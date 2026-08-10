@@ -86,13 +86,20 @@ public static class BuildScript
         var outputPath = System.Environment.GetEnvironmentVariable("NDW_BUILD_OUTPUT") ?? "Build/WebGL";
         System.IO.Directory.CreateDirectory(outputPath);
 
-        // Same gzip + client-side decompression-fallback approach proven in
-        // the old project (see its BuildScript.cs comment) — Cloudflare
-        // Pages strips manually-set Content-Encoding on precompressed
-        // files, and uncompressed WebGL.wasm alone blew past the 25MB
-        // per-file limit. decompressionFallback sidesteps both.
-        PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Gzip;
-        PlayerSettings.WebGL.decompressionFallback = true;
+        // Ship UNCOMPRESSED — per neurodinoworld/CLAUDE.md's "Unity WebGL
+        // games" section: the gzip + decompressionFallback approach this
+        // project used earlier (matching the old, archived project's
+        // BuildScript.cs comment) was verified 2026-08-09 to NOT actually
+        // work on real Cloudflare Pages hosting — Cloudflare's edge
+        // compression layer strips/overrides a manually-declared
+        // Content-Encoding on precompressed files, a documented Cloudflare
+        // limitation. Shipping raw instead lets Cloudflare's own automatic
+        // compression handle the wire transfer correctly with zero header
+        // rules needed. Also separately confirmed this session: this
+        // Unity version's loader.js has no client-side JS gunzip fallback
+        // at all — decompressionFallback is a dead config key here, it's
+        // not referenced anywhere in the generated loader.js.
+        PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Disabled;
 
         var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
         {
