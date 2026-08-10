@@ -20,11 +20,28 @@ namespace AFL
         Vector3 _home;
         bool _committed;
         float _recommitAt, _gotBallAt;
+        Vector3 _approachOffset;
 
         void Awake()
         {
             _p = GetComponent<AFLPlayer>();
             _home = transform.position;
+
+            // Real bug fix (2026-08-10, direct report — multiple bots
+            // visibly merging into one mass around the ball): Chase() and
+            // ContestFlight() sent every teammate to the EXACT same point
+            // (the ball's literal position / predicted landing spot), so
+            // when 2+ bots went for the same loose ball they converged
+            // onto identical coordinates and their capsules interpenetrated
+            // — CharacterController's own push-apart couldn't keep up
+            // against bots continuously re-driving toward that same point
+            // every frame. A small, stable per-bot offset (fixed at spawn,
+            // not recomputed) means bots approach the ball from spread-out
+            // angles instead of all aiming for the same spot — cheap and
+            // permanent, doesn't need any flocking/formation logic.
+            float angle = Random.Range(0f, 360f) * Mathf.Deg2Rad;
+            float radius = Random.Range(0.9f, 1.6f);
+            _approachOffset = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * radius;
         }
 
         void Update()
@@ -36,12 +53,58 @@ namespace AFL
             if (_p.HasBall) { WithBall(ball); return; }
             _gotBallAt = 0f;
 
-            if (ball.Carrier != null && ball.Carrier.team != _p.team) { Chase(ball.Carrier.transform.position, ball); return; }
-            if (ball.InFlight) { ContestFlight(ball); return; }
+            // Real bug fix (2026-08-10, direct report — multiple bots from
+            // BOTH teams visibly piling into one mass around the ball):
+            // every bot on the field chased any loose ball with no team
+            // structure at all — the exact gap the original code review
+            // flagged and deferred as "design work, not fixes," but in
+            // practice it looks like a monstrous character pile-up, not
+            // acceptable to ship. Real fix: only the NEAREST teammate to
+            // whatever the ball is doing actually goes for it; everyone
+            // else holds a supporting position instead of swarming.
+            Vector3 focus = ball.Carrier != null ? ball.Carrier.transform.position
+                          : (ball.InFlight ? PredictLanding(ball, transform.position.y) : ball.transform.position);
+            bool isNearest = IsNearestTeammate(focus);
+
+            if (ball.Carrier != null && ball.Carrier.team != _p.team)
+            {
+                if (isNearest) Chase(ball.Carrier.transform.position, ball);
+                else Support(focus);
+                return;
+            }
+            if (ball.InFlight)
+            {
+                if (isNearest) ContestFlight(ball);
+                else Support(focus);
+                return;
+            }
 
             float d = Vector3.Distance(transform.position, ball.transform.position);
-            if (d < chaseRadius) Chase(ball.transform.position, ball);
+            if (d < chaseRadius)
+            {
+                if (isNearest) Chase(ball.transform.position, ball);
+                else Support(focus);
+            }
             else MoveTo(_home, _p.walkSpeed);
+        }
+
+        bool IsNearestTeammate(Vector3 point)
+        {
+            float myDist = Vector3.Distance(transform.position, point);
+            foreach (var p in AFLPlayer.All)
+            {
+                if (p.team != _p.team || p == _p) continue;
+                if (Vector3.Distance(p.transform.position, point) < myDist) return false;
+            }
+            return true;
+        }
+
+        // Not the nearest teammate to the play — drift partway from home
+        // toward it instead of swarming, so the team still looks alive and
+        // repositioning without everyone piling onto the same contest.
+        void Support(Vector3 focus)
+        {
+            MoveTo(Vector3.Lerp(_home, focus, 0.35f), _p.walkSpeed);
         }
 
         void WithBall(AFLBall ball)
@@ -64,16 +127,21 @@ namespace AFL
 
         void Chase(Vector3 pos, AFLBall ball)
         {
-            MoveTo(pos, _p.runSpeed);
-            if (Vector3.Distance(transform.position, ball.transform.position) < 1.6f &&
-                ball.Carrier == null && Random.value < 0.15f)
+            // Only spread out while the ball is still loose/being chased —
+            // once genuinely close enough to actually contest it, approach
+            // the real position so the timing/reach checks still work.
+            float distToBall = Vector3.Distance(transform.position, ball.transform.position);
+            MoveTo(distToBall > 2.5f ? pos + _approachOffset : pos, _p.runSpeed);
+            if (distToBall < 1.6f && ball.Carrier == null && Random.value < 0.15f)
                 _p.AttemptContest();
         }
 
         void ContestFlight(AFLBall ball)
         {
-            // run to where it's coming down
-            Vector3 landing = PredictLanding(ball, transform.position.y);
+            // run to where it's coming down, spread around the landing
+            // spot rather than every teammate converging on the identical
+            // point (see the Awake() comment on _approachOffset)
+            Vector3 landing = PredictLanding(ball, transform.position.y) + _approachOffset;
             MoveTo(landing, _p.sprintSpeed);
 
             if (Time.time > _recommitAt) _committed = false;
