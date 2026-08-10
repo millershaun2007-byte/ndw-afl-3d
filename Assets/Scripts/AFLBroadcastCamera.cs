@@ -3,42 +3,35 @@ using UnityEngine;
 namespace AFL
 {
     // =======================================================================
-    //  BROADCAST CAMERA  — follows the player but leans on the ball
+    //  BROADCAST CAMERA — smooth follow, but cuts deliberately at handoffs
     // =======================================================================
+    // Rebuilt 2026-08-11 (issue #1): the old camera continuously chased
+    // whoever had the ball with a ball-bias lean and a speed-driven FOV
+    // punch, and separately read AFLInput.Look for manual orbit — a raw
+    // mouse-axis read with no button gate, which is why it used to swing on
+    // any stray pointer movement. Both are gone, not toned down. This
+    // camera now just follows its current target smoothly, and CutTo()
+    // snaps to a new target instantly at each control handoff instead of
+    // drifting there — the actual fix for "camera left pointing the wrong
+    // way after a switch," which smoothing on top of the old logic could
+    // never have solved.
     [AddComponentMenu("AFL/AFL Broadcast Camera")]
     [RequireComponent(typeof(Camera))]
     public class AFLBroadcastCamera : MonoBehaviour
     {
-        [Header("Targets")]
-        public Transform target;                       // controlled player
-        public AFLBall ball;
+        [Header("Target")]
+        public Transform target;
 
         [Header("Framing")]
         public Vector3 pivotOffset = new Vector3(0f, 1.55f, 0f);
-        // Polish pass (2026-08-10): pulled closer and lower — the original
-        // 7.5/2.6/pitch-14 combo read as an elevated "blimp cam" (verified
-        // via a real screenshot: horizon high in frame, characters small
-        // and centrally clustered). This sits closer to a real broadcast
-        // over-the-shoulder angle without losing the wide field-awareness
-        // the follow camera needs.
         public float distance = 6f;
         public float height = 1.9f;
-        [Range(0f, 1f)] public float ballBias = 0.4f;      // lean toward the ball in flight
-        public float ballBiasMaxDistance = 45f;
+        public float fixedFov = 55f;
 
         [Header("Feel")]
         public float positionSmooth = 0.10f;
         public float rotationSmooth = 9f;
-        public float autoAlignSpeed = 2.2f;            // swings behind the runner
-        public float yawSensitivity = 200f;
-        public float pitchSensitivity = 120f;
-        public float minPitch = -5f, maxPitch = 45f;
-
-        [Header("FOV")]
-        public float baseFov = 52f;
-        public float maxFov = 66f;
-        public float fovSpeedRef = 9f;
-        public float fovSmooth = 5f;
+        public float autoAlignSpeed = 2.2f;   // swings behind the runner as they move
 
         [Header("Collision")]
         public LayerMask collisionMask = 1;
@@ -46,53 +39,36 @@ namespace AFL
         public float collisionBuffer = 0.25f;
 
         Camera _cam;
-        float _yaw, _pitch = 8f;
+        float _yaw;
         Vector3 _posVel, _smoothPivot, _pivotVel;
         float _currentDistance;
+        bool _setShotMode;
+        Transform _setShotGoal;
 
         void Awake()
         {
             _cam = GetComponent<Camera>();
-            if (!ball) ball = AFLBall.Instance;
+            _cam.fieldOfView = fixedFov;
             _currentDistance = distance;
             if (target) { _yaw = target.eulerAngles.y; _smoothPivot = target.position + pivotOffset; }
         }
 
         void LateUpdate()
         {
+            if (_setShotMode) { UpdateSetShotFraming(); return; }
             if (!target) return;
-            if (!ball) ball = AFLBall.Instance;
 
-            // ---- 1. where are we looking? -----------------------------------
             Vector3 pivot = target.position + pivotOffset;
-            if (ball && ball.InFlight)
-            {
-                float d = Vector3.Distance(pivot, ball.transform.position);
-                float w = ballBias * (1f - Mathf.Clamp01(d / ballBiasMaxDistance));
-                pivot = Vector3.Lerp(pivot, ball.transform.position, w);
-            }
             _smoothPivot = Vector3.SmoothDamp(_smoothPivot, pivot, ref _pivotVel, positionSmooth);
 
-            // ---- 2. orbit: manual look, otherwise drift behind the player ----
-            Vector2 look = AFLInput.Look;
-            if (Mathf.Abs(look.x) > 0.01f || Mathf.Abs(look.y) > 0.01f)
+            var p = target.GetComponent<AFLPlayer>();
+            if (p && p.Velocity.sqrMagnitude > 4f)
             {
-                _yaw += look.x * yawSensitivity * Time.deltaTime;
-                _pitch -= look.y * pitchSensitivity * Time.deltaTime;
+                float want = Mathf.Atan2(p.Velocity.x, p.Velocity.z) * Mathf.Rad2Deg;
+                _yaw = Mathf.LerpAngle(_yaw, want, autoAlignSpeed * Time.deltaTime);
             }
-            else
-            {
-                var p = target.GetComponent<AFLPlayer>();
-                if (p && p.Velocity.sqrMagnitude > 4f)
-                {
-                    float want = Mathf.Atan2(p.Velocity.x, p.Velocity.z) * Mathf.Rad2Deg;
-                    _yaw = Mathf.LerpAngle(_yaw, want, autoAlignSpeed * Time.deltaTime);
-                }
-            }
-            _pitch = Mathf.Clamp(_pitch, minPitch, maxPitch);
 
-            // ---- 3. desired position + spherecast so we never clip a post ----
-            Quaternion orbit = Quaternion.Euler(_pitch, _yaw, 0f);
+            Quaternion orbit = Quaternion.Euler(8f, _yaw, 0f);
             Vector3 dir = orbit * Vector3.back;
             Vector3 wanted = _smoothPivot + dir * distance + Vector3.up * height;
 
@@ -107,25 +83,50 @@ namespace AFL
             Vector3 finalPos = _smoothPivot + dir * _currentDistance + Vector3.up * height;
             transform.position = Vector3.SmoothDamp(transform.position, finalPos, ref _posVel, positionSmooth);
 
-            // ---- 4. look at, with a slight lift so the ball stays framed -----
             Vector3 lookAt = _smoothPivot + Vector3.up * 0.35f;
             Quaternion wantRot = Quaternion.LookRotation(lookAt - transform.position, Vector3.up);
             transform.rotation = Quaternion.Slerp(transform.rotation, wantRot, rotationSmooth * Time.deltaTime);
-
-            // ---- 5. speed / flight FOV --------------------------------------
-            float speed = 0f;
-            var pl = target.GetComponent<AFLPlayer>();
-            if (pl) speed = pl.Velocity.magnitude;
-            if (ball && ball.InFlight) speed = Mathf.Max(speed, ball.Rb.velocity.magnitude * 0.55f);
-
-            float wantFov = Mathf.Lerp(baseFov, maxFov, Mathf.Clamp01(speed / fovSpeedRef));
-            _cam.fieldOfView = Mathf.Lerp(_cam.fieldOfView, wantFov, fovSmooth * Time.deltaTime);
         }
 
-        public void SetTarget(Transform t)
+        // Instant cut — no smoothing carried over from the previous target.
+        // Call this at every control handoff (centre -> carrier, carrier ->
+        // receiving forward/defender, mark -> set shot).
+        public void CutTo(Transform newTarget)
         {
-            target = t;
-            if (t) _smoothPivot = t.position + pivotOffset;
+            _setShotMode = false;
+            target = newTarget;
+            if (!target) return;
+            _yaw = target.eulerAngles.y;
+            Vector3 pivot = target.position + pivotOffset;
+            _smoothPivot = pivot;
+            _pivotVel = Vector3.zero;
+            _currentDistance = distance;
+            Quaternion orbit = Quaternion.Euler(8f, _yaw, 0f);
+            transform.position = pivot + orbit * Vector3.back * distance + Vector3.up * height;
+            transform.rotation = Quaternion.LookRotation(pivot + Vector3.up * 0.35f - transform.position, Vector3.up);
+            _posVel = Vector3.zero;
+        }
+
+        // Behind-the-kicker framing for the set shot — fixed, no smoothing
+        // or collision handling needed since nothing is moving the camera.
+        public void CutToSetShot(Transform kicker, Transform goal)
+        {
+            _setShotMode = true;
+            target = kicker;
+            _setShotGoal = goal;
+            UpdateSetShotFraming();
+        }
+
+        void UpdateSetShotFraming()
+        {
+            if (!target) return;
+            Vector3 toGoal = _setShotGoal ? (_setShotGoal.position - target.position) : target.forward;
+            toGoal.y = 0f;
+            if (toGoal.sqrMagnitude < 0.01f) toGoal = target.forward;
+            toGoal.Normalize();
+            Vector3 pos = target.position - toGoal * 5.5f + Vector3.up * 2.4f;
+            transform.position = pos;
+            transform.rotation = Quaternion.LookRotation(target.position + Vector3.up * 1.2f - pos, Vector3.up);
         }
     }
 }

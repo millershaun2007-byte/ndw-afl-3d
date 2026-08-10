@@ -5,37 +5,32 @@ namespace AFL
     // =======================================================================
     //  INPUT WRAPPER  — swap the bodies out if you move to the Input System
     // =======================================================================
-    // Touch overlay (2026-08-10): every property below merges real
-    // keyboard/mouse input with state written by AFLTouchBridge, so
-    // AFLPlayer/AFLGameManager/AFLBroadcastCamera never need to know or
-    // care which input source is actually driving them — this file stays
-    // the single point of truth, matching its own header comment above.
+    // Rebuilt 2026-08-11 per issue #1 / docs/FOOTY-REBUILD.md: three buttons
+    // only — MOVE, MARK, KICK. Handball/Tackle/Switch and the free-look
+    // mouse axes are gone, not just unused — Look read the mouse axes
+    // unconditionally (no button gate at all), which is why the camera used
+    // to swing on any stray pointer movement, and the old KickHeld read
+    // Input.GetMouseButton(0) directly, which is why any tap anywhere on
+    // the canvas charged/fired a kick. Neither has a replacement; removing
+    // the source is the fix, not adding a guard on top of it.
     public static class AFLInput
     {
-        internal static bool TouchMoveForward;
-        internal static bool TouchMarkDown;   // one-shot, cleared after one frame
-        internal static bool TouchKickHeld;
-        internal static bool TouchKickUp;     // one-shot
-        internal static bool TouchHandball;   // one-shot
-        internal static bool TouchTackle;     // one-shot
+        // Public, not internal: the Editor-only automated playtest
+        // (Assets/Editor/PlaytestDriver.cs) drives these directly from a
+        // separate assembly, the same way the real HTML control bar does
+        // via AFLTouchBridge.
+        public static bool TouchMoveHeld;
+        public static bool TouchMarkDown;   // one-shot, cleared after one frame
+        public static bool TouchKickHeld;
+        public static bool TouchKickUp;     // one-shot
 
-        // Real design change (2026-08-10, direct real-device report): a
-        // free-aim D-pad "just doesn't work for this game" — matches the
-        // same real-device finding that killed the earlier analog joystick
-        // ("too hard for a kid to aim precisely"). Movement is a single
-        // hold-to-run button again: each player always advances straight
-        // down their own fixed attack lane (AFLPlayer.attackDir), no
-        // steering at all. AFLPlayer reads this directly rather than
-        // through a Move vector now.
-        public static bool MoveForwardHeld => Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow) || TouchMoveForward;
-        public static Vector2 Look   => new Vector2(Input.GetAxis("Mouse X"), Input.GetAxis("Mouse Y"));
-        public static bool Sprint    => Input.GetKey(KeyCode.LeftShift);
-        public static bool MarkDown  => Input.GetKeyDown(KeyCode.Space) || TouchMarkDown;   // jump / mark / gather
-        public static bool KickHeld  => Input.GetMouseButton(0) || TouchKickHeld;
-        public static bool KickUp    => Input.GetMouseButtonUp(0) || TouchKickUp;
-        public static bool Handball  => Input.GetMouseButtonDown(1) || TouchHandball;
-        public static bool Tackle    => Input.GetKeyDown(KeyCode.E) || TouchTackle;
-        public static bool Switch    => Input.GetKeyDown(KeyCode.Q);
+        public static bool MoveHeld  => Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow) || TouchMoveHeld;
+        public static bool MarkDown  => Input.GetKeyDown(KeyCode.Space) || TouchMarkDown;
+        // Desktop testing uses a dedicated key (K), never the mouse — a
+        // mouse button doubles as "click anywhere on this canvas," which is
+        // exactly the bug that used to fire kicks from ordinary taps.
+        public static bool KickHeld  => Input.GetKey(KeyCode.K) || TouchKickHeld;
+        public static bool KickUp    => Input.GetKeyUp(KeyCode.K) || TouchKickUp;
 
         // Called once per frame, after every AFLPlayer/AFLGameManager Update
         // has had a chance to read this frame's one-shot touch flags — see
@@ -44,8 +39,6 @@ namespace AFL
         {
             TouchMarkDown = false;
             TouchKickUp = false;
-            TouchHandball = false;
-            TouchTackle = false;
         }
     }
 

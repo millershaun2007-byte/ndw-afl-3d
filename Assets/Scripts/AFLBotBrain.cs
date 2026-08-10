@@ -11,9 +11,14 @@ namespace AFL
     {
         [Header("Behaviour")]
         public Transform attackingGoal;
-        [Range(0f, 1f)] public float skill = 0.6f;      // drives jump-timing error
+        // Dropped well below the old 0.6 (issue #1: "drop well below" — a
+        // bot pays zero input latency for a timed press, a child on a
+        // touchscreen pays real round-trip latency through the touch
+        // bridge; matching the numbers isn't fair, the bot has to be
+        // measurably worse at the same check to stay beatable).
+        [Range(0f, 1f)] public float skill = 0.28f;
         public float chaseRadius = 40f;
-        public float kickRange = 45f;
+        public float kickRange = 30f;
         public float holdBeforeDisposal = 0.9f;
 
         AFLPlayer _p;
@@ -27,18 +32,9 @@ namespace AFL
             _p = GetComponent<AFLPlayer>();
             _home = transform.position;
 
-            // Real bug fix (2026-08-10, direct report — multiple bots
-            // visibly merging into one mass around the ball): Chase() and
-            // ContestFlight() sent every teammate to the EXACT same point
-            // (the ball's literal position / predicted landing spot), so
-            // when 2+ bots went for the same loose ball they converged
-            // onto identical coordinates and their capsules interpenetrated
-            // — CharacterController's own push-apart couldn't keep up
-            // against bots continuously re-driving toward that same point
-            // every frame. A small, stable per-bot offset (fixed at spawn,
-            // not recomputed) means bots approach the ball from spread-out
-            // angles instead of all aiming for the same spot — cheap and
-            // permanent, doesn't need any flocking/formation logic.
+            // Small, stable per-bot offset (fixed at spawn) so bots
+            // approach a contested ball from spread-out angles instead of
+            // all driving toward the exact same point and interpenetrating.
             float angle = Random.Range(0f, 360f) * Mathf.Deg2Rad;
             float radius = Random.Range(0.9f, 1.6f);
             _approachOffset = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * radius;
@@ -46,36 +42,43 @@ namespace AFL
 
         void Update()
         {
+            // Every player gets a brain now (BuildScript no longer skips it
+            // for the human-designated player) — isUserControlled is the
+            // only gate, so whoever control hands away from immediately
+            // resumes acting instead of standing frozen. Issue #1:
+            // "HomeCroc1 built with no AFLBotBrain... permanently frozen
+            // once control leaves it."
             if (_p.isUserControlled) return;
+            if (AFLGameManager.BotsFrozen) { _p.SetMoveIntent(Vector3.zero, 0f); return; }
+
             var ball = AFLBall.Instance;
             if (ball == null) return;
 
             if (_p.HasBall) { WithBall(ball); return; }
             _gotBallAt = 0f;
 
-            // Real bug fix (2026-08-10, direct report — multiple bots from
-            // BOTH teams visibly piling into one mass around the ball):
-            // every bot on the field chased any loose ball with no team
-            // structure at all — the exact gap the original code review
-            // flagged and deferred as "design work, not fixes," but in
-            // practice it looks like a monstrous character pile-up, not
-            // acceptable to ship. Real fix: only the NEAREST teammate to
-            // whatever the ball is doing actually goes for it; everyone
-            // else holds a supporting position instead of swarming.
             Vector3 focus = ball.Carrier != null ? ball.Carrier.transform.position
                           : (ball.InFlight ? PredictLanding(ball, transform.position.y) : ball.transform.position);
             bool isNearest = IsNearestTeammate(focus);
 
+            if (ball.Carrier != null && ball.Carrier.team == _p.team)
+            {
+                // A teammate has it — lead toward the attacking goal so the
+                // carrier actually has a forward option to run/kick at,
+                // instead of everyone bunching around whoever's holding it.
+                LeadForGoal();
+                return;
+            }
             if (ball.Carrier != null && ball.Carrier.team != _p.team)
             {
                 if (isNearest) Chase(ball.Carrier.transform.position, ball);
-                else Support(focus);
+                else HoldShape(focus);
                 return;
             }
             if (ball.InFlight)
             {
                 if (isNearest) ContestFlight(ball);
-                else Support(focus);
+                else HoldShape(focus);
                 return;
             }
 
@@ -83,7 +86,7 @@ namespace AFL
             if (d < chaseRadius)
             {
                 if (isNearest) Chase(ball.transform.position, ball);
-                else Support(focus);
+                else HoldShape(focus);
             }
             else MoveTo(_home, _p.walkSpeed);
         }
@@ -99,12 +102,18 @@ namespace AFL
             return true;
         }
 
-        // Not the nearest teammate to the play — drift partway from home
-        // toward it instead of swarming, so the team still looks alive and
-        // repositioning without everyone piling onto the same contest.
-        void Support(Vector3 focus)
+        // Not directly involved in the current contest — hold a position
+        // between home and the play so the team looks alive without
+        // swarming the ball.
+        void HoldShape(Vector3 focus)
         {
             MoveTo(Vector3.Lerp(_home, focus, 0.35f), _p.walkSpeed);
+        }
+
+        void LeadForGoal()
+        {
+            Vector3 goal = attackingGoal ? attackingGoal.position : transform.position;
+            MoveTo(goal, _p.runSpeed * 0.85f);
         }
 
         void WithBall(AFLBall ball)
@@ -119,24 +128,13 @@ namespace AFL
             if (Time.time - _gotBallAt > holdBeforeDisposal)
             {
                 float power = Mathf.Clamp01(dist / kickRange);
-                if (dist < 12f) _p.Handball(dir.normalized);
-                else _p.Kick(Mathf.Lerp(0.45f, 1f, power) * Mathf.Lerp(0.8f, 1f, skill), dir.normalized);
+                _p.Kick(Mathf.Lerp(0.35f, 1f, power) * Mathf.Lerp(0.8f, 1f, skill), dir.normalized);
                 _gotBallAt = 0f;
             }
         }
 
         void Chase(Vector3 pos, AFLBall ball)
         {
-            // Real fix (2026-08-10): used to drop the approach offset once
-            // within 2.5 units so bots could actually reach the ball — but
-            // that meant the final approach still beelined to the exact
-            // same coordinate as the opposing team's nearest player,
-            // producing occasional full character interpenetration (caught
-            // on a real screenshot, not every run — Unity's per-session
-            // Random seed meant it didn't reproduce every time). CanReach()
-            // and AttemptTackle() already tolerate ~1.6-1.8 units, well
-            // within the 0.9-1.6 unit offset range, so there's no need to
-            // ever fully drop it.
             float distToBall = Vector3.Distance(transform.position, ball.transform.position);
             MoveTo(pos + _approachOffset, _p.runSpeed);
             if (distToBall < 1.6f && ball.Carrier == null && Random.value < 0.15f)
@@ -145,9 +143,6 @@ namespace AFL
 
         void ContestFlight(AFLBall ball)
         {
-            // run to where it's coming down, spread around the landing
-            // spot rather than every teammate converging on the identical
-            // point (see the Awake() comment on _approachOffset)
             Vector3 landing = PredictLanding(ball, transform.position.y) + _approachOffset;
             MoveTo(landing, _p.sprintSpeed);
 
@@ -174,7 +169,7 @@ namespace AFL
 
         static Vector3 PredictLanding(AFLBall ball, float groundY)
         {
-            Vector3 p = ball.Rb.position, v = ball.Rb.velocity;
+            Vector3 p = ball.Rb.position, v = ball.Rb.linearVelocity;
             const float dt = 0.05f;
             float k = Mathf.Clamp01(1f - ball.drag * dt);
             for (int i = 0; i < 160; i++)

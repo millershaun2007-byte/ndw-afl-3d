@@ -23,7 +23,13 @@ namespace AFL
         public float contestScanRadius = 2.2f;
         public float markThreshold = 0.55f;        // bid needed to hold a mark
         public float gatherThreshold = 0.30f;      // below this it spills
-        public float minMarkDistance = 15f;        // AFL rule of thumb
+        // Was 15 (real AFL rule of thumb) — nearly 40% of this 45-unit-long
+        // ground, which made most clearance kicks unmarkable. Issue #1: "on
+        // a 45m ground clean marks rarely register." 8 keeps the rule
+        // meaningful (a genuine short give-up handball still can't be
+        // marked) without making the actual forward-kick-to-mark loop this
+        // whole rebuild is built around structurally rare.
+        public float minMarkDistance = 8f;
         public float contestCooldown = 0.35f;
 
         public Rigidbody Rb { get; private set; }
@@ -44,8 +50,8 @@ namespace AFL
             Instance = this;
             Rb = GetComponent<Rigidbody>();
             Rb.mass = mass;
-            Rb.drag = drag;                 // Unity 6: rename to linearDamping
-            Rb.angularDrag = angularDrag;
+            Rb.linearDamping = drag;
+            Rb.angularDamping = angularDrag;
             Rb.interpolation = RigidbodyInterpolation.Interpolate;
             Rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
         }
@@ -64,7 +70,7 @@ namespace AFL
             hitTime = 0f; hitPoint = Vector3.zero;
             if (!InFlight) return false;
 
-            Vector3 p = Rb.position, v = Rb.velocity;
+            Vector3 p = Rb.position, v = Rb.linearVelocity;
             const float dt = 0.04f;
             float dragK = Mathf.Clamp01(1f - drag * dt);
 
@@ -116,9 +122,17 @@ namespace AFL
         public void Attach(AFLPlayer p)
         {
             Carrier = p;
-            Rb.isKinematic = true;
-            Rb.velocity = Vector3.zero;
+            // Real bug, only surfaced by the automated playtest (2026-08-11)
+            // — a kinematic Rigidbody can't have its velocity set at all;
+            // doing it in this order logged "Setting velocity of a
+            // kinematic body is not supported" on every single mark/
+            // gather/fumble, which was true of the original pre-rebuild
+            // code too, just never looked at closely enough to notice.
+            // Zero the velocity while it's still dynamic, then go
+            // kinematic.
+            Rb.linearVelocity = Vector3.zero;
             Rb.angularVelocity = Vector3.zero;
+            Rb.isKinematic = true;
             transform.SetParent(p.ballHold, false);
             transform.localPosition = Vector3.zero;
             transform.localRotation = Quaternion.identity;
@@ -133,7 +147,7 @@ namespace AFL
             HasBounced = false;
             _launchPoint = transform.position;
             Rb.isKinematic = false;
-            Rb.velocity = velocity;
+            Rb.linearVelocity = velocity;
             Rb.angularVelocity = spin;
             _contestLockUntil = Time.time + 0.2f;   // no instant self-recatch
         }
@@ -150,10 +164,10 @@ namespace AFL
             if ((groundMask.value & (1 << c.gameObject.layer)) == 0) return;
             HasBounced = true;
             // pointy ends: randomise the bounce so ground balls stay unpredictable
-            Vector3 v = Rb.velocity;
+            Vector3 v = Rb.linearVelocity;
             v += new Vector3(Random.Range(-1f, 1f), Random.Range(0f, 1.2f), Random.Range(-1f, 1f)) *
                  bounceRandomness * v.magnitude * 0.35f;
-            Rb.velocity = v;
+            Rb.linearVelocity = v;
         }
 
         public void ResetTo(Vector3 pos)
@@ -161,7 +175,7 @@ namespace AFL
             transform.SetParent(null, true);
             Carrier = null; WasKicked = false; HasBounced = false;
             Rb.isKinematic = false;
-            Rb.position = pos; Rb.velocity = Vector3.zero; Rb.angularVelocity = Vector3.zero;
+            Rb.position = pos; Rb.linearVelocity = Vector3.zero; Rb.angularVelocity = Vector3.zero;
         }
     }
 }

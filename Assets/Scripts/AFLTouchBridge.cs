@@ -9,11 +9,10 @@ namespace AFL
     // (Assets/WebGLTemplates/Responsive/index.html) targets it by name via
     // unityInstance.SendMessage('TouchBridge', method, value).
     //
-    // Single hold-to-move button, not a D-pad or joystick — real-device
-    // testing found the D-pad "just doesn't work for this game" (matching
-    // the earlier, separate finding that an analog joystick was
-    // unworkable). Every player only ever advances straight down their own
-    // fixed attack lane (AFLPlayer.attackDir) while held.
+    // Three buttons only (2026-08-11 rebuild, issue #1): MOVE, MARK, KICK.
+    // HandballPressed/TacklePressed are gone along with the buttons that
+    // called them — not left behind as dead methods a stray SendMessage
+    // could still hit.
     [AddComponentMenu("AFL/AFL Touch Bridge")]
     public class AFLTouchBridge : MonoBehaviour
     {
@@ -22,7 +21,7 @@ namespace AFL
             AFLInput.ClearOneShotTouchFlags();
         }
 
-        public void SetMoveForwardHeld(string v) { AFLInput.TouchMoveForward = v == "1"; }
+        public void SetMoveHeld(string v) { AFLInput.TouchMoveHeld = v == "1"; }
 
         public void MarkPressed(string _) { AFLInput.TouchMarkDown = true; }
 
@@ -33,9 +32,5 @@ namespace AFL
             AFLInput.TouchKickHeld = false;
             AFLInput.TouchKickUp = true;
         }
-
-        public void HandballPressed(string _) { AFLInput.TouchHandball = true; }
-
-        public void TacklePressed(string _) { AFLInput.TouchTackle = true; }
     }
 }

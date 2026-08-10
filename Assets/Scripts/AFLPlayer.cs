@@ -16,42 +16,62 @@ namespace AFL
         [Header("Identity")]
         public Team team = Team.Home;
         public bool isUserControlled;
+        public bool isRuck;                 // contests the centre throw-up
         public Animator animator;
-        public Transform ballHold;          // empty at chest/hands
-        public Transform handsAnchor;       // empty at top of reach
+        public Transform ballHold;          // empty at chest/hands — derived from the model, see BuildScript
+        public Transform handsAnchor;       // empty at top of reach — derived from the model, see BuildScript
 
-        // Real design change (2026-08-10, direct real-device report): the
-        // free-2D D-pad "just doesn't work for this game" — same real-world
-        // finding that killed the earlier analog joystick. The
-        // user-controlled player now only ever advances straight down this
-        // fixed world-space direction (set at spawn to each team's own
-        // attacking end) while MoveForwardHeld is true — no steering.
-        public Vector3 attackDir = Vector3.forward;
+        // Rebuilt 2026-08-11 (issue #1): the old fixed world-space attackDir
+        // lane is gone — it was the root cause of "you cannot get to the
+        // ball," since it gave the player no way to steer toward anything.
+        // MOVE now curves toward moveTarget (set each phase by
+        // AFLGameManager/AFLBotBrain — the ball while chasing, a teammate or
+        // the attacking goal while carrying). No target set falls back to
+        // the ball itself, so a player is never left with nothing to aim at.
+        public Transform moveTarget;
 
         [Header("Movement")]
         public float walkSpeed = 3.4f;
         public float runSpeed = 7.0f;
-        public float sprintSpeed = 9.3f;
+        public float sprintSpeed = 9.3f;    // used by bot chase/contest logic only — no human sprint input exists
         public float acceleration = 24f;
         public float turnSmoothTime = 0.08f;
-        public float gravity = -24f;        // snappier than real g, feels better
+        // Matches Physics.gravity (set in BuildScript) — was -24 against a
+        // project value of -9.81, the exact "one fact in two places" bug
+        // CLAUDE.md calls out: mark-timing predictions used real physics
+        // gravity while the jumping player fell under a completely
+        // different number, so a jump could never actually line up with
+        // where the prediction said the ball would be.
+        public float gravity = -14f;
 
         [Header("Jump / Marking")]
         public float jumpHeight = 1.15f;
-        public float standingReach = 2.20f;   // ground -> fingertips, feet down
+        public float standingReach = 2.20f;   // ground -> fingertips, feet down — overwritten if handsAnchor is set
         public float catchRadius = 1.25f;
-        public float perfectWindow = 0.09f;   // ±s from apex = screamer
-        public float goodWindow = 0.20f;
-        public float lateWindow = 0.34f;
+        // Widened from 0.09/0.20/0.34 (issue #1): those windows assumed
+        // zero-latency input. A touchscreen control bar round-tripping
+        // through SendMessage cannot hit a 90ms window reliably — this is
+        // the "child on a touchscreen" tuning target from CLAUDE.md.
+        public float perfectWindow = 0.18f;
+        public float goodWindow = 0.32f;
+        public float lateWindow = 0.55f;
         public float bidLifetime = 1.4f;      // press must be this recent
+        // The touch bridge always biases a real press late (button press ->
+        // SendMessage -> next Unity frame). Shifting the ideal press time
+        // earlier by this much means a child who presses at the moment that
+        // *feels* right still lands inside the good window instead of
+        // always grading as slightly late.
+        public float touchLatencyBias = 0.07f;
 
         [Header("Disposal")]
         public float kickChargeTime = 0.9f;
-        public float minKickSpeed = 13f;
-        public float maxKickSpeed = 29f;
-        public float minKickAngle = 22f;
-        public float maxKickAngle = 41f;
-        public float handballSpeed = 13f;
+        // Rescaled (issue #1) for a 35x45 field with goals 40 apart: the old
+        // 13-29 m/s range put a full-charge kick around 85m, meaning it
+        // could clear the entire ground with no boundary rule to catch it.
+        public float minKickSpeed = 10f;    // ~8m, a real short kick
+        public float maxKickSpeed = 17.5f;  // ~28m, a real set-shot-range kick
+        public float minKickAngle = 25f;
+        public float maxKickAngle = 38f;
         public float baseAccuracyError = 1.5f;   // degrees
 
         [Header("Contest tuning")]
@@ -62,8 +82,8 @@ namespace AFL
         Vector3 _horizVel;
         float _vertVel, _turnVel;
         float _bidTime = -99f, _timingError = 99f;
+        bool _activeBid;
         float _kickCharge;
-        Camera _cam;
 
         public bool IsAirborne { get; private set; }
         public bool HasBall => AFLBall.Instance && AFLBall.Instance.Carrier == this;
@@ -80,21 +100,14 @@ namespace AFL
         void Awake()
         {
             _cc = GetComponent<CharacterController>();
-            _cam = Camera.main;
             if (!ballHold) ballHold = CreateAnchor("BallHold", new Vector3(0.35f, 1.15f, 0.35f));
 
-            // Real fix (2026-08-10 code review): standingReach and
-            // handsAnchor used to be two independently-set facts about the
-            // same thing — where this character's hands actually are —
-            // which is exactly the "one fact written down in two places"
-            // bug class that broke marking in every earlier version of this
-            // game (2D: hands drawn at -sz*1.18 vs ball placed at -sz*0.05;
-            // first Unity version: root rotated correctly while a Visual
-            // child carried a stale 180-degree yaw offset). If a prefab
-            // already positions a Hands anchor, that anchor wins and
-            // standingReach is derived from it, not the other way around —
-            // an artist positioning hands on a model automatically becomes
-            // correct physics, instead of needing separately-tuned agreement.
+            // If BuildScript already positioned a real Hands anchor from the
+            // actual model bounds, that anchor wins and standingReach is
+            // derived from it, not the other way around — see BuildScript's
+            // BuildCharacterModel3D for where that now actually happens
+            // (it never did before 2026-08-11, which is why this fallback
+            // used to be the only thing that ever ran).
             if (handsAnchor) standingReach = handsAnchor.localPosition.y;
             else handsAnchor = CreateAnchor("Hands", new Vector3(0f, standingReach, 0.25f));
         }
@@ -117,30 +130,35 @@ namespace AFL
         // ---- input ---------------------------------------------------------
         void HandleInput()
         {
-            // No steering — hold to advance straight down attackDir,
-            // release to stop. See attackDir's own comment for why.
-            bool moving = AFLInput.MoveForwardHeld;
-            float target = AFLInput.Sprint ? sprintSpeed : runSpeed;
-            if (HasBall) target *= 0.94f;                       // carrying costs a touch
-            SetMoveIntent(moving ? attackDir : Vector3.zero, target);
+            bool moving = AFLInput.MoveHeld;
+            Vector3 dir = Vector3.zero;
+            if (moving)
+            {
+                Vector3 targetPos = moveTarget ? moveTarget.position
+                                  : (AFLBall.Instance ? AFLBall.Instance.transform.position : transform.position + transform.forward);
+                Vector3 to = targetPos - transform.position; to.y = 0f;
+                dir = to.sqrMagnitude > 0.04f ? to.normalized : transform.forward;
+            }
+            float target = HasBall ? runSpeed * 0.94f : runSpeed;   // carrying costs a touch
+            SetMoveIntent(moving ? dir : Vector3.zero, target);
 
             if (AFLInput.MarkDown) AttemptContest();
-            if (AFLInput.Tackle)   AttemptTackle();
 
             if (HasBall)
             {
                 if (AFLInput.KickHeld) _kickCharge = Mathf.Clamp01(_kickCharge + Time.deltaTime / kickChargeTime);
                 if (AFLInput.KickUp && _kickCharge > 0.05f) { Kick(_kickCharge, AimDirection()); _kickCharge = 0f; }
-                if (AFLInput.Handball) Handball(AimDirection());
             }
             else _kickCharge = 0f;
         }
 
-        Vector3 AimDirection()
-        {
-            if (_cam) return Vector3.ProjectOnPlane(_cam.transform.forward, Vector3.up).normalized;
-            return transform.forward;
-        }
+        // Aim is always the player's own facing, never the camera — issue
+        // #1: "kicks aim from camera forward not player facing, camera
+        // moves on its own." Facing is already driven by moveTarget (you
+        // face whoever/wherever you're curving toward), so this alone also
+        // makes kicks land roughly where you were just steering, without a
+        // dedicated aim stick.
+        Vector3 AimDirection() => transform.forward;
 
         // ---- movement (also used by the AI brain) ---------------------------
         Vector3 _wishDir; float _wishSpeed;
@@ -191,9 +209,10 @@ namespace AFL
                     // press should land the APEX of the jump on the ball. If it's low,
                     // you just need hands up ~0.12s before it gets there.
                     bool needsJump = pt.y > feet + standingReach - 0.30f;
-                    float idealLead = needsJump ? TimeToApex : 0.12f;
+                    float idealLead = (needsJump ? TimeToApex : 0.12f) - touchLatencyBias;
                     _timingError = t - idealLead;          // + = too early, - = too late
                     _bidTime = Time.time;
+                    _activeBid = true;
 
                     if (needsJump && _cc.isGrounded)
                     {
@@ -208,6 +227,7 @@ namespace AFL
             // no ball in the air: this press is a ground gather / loose ball dive
             _bidTime = Time.time;
             _timingError = 0.15f;
+            _activeBid = false;
         }
 
         public bool CanReach(Vector3 ballPos)
@@ -241,6 +261,13 @@ namespace AFL
             grade += (strength - 0.5f) * 0.12f;
             grade += Random.Range(-0.05f, 0.05f);
 
+            // A genuine timed attempt never grades low enough to Spoil —
+            // the worst a real jump should do is spill it loose (Fumble),
+            // never look like the player punched their own contest away.
+            // Issue #1: "a mistimed human press must never resolve as
+            // Spoil... the kid punches the ball away themselves."
+            if (_activeBid) grade = Mathf.Max(grade, ball.gatherThreshold + 0.02f);
+
             return Mathf.Clamp01(grade);
         }
 
@@ -266,6 +293,7 @@ namespace AFL
                     if (animator) animator.SetTrigger("Spoil");
                     break;
             }
+            AFLGameManager.Instance?.OnContestSettled(this, grade);
             _bidTime = -99f;
         }
 
@@ -286,36 +314,6 @@ namespace AFL
 
             ball.Release(dir.normalized * speed, transform.right * -18f, this, true);
             if (animator) animator.SetTrigger("Kick");
-        }
-
-        public void Handball(Vector3 flatDir)
-        {
-            var ball = AFLBall.Instance;
-            if (!ball || ball.Carrier != this) return;
-            Vector3 dir = (flatDir + Vector3.up * 0.18f).normalized;
-            ball.Release(dir * handballSpeed, Vector3.zero, this, false);
-            if (animator) animator.SetTrigger("Handball");
-        }
-
-        void AttemptTackle()
-        {
-            var ball = AFLBall.Instance;
-            if (!ball || ball.Carrier == null || ball.Carrier == this) return;
-            var victim = ball.Carrier;
-            if (victim.team == team) return;
-            if (Vector3.Distance(victim.transform.position, transform.position) > 1.8f) return;
-
-            bool held = Random.value < 0.5f + (strength - victim.strength) * 0.5f;
-            if (held)
-            {
-                AFLGameManager.Instance?.Announce("Holding the ball!");
-                ball.Release(victim.transform.forward * 4f + Vector3.up * 3f, Vector3.zero, victim, false);
-            }
-            else
-            {
-                AFLGameManager.Instance?.Announce("Ball spills free");
-                ball.Release(Random.insideUnitSphere.normalized * 6f + Vector3.up * 2f, Vector3.zero, victim, false);
-            }
         }
 
         public void SetControlled(bool on)

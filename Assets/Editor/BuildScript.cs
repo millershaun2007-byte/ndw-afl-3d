@@ -9,6 +9,15 @@ using AFL;
 // pattern as before: construct everything in code, save a .unity scene, then
 // do a headless WebGL build. Invoked via:
 //   Unity -batchmode -quit -executeMethod BuildScript.PerformWebGLBuild
+//
+// 2026-08-11: scoped down further per issue #1 / docs/FOOTY-REBUILD.md — the
+// 5-goal-chain rebuild (centre throw-up -> run/kick to a forward option ->
+// mark contest -> set shot). See AFLGameManager for the phase logic; the
+// changes here are: real physics gravity to match AFLPlayer's, goal trigger
+// boxes tall enough to actually catch a lofted kick, hand/ball anchors
+// derived from each model's real bounds instead of a hardcoded guess, and
+// every player gets a bot brain (not just the non-human ones) so control
+// handing away from someone never leaves them standing still forever.
 public static class BuildScript
 {
     // Real physics-layer separation (2026-08-10, direct review feedback):
@@ -27,73 +36,7 @@ public static class BuildScript
 
     public static void PerformWebGLBuild()
     {
-        // Real trademark fix (2026-08-10, direct request): "AFL" is the
-        // Australian Football League's trademarked name — same category of
-        // risk as the earlier "Chaotic Sports" rename away from "Olympics".
-        // "Footy" is the generic/colloquial term for the sport, not a mark.
-        PlayerSettings.productName = "Mount Duneed Cats Footy";
-        PlayerSettings.WebGL.template = "PROJECT:Responsive";
-
-        AssetDatabase.Refresh(); // pick up any newly-added model/texture files before the Build* calls load them
-
-        _groundLayer = EnsureLayer("Ground");
-        _playerLayer = EnsureLayer("Player");
-        _ballLayer = EnsureLayer("Ball");
-        // The contest itself is resolved in script via OverlapSphere
-        // (AFLBall.ResolveContest), which ignores this matrix entirely —
-        // disabling Ball×Player here only stops the PHYSICS ENGINE from
-        // also independently colliding the two, which is what caused the
-        // held-ball-vs-carrier stutter.
-        Physics.IgnoreLayerCollision(_ballLayer, _playerLayer, true);
-
-        var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-
-        var centreCircle = BuildField();
-        var goalNorth = BuildGoal(new Vector3(0, 0, 20), Quaternion.identity, "GoalNorth", AFLPlayer.Team.Home);
-        var goalSouth = BuildGoal(new Vector3(0, 0, -20), Quaternion.Euler(0, 180, 0), "GoalSouth", AFLPlayer.Team.Away);
-        var ball = BuildBall();
-
-        // Roster cut down to 2 models per direct review feedback (2026-08-10):
-        // the marking contest needs a character that can legibly jump and
-        // reach, which rules out anything not bipedal/upright with clearly
-        // separated arms. Of the six originally wired in, only crocodile and
-        // kangaroo qualify — dragon's wings clip other players in a pack,
-        // and lion/unicorn are quadruped-style models not rebuilt upright.
-        // "Build two characters, not six. One per team, recoloured, is
-        // enough to prove the game works." 3 per side (matches the earlier
-        // ruck/rover+forward+defender sizing), each side's own model tinted
-        // so Home vs Away reads clearly despite reusing one mesh 3×.
-        var homeTint = new Color(0.35f, 0.6f, 1f);    // cool blue — Home
-        var awayTint = new Color(1f, 0.4f, 0.35f);    // warm red — Away
-
-        // Wider spread than the original spawn spots — from the (now
-        // closer/lower, see AFLBroadcastCamera) follow camera, the old
-        // tighter cluster read as characters standing on top of each other.
-        var croc = BuildPlayer("HomeCroc1", AFLPlayer.Team.Home, new Vector3(0, 1, -5),
-            "Assets/Models/CrocModel3DAI/CrocModel.glb", isUser: true, attackingGoal: null, tint: homeTint);
-        BuildPlayer("HomeCroc2", AFLPlayer.Team.Home, new Vector3(-6, 1, -8),
-            "Assets/Models/CrocModel3DAI/CrocModel.glb", isUser: false, attackingGoal: goalNorth, tint: homeTint);
-        BuildPlayer("HomeCroc3", AFLPlayer.Team.Home, new Vector3(6, 1, -9),
-            "Assets/Models/CrocModel3DAI/CrocModel.glb", isUser: false, attackingGoal: goalNorth, tint: homeTint);
-        BuildPlayer("AwayRoo1", AFLPlayer.Team.Away, new Vector3(0, 1, 5),
-            "Assets/Models/RooModel3DAI/RooModel.glb", isUser: false, attackingGoal: goalSouth, tint: awayTint);
-        BuildPlayer("AwayRoo2", AFLPlayer.Team.Away, new Vector3(-6, 1, 8),
-            "Assets/Models/RooModel3DAI/RooModel.glb", isUser: false, attackingGoal: goalSouth, tint: awayTint);
-        BuildPlayer("AwayRoo3", AFLPlayer.Team.Away, new Vector3(6, 1, 9),
-            "Assets/Models/RooModel3DAI/RooModel.glb", isUser: false, attackingGoal: goalSouth, tint: awayTint);
-
-        var cam = BuildCamera(croc.transform, ball);
-        BuildManagers(ball, cam, centreCircle);
-        BuildLighting();
-
-        // Name must stay "TouchBridge" — the HTML control bar targets it by
-        // name via unityInstance.SendMessage('TouchBridge', ...).
-        var touchBridgeGo = new GameObject("TouchBridge");
-        touchBridgeGo.AddComponent<AFLTouchBridge>();
-
-        System.IO.Directory.CreateDirectory("Assets/Scenes");
-        EditorSceneManager.SaveScene(scene, "Assets/Scenes/AflField.unity");
-        EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene("Assets/Scenes/AflField.unity", true) };
+        BuildSceneContents(saveToDisk: true);
 
         var outputPath = System.Environment.GetEnvironmentVariable("NDW_BUILD_OUTPUT") ?? "Build/WebGL";
         System.IO.Directory.CreateDirectory(outputPath);
@@ -127,6 +70,83 @@ public static class BuildScript
         if (summary.result != UnityEditor.Build.Reporting.BuildResult.Succeeded)
         {
             EditorApplication.Exit(1);
+        }
+    }
+
+    // Extracted (2026-08-11) so an automated playtest can construct the
+    // exact same scene the real build ships without paying for a full
+    // WebGL compile every time — see PlaytestRunner.cs. saveToDisk is
+    // false for that path; PerformWebGLBuild always saves since the real
+    // build reads the scene back off disk via EditorBuildSettings.
+    public static void BuildSceneContents(bool saveToDisk)
+    {
+        // Real trademark fix (2026-08-10, direct request): "AFL" is the
+        // Australian Football League's trademarked name — same category of
+        // risk as the earlier "Chaotic Sports" rename away from "Olympics".
+        // "Footy" is the generic/colloquial term for the sport, not a mark.
+        PlayerSettings.productName = "Mount Duneed Cats Footy";
+        PlayerSettings.WebGL.template = "PROJECT:Responsive";
+
+        AssetDatabase.Refresh(); // pick up any newly-added model/texture files before the Build* calls load them
+
+        _groundLayer = EnsureLayer("Ground");
+        _playerLayer = EnsureLayer("Player");
+        _ballLayer = EnsureLayer("Ball");
+        // The contest itself is resolved in script via OverlapSphere
+        // (AFLBall.ResolveContest), which ignores this matrix entirely —
+        // disabling Ball×Player here only stops the PHYSICS ENGINE from
+        // also independently colliding the two, which is what caused the
+        // held-ball-vs-carrier stutter.
+        Physics.IgnoreLayerCollision(_ballLayer, _playerLayer, true);
+
+        // Real fix (2026-08-11, issue #1's "one fact in two places"): this
+        // used to sit at Unity's default -9.81 while AFLPlayer fell under
+        // its own -24, so a jump could never land where the ball-trajectory
+        // prediction said it would. Both now agree at -14.
+        Physics.gravity = new Vector3(0f, -14f, 0f);
+
+        var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+
+        var centreCircle = BuildField();
+        var goalNorth = BuildGoal(new Vector3(0, 0, 20), Quaternion.identity, "GoalNorth", AFLPlayer.Team.Home);
+        var goalSouth = BuildGoal(new Vector3(0, 0, -20), Quaternion.Euler(0, 180, 0), "GoalSouth", AFLPlayer.Team.Away);
+        var ball = BuildBall();
+
+        // Roster: 3 per side, one mesh per team recoloured. The first
+        // player on each side is the designated Ruck — the one who
+        // contests the centre throw-up at the start of every chain (see
+        // AFLGameManager.FindRuck). The other two are lead/forward options
+        // once their team has the ball (AFLBotBrain.LeadForGoal).
+        var homeTint = new Color(0.35f, 0.6f, 1f);    // cool blue — Home
+        var awayTint = new Color(1f, 0.4f, 0.35f);    // warm red — Away
+
+        var croc = BuildPlayer("HomeCroc1", AFLPlayer.Team.Home, new Vector3(0, 1, -5),
+            "Assets/Models/CrocModel3DAI/CrocModel.glb", isUser: true, attackingGoal: goalNorth, isRuck: true, tint: homeTint);
+        BuildPlayer("HomeCroc2", AFLPlayer.Team.Home, new Vector3(-6, 1, -8),
+            "Assets/Models/CrocModel3DAI/CrocModel.glb", isUser: false, attackingGoal: goalNorth, isRuck: false, tint: homeTint);
+        BuildPlayer("HomeCroc3", AFLPlayer.Team.Home, new Vector3(6, 1, -9),
+            "Assets/Models/CrocModel3DAI/CrocModel.glb", isUser: false, attackingGoal: goalNorth, isRuck: false, tint: homeTint);
+        BuildPlayer("AwayRoo1", AFLPlayer.Team.Away, new Vector3(0, 1, 5),
+            "Assets/Models/RooModel3DAI/RooModel.glb", isUser: false, attackingGoal: goalSouth, isRuck: true, tint: awayTint);
+        BuildPlayer("AwayRoo2", AFLPlayer.Team.Away, new Vector3(-6, 1, 8),
+            "Assets/Models/RooModel3DAI/RooModel.glb", isUser: false, attackingGoal: goalSouth, isRuck: false, tint: awayTint);
+        BuildPlayer("AwayRoo3", AFLPlayer.Team.Away, new Vector3(6, 1, 9),
+            "Assets/Models/RooModel3DAI/RooModel.glb", isUser: false, attackingGoal: goalSouth, isRuck: false, tint: awayTint);
+
+        var cam = BuildCamera(croc.transform);
+        BuildManagers(ball, cam, centreCircle, goalNorth, goalSouth);
+        BuildLighting();
+
+        // Name must stay "TouchBridge" — the HTML control bar targets it by
+        // name via unityInstance.SendMessage('TouchBridge', ...).
+        var touchBridgeGo = new GameObject("TouchBridge");
+        touchBridgeGo.AddComponent<AFLTouchBridge>();
+
+        if (saveToDisk)
+        {
+            System.IO.Directory.CreateDirectory("Assets/Scenes");
+            EditorSceneManager.SaveScene(scene, "Assets/Scenes/AflField.unity");
+            EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene("Assets/Scenes/AflField.unity", true) };
         }
     }
 
@@ -166,11 +186,17 @@ public static class BuildScript
         CreatePost(goalRoot.transform, new Vector3(-6.4f, 0, 0), 3.5f, "BehindPostL");
         CreatePost(goalRoot.transform, new Vector3(6.4f, 0, 0), 3.5f, "BehindPostR");
 
-        CreateScoringZone(goalRoot.transform, new Vector3(0, 2f, 0), new Vector3(6.4f, 4f, 2f),
+        // Real fix (2026-08-11, issue #1): these used to be 4 units tall
+        // against 6-unit posts, so a lofted kick could sail clean over the
+        // trigger and score nothing. Now comfortably taller than the posts
+        // themselves — kick speeds are also lower post-rebuild (max ~17.5
+        // m/s vs the old 29), so trajectories are less extreme to begin
+        // with, but the trigger shouldn't rely on that alone.
+        CreateScoringZone(goalRoot.transform, new Vector3(0, 4f, 0), new Vector3(6.4f, 9f, 2f),
             AFLScoringZone.ScoreType.Goal, scoringTeam, "GoalZone");
-        CreateScoringZone(goalRoot.transform, new Vector3(-4.8f, 1.75f, 0), new Vector3(3.2f, 3.5f, 2f),
+        CreateScoringZone(goalRoot.transform, new Vector3(-4.8f, 3.75f, 0), new Vector3(3.2f, 7.5f, 2f),
             AFLScoringZone.ScoreType.Behind, scoringTeam, "BehindZoneL");
-        CreateScoringZone(goalRoot.transform, new Vector3(4.8f, 1.75f, 0), new Vector3(3.2f, 3.5f, 2f),
+        CreateScoringZone(goalRoot.transform, new Vector3(4.8f, 3.75f, 0), new Vector3(3.2f, 7.5f, 2f),
             AFLScoringZone.ScoreType.Behind, scoringTeam, "BehindZoneR");
 
         return goalRoot.transform;
@@ -268,25 +294,48 @@ public static class BuildScript
         // fallback for OBJ-based models, harmless no-op when a GLB's folder
         // has no loose PNG.
 
-        // Team tint: DEFERRED, not implemented (2026-08-10). Tried setting
-        // the GLB material's real base-tint property directly
-        // ("baseColorFactor" on glTFast's "glTF/PbrMetallicRoughness"
-        // shader, since this project has no URP/custom SRP active) —
-        // confirmed correct at build time (read back byte-for-byte right
-        // after SetColor) but invisible in the actual running WebGL build.
-        // Also tried rebuilding the material on Unity's own "Standard"
-        // shader with the same extracted texture — also had no visible
-        // effect for a reason not yet root-caused, despite that exact
-        // shader fallback rendering correctly elsewhere in this build
-        // (SolidColorMaterial's field/goalpost colors). Rather than ship
-        // more unverified guessing, leaving characters on their original
-        // imported material — Home/Away are still distinguishable via the
-        // HUD scoreboard and which player you're controlling.
+        // Team tint: DEFERRED, not implemented (2026-08-10) — see git
+        // history on this file for what was already tried and didn't work.
+        // Home/Away are still distinguishable via the HUD scoreboard and
+        // which player you're controlling.
         _ = tint; // parameter kept for when this gets revisited
+
+        // Real fix (2026-08-11, issue #1's "one fact in two places" — hands
+        // don't match the model): standingReach used to be a hardcoded
+        // 2.20 while the visual sat at localScale=2 with a +1 offset, with
+        // nothing tying the two together. Deriving both anchors from this
+        // model's actual rendered bounds means an artist repositioning or
+        // resizing a model automatically becomes correct physics, instead
+        // of needing separately-tuned agreement that drifts the moment
+        // either side changes.
+        var renderers = instance.GetComponentsInChildren<Renderer>();
+        if (renderers.Length > 0)
+        {
+            var b = renderers[0].bounds;
+            for (int i = 1; i < renderers.Length; i++) b.Encapsulate(renderers[i].bounds);
+            float modelHeight = Mathf.Max(0.5f, b.max.y - parent.position.y);
+
+            var player = parent.GetComponent<AFLPlayer>();
+            if (player)
+            {
+                float reachY = Mathf.Clamp(modelHeight * 0.9f, 1.6f, 2.7f);
+                float holdY = Mathf.Clamp(modelHeight * 0.5f, 0.9f, 1.6f);
+                player.handsAnchor = CreateAnchor(parent, "Hands", new Vector3(0f, reachY, 0.28f));
+                player.ballHold = CreateAnchor(parent, "BallHold", new Vector3(0.32f, holdY, 0.32f));
+            }
+        }
+    }
+
+    static Transform CreateAnchor(Transform parent, string n, Vector3 local)
+    {
+        var t = new GameObject(n).transform;
+        t.SetParent(parent, false);
+        t.localPosition = local;
+        return t;
     }
 
     static AFLPlayer BuildPlayer(string name, AFLPlayer.Team team, Vector3 position,
-        string modelPath, bool isUser, Transform attackingGoal, Color? tint = null)
+        string modelPath, bool isUser, Transform attackingGoal, bool isRuck, Color? tint = null)
     {
         var go = new GameObject(name);
         go.layer = _playerLayer;
@@ -299,25 +348,27 @@ public static class BuildScript
         var p = go.AddComponent<AFLPlayer>();
         p.team = team;
         p.isUserControlled = isUser;
-        // Home attacks GoalNorth (+Z), Away attacks GoalSouth (-Z) — see
-        // BuildGoal's own +Z/-Z placement. Faced correctly from spawn too,
-        // matching the fixed-lane movement direction from the first frame.
-        p.attackDir = team == AFLPlayer.Team.Home ? Vector3.forward : Vector3.back;
-        go.transform.rotation = Quaternion.LookRotation(p.attackDir, Vector3.up);
+        p.isRuck = isRuck;
+        // Faced toward their own attacking end from spawn — matches
+        // whichever goal BuildManagers/AFLBotBrain will send them toward.
+        Vector3 faceDir = team == AFLPlayer.Team.Home ? Vector3.forward : Vector3.back;
+        go.transform.rotation = Quaternion.LookRotation(faceDir, Vector3.up);
 
         BuildCharacterModel3D(go.transform, modelPath, tint);
 
-        if (!isUser)
-        {
-            var brain = go.AddComponent<AFLBotBrain>();
-            brain.attackingGoal = attackingGoal;
-            brain.skill = 0.6f;
-        }
+        // Every player gets a brain now, including the human-designated
+        // one — isUserControlled is the only gate AFLBotBrain/AFLPlayer
+        // check, so control handing away from someone mid-chain no longer
+        // leaves them standing frozen. Issue #1: "HomeCroc1 built with no
+        // AFLBotBrain... permanently frozen once control leaves it."
+        var brain = go.AddComponent<AFLBotBrain>();
+        brain.attackingGoal = attackingGoal;
+        brain.skill = 0.28f;
 
         return p;
     }
 
-    static AFLBroadcastCamera BuildCamera(Transform followTarget, AFLBall ball)
+    static AFLBroadcastCamera BuildCamera(Transform followTarget)
     {
         var cameraGo = new GameObject("Main Camera");
         var cam = cameraGo.AddComponent<Camera>();
@@ -327,7 +378,6 @@ public static class BuildScript
 
         var rig = cameraGo.AddComponent<AFLBroadcastCamera>();
         rig.target = followTarget;
-        rig.ball = ball;
         // Ground/scenery only — never the Player layer, or the SphereCast
         // collision-avoidance treats the followed player's own
         // CharacterController as an obstruction and pulls the camera in
@@ -341,13 +391,15 @@ public static class BuildScript
         return rig;
     }
 
-    static void BuildManagers(AFLBall ball, AFLBroadcastCamera cam, Transform centreCircle)
+    static void BuildManagers(AFLBall ball, AFLBroadcastCamera cam, Transform centreCircle, Transform goalNorth, Transform goalSouth)
     {
         var gm = new GameObject("GameManager");
         var manager = gm.AddComponent<AFLGameManager>();
         manager.ball = ball;
         manager.cam = cam;
         manager.centreCircle = centreCircle;
+        manager.goalNorth = goalNorth;
+        manager.goalSouth = goalSouth;
         manager.userTeam = AFLPlayer.Team.Home;
 
         // AFLBall.playerMask has no field-initializer default (unlike
