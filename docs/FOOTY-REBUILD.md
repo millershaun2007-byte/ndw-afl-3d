@@ -30,4 +30,4 @@ Aim comes from the player's facing, never from the camera. No mouse-look, and ta
 
 Bots must be beatable by a child on a touchscreen, allowing for the touch-bridge input latency that a bot does not pay.
 
-Commit per change. This repo had a single "Initial commit" until 2026-08-11.
+Commit per change, as this repo already does.
