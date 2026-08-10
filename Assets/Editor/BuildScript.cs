@@ -1,0 +1,514 @@
+using UnityEngine;
+using UnityEditor;
+using UnityEditor.SceneManagement;
+using AFL;
+
+// Rebuild of BuildScript for the AFLGameKit.cs architecture (2026-08-10 full
+// rewrite — see the archived project ndw-afl-3d-ARCHIVED-2026-08-10 for the
+// old single-lane/Ruck-Rover system this replaces). Same programmatic-scene
+// pattern as before: construct everything in code, save a .unity scene, then
+// do a headless WebGL build. Invoked via:
+//   Unity -batchmode -quit -executeMethod BuildScript.PerformWebGLBuild
+public static class BuildScript
+{
+    // Real physics-layer separation (2026-08-10, direct review feedback):
+    // ball/players/ground all sat on the single Default layer, which meant
+    // the camera's default collisionMask (Default) treated the followed
+    // player's own CharacterController as an obstruction — the classic
+    // "camera jams into your own back" bug — and the kinematic ball
+    // parented to a carrier's hand kept generating real collisions against
+    // that same carrier's CharacterController, causing stutter. Three
+    // dedicated layers fix both: Ground for terrain/scenery (what the
+    // camera is allowed to collide with), Player for every AFLPlayer's
+    // CharacterController (what AFLBall.playerMask scans for contests),
+    // and Ball for the ball itself (so Ball×Player can be disabled in the
+    // physics matrix below without touching Ball×Ground).
+    static int _groundLayer, _playerLayer, _ballLayer;
+
+    // Diagnostic-only: isolates whether the "level0 is corrupted" WASM
+    // runtime error (hit 2026-08-10 on every real build of the full scene,
+    // including from a completely clean Library) is caused by something in
+    // the AFLGameKit.cs scene content, or something more fundamental about
+    // this project's build config. Builds only field+camera+light — no
+    // AFLPlayer/AFLBall/AFLGameManager/AFLBotBrain components anywhere.
+    public static void PerformMinimalDiagnosticBuild()
+    {
+        PlayerSettings.productName = "Mount Duneed Cats AFL";
+        PlayerSettings.WebGL.template = "PROJECT:Responsive";
+        AssetDatabase.Refresh();
+
+        var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        BuildField();
+        var camGo = new GameObject("Main Camera");
+        var cam = camGo.AddComponent<Camera>();
+        cam.tag = "MainCamera";
+        camGo.transform.position = new Vector3(0, 5, -10);
+        camGo.transform.LookAt(Vector3.zero);
+        BuildLighting();
+
+        System.IO.Directory.CreateDirectory("Assets/Scenes");
+        DoMinimalDiagnosticBuildTail(scene);
+    }
+
+    // Stage 2: full scene (players/ball/goals/managers) but with
+    // SkipCharacterModelsForDiagnostic true — isolates whether the GLB
+    // character imports are the corruption source vs the AFL component
+    // structure itself.
+    public static void PerformNoModelsDiagnosticBuild()
+    {
+        SkipCharacterModelsForDiagnostic = true;
+        PerformWebGLBuild();
+    }
+
+    // Stage 3: field + ball (AFLBall, Rigidbody, CapsuleCollider) + camera
+    // only — no players, no goals, no AFLGameManager. Isolates whether
+    // AFLBall itself is the corruption source.
+    public static void PerformBallOnlyDiagnosticBuild()
+    {
+        PlayerSettings.productName = "Mount Duneed Cats AFL";
+        PlayerSettings.WebGL.template = "PROJECT:Responsive";
+        AssetDatabase.Refresh();
+
+        _groundLayer = EnsureLayer("Ground");
+        _playerLayer = EnsureLayer("Player");
+        _ballLayer = EnsureLayer("Ball");
+        Physics.IgnoreLayerCollision(_ballLayer, _playerLayer, true);
+
+        var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        BuildField();
+        var ball = BuildBall();
+        ball.playerMask = 1 << _playerLayer;
+        ball.groundMask = 1 << _groundLayer;
+        var camGo = new GameObject("Main Camera");
+        var cam = camGo.AddComponent<Camera>();
+        cam.tag = "MainCamera";
+        camGo.transform.position = new Vector3(0, 5, -10);
+        camGo.transform.LookAt(Vector3.zero);
+        BuildLighting();
+
+        System.IO.Directory.CreateDirectory("Assets/Scenes");
+        DoMinimalDiagnosticBuildTail(scene);
+    }
+
+    // Stage 4: field + a plain Rigidbody+CapsuleCollider sphere (NO AFLBall
+    // script attached at all) + camera. Isolates whether the corruption is
+    // about the AFLBall MonoBehaviour class specifically, or just having
+    // any dynamic Rigidbody object in the scene.
+    public static void PerformPlainRigidbodyDiagnosticBuild()
+    {
+        PlayerSettings.productName = "Mount Duneed Cats AFL";
+        PlayerSettings.WebGL.template = "PROJECT:Responsive";
+        AssetDatabase.Refresh();
+
+        var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        BuildField();
+
+        var ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        ball.name = "PlainBall";
+        ball.transform.position = new Vector3(0, 1.2f, 0);
+        ball.transform.localScale = new Vector3(0.4f, 0.28f, 0.4f);
+        Object.DestroyImmediate(ball.GetComponent<SphereCollider>());
+        var capsule = ball.AddComponent<CapsuleCollider>();
+        capsule.direction = 2;
+        capsule.radius = 0.5f;
+        capsule.height = 1.2f;
+        ball.AddComponent<Rigidbody>();
+
+        var camGo = new GameObject("Main Camera");
+        var cam = camGo.AddComponent<Camera>();
+        cam.tag = "MainCamera";
+        camGo.transform.position = new Vector3(0, 5, -10);
+        camGo.transform.LookAt(Vector3.zero);
+        BuildLighting();
+
+        System.IO.Directory.CreateDirectory("Assets/Scenes");
+        DoMinimalDiagnosticBuildTail(scene);
+    }
+
+    // Stage 5: plain rigidbody ball + a trivial DiagTest component whose
+    // only field is `LayerMask testMask = ~0;` — tests whether the `~0`
+    // LayerMask field-initializer pattern itself is what corrupts scene
+    // serialization.
+    public static void PerformLayerMaskDiagnosticBuild()
+    {
+        PlayerSettings.productName = "Mount Duneed Cats AFL";
+        PlayerSettings.WebGL.template = "PROJECT:Responsive";
+        AssetDatabase.Refresh();
+
+        var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        BuildField();
+
+        var ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        ball.name = "PlainBall";
+        ball.transform.position = new Vector3(0, 1.2f, 0);
+        ball.AddComponent<DiagTest>();
+
+        var camGo = new GameObject("Main Camera");
+        var cam = camGo.AddComponent<Camera>();
+        cam.tag = "MainCamera";
+        camGo.transform.position = new Vector3(0, 5, -10);
+        camGo.transform.LookAt(Vector3.zero);
+        BuildLighting();
+
+        System.IO.Directory.CreateDirectory("Assets/Scenes");
+        DoMinimalDiagnosticBuildTail(scene);
+    }
+
+    static void DoMinimalDiagnosticBuildTail(UnityEngine.SceneManagement.Scene scene)
+    {
+        EditorSceneManager.SaveScene(scene, "Assets/Scenes/AflField.unity");
+        EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene("Assets/Scenes/AflField.unity", true) };
+
+        var outputPath = System.Environment.GetEnvironmentVariable("NDW_BUILD_OUTPUT") ?? "Build/WebGL";
+        System.IO.Directory.CreateDirectory(outputPath);
+        PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Gzip;
+        PlayerSettings.WebGL.decompressionFallback = true;
+
+        var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
+        {
+            scenes = new[] { "Assets/Scenes/AflField.unity" },
+            locationPathName = outputPath,
+            target = BuildTarget.WebGL,
+            options = BuildOptions.None
+        });
+        var summary = report.summary;
+        Debug.Log($"NDW_BUILD_RESULT={summary.result} totalSize={summary.totalSize} errors={summary.totalErrors} warnings={summary.totalWarnings}");
+        if (summary.result != UnityEditor.Build.Reporting.BuildResult.Succeeded) EditorApplication.Exit(1);
+    }
+
+    public static void PerformWebGLBuild()
+    {
+        PlayerSettings.productName = "Mount Duneed Cats AFL";
+        PlayerSettings.WebGL.template = "PROJECT:Responsive";
+
+        AssetDatabase.Refresh(); // pick up any newly-added model/texture files before the Build* calls load them
+
+        _groundLayer = EnsureLayer("Ground");
+        _playerLayer = EnsureLayer("Player");
+        _ballLayer = EnsureLayer("Ball");
+        // The contest itself is resolved in script via OverlapSphere
+        // (AFLBall.ResolveContest), which ignores this matrix entirely —
+        // disabling Ball×Player here only stops the PHYSICS ENGINE from
+        // also independently colliding the two, which is what caused the
+        // held-ball-vs-carrier stutter.
+        Physics.IgnoreLayerCollision(_ballLayer, _playerLayer, true);
+
+        var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+
+        var centreCircle = BuildField();
+        var goalNorth = BuildGoal(new Vector3(0, 0, 20), Quaternion.identity, "GoalNorth", AFLPlayer.Team.Home);
+        var goalSouth = BuildGoal(new Vector3(0, 0, -20), Quaternion.Euler(0, 180, 0), "GoalSouth", AFLPlayer.Team.Away);
+        var ball = BuildBall();
+
+        // First playable slice: 3v3 (matches the "ruck/rover + forward +
+        // defender, 3 on 3" number from the earlier scoping discussion),
+        // using six of the strongest, gameplay-appropriate characters from
+        // the 24-character library rather than just reusing one model per
+        // side — crocodile/kangaroo/emu were already proven importing and
+        // texturing correctly; dragon/lion/unicorn are the next-best batch
+        // (dragon was explicitly built "arms and legs for the footy", lion
+        // and unicorn both came out clean with no logo issues), freshly
+        // compressed with the same weld/simplify/resize pipeline. Only the
+        // crocodile is user-controlled; everyone else runs AFLBotBrain.
+        var croc = BuildPlayer("HomeCroc", AFLPlayer.Team.Home, new Vector3(0, 1, -4),
+            "Assets/Models/CrocModel3DAI/CrocModel.glb", isUser: true, attackingGoal: null);
+        var roo = BuildPlayer("HomeRoo", AFLPlayer.Team.Home, new Vector3(-4, 1, -6),
+            "Assets/Models/RooModel3DAI/RooModel.glb", isUser: false, attackingGoal: goalNorth);
+        var dragon = BuildPlayer("HomeDragon", AFLPlayer.Team.Home, new Vector3(4, 1, -7),
+            "Assets/Models/DragonModel3DAI/DragonModel.glb", isUser: false, attackingGoal: goalNorth);
+        var emu = BuildPlayer("AwayEmu", AFLPlayer.Team.Away, new Vector3(0, 1, 4),
+            "Assets/Models/EmuModel3DAI/EmuModel.glb", isUser: false, attackingGoal: goalSouth);
+        var lion = BuildPlayer("AwayLion", AFLPlayer.Team.Away, new Vector3(-4, 1, 6),
+            "Assets/Models/LionModel3DAI/LionModel.glb", isUser: false, attackingGoal: goalSouth);
+        var unicorn = BuildPlayer("AwayUnicorn", AFLPlayer.Team.Away, new Vector3(4, 1, 7),
+            "Assets/Models/UnicornModel3DAI/UnicornModel.glb", isUser: false, attackingGoal: goalSouth);
+
+        var cam = BuildCamera(croc.transform, ball);
+        BuildManagers(ball, cam, centreCircle);
+        BuildLighting();
+
+        System.IO.Directory.CreateDirectory("Assets/Scenes");
+        EditorSceneManager.SaveScene(scene, "Assets/Scenes/AflField.unity");
+        EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene("Assets/Scenes/AflField.unity", true) };
+
+        var outputPath = System.Environment.GetEnvironmentVariable("NDW_BUILD_OUTPUT") ?? "Build/WebGL";
+        System.IO.Directory.CreateDirectory(outputPath);
+
+        // Same gzip + client-side decompression-fallback approach proven in
+        // the old project (see its BuildScript.cs comment) — Cloudflare
+        // Pages strips manually-set Content-Encoding on precompressed
+        // files, and uncompressed WebGL.wasm alone blew past the 25MB
+        // per-file limit. decompressionFallback sidesteps both.
+        PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Gzip;
+        PlayerSettings.WebGL.decompressionFallback = true;
+
+        var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
+        {
+            scenes = new[] { "Assets/Scenes/AflField.unity" },
+            locationPathName = outputPath,
+            target = BuildTarget.WebGL,
+            options = BuildOptions.None
+        });
+
+        var summary = report.summary;
+        Debug.Log($"NDW_BUILD_RESULT={summary.result} totalSize={summary.totalSize} totalTime={summary.totalTime} errors={summary.totalErrors} warnings={summary.totalWarnings}");
+
+        if (summary.result != UnityEditor.Build.Reporting.BuildResult.Succeeded)
+        {
+            EditorApplication.Exit(1);
+        }
+    }
+
+    static Transform BuildField()
+    {
+        var ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
+        ground.name = "Field";
+        ground.layer = _groundLayer;
+        ground.transform.localScale = new Vector3(3.5f, 1, 4.5f); // ~35x45 unit footprint, same scale proven in the old project
+        ground.GetComponent<Renderer>().sharedMaterial = SolidColorMaterial(new Color(0.25f, 0.55f, 0.2f));
+
+        var centerCircle = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        centerCircle.name = "CenterCircle";
+        centerCircle.layer = _groundLayer;
+        Object.DestroyImmediate(centerCircle.GetComponent<Collider>());
+        centerCircle.transform.position = new Vector3(0, 0.01f, 0);
+        centerCircle.transform.localScale = new Vector3(6f, 0.005f, 6f);
+        centerCircle.GetComponent<Renderer>().sharedMaterial = SolidColorMaterial(new Color(0.32f, 0.62f, 0.27f));
+
+        return centerCircle.transform;
+    }
+
+    // Real posts + three non-overlapping AFLScoringZone triggers per end:
+    // one Goal zone between the two tall posts, and two narrower Behind
+    // zones flanking it (one per side, out to the short posts) — kept
+    // non-overlapping so a single pass through the goalmouth only ever
+    // fires one trigger, unlike the old GoalDetector pair which relied on
+    // isGoal-priority logic layered on top of overlapping triggers.
+    static Transform BuildGoal(Vector3 center, Quaternion rot, string name, AFLPlayer.Team scoringTeam)
+    {
+        var goalRoot = new GameObject(name);
+        goalRoot.transform.position = center;
+        goalRoot.transform.rotation = rot;
+
+        CreatePost(goalRoot.transform, new Vector3(-3.2f, 0, 0), 6f, "GoalPostL");
+        CreatePost(goalRoot.transform, new Vector3(3.2f, 0, 0), 6f, "GoalPostR");
+        CreatePost(goalRoot.transform, new Vector3(-6.4f, 0, 0), 3.5f, "BehindPostL");
+        CreatePost(goalRoot.transform, new Vector3(6.4f, 0, 0), 3.5f, "BehindPostR");
+
+        CreateScoringZone(goalRoot.transform, new Vector3(0, 2f, 0), new Vector3(6.4f, 4f, 2f),
+            AFLScoringZone.ScoreType.Goal, scoringTeam, "GoalZone");
+        CreateScoringZone(goalRoot.transform, new Vector3(-4.8f, 1.75f, 0), new Vector3(3.2f, 3.5f, 2f),
+            AFLScoringZone.ScoreType.Behind, scoringTeam, "BehindZoneL");
+        CreateScoringZone(goalRoot.transform, new Vector3(4.8f, 1.75f, 0), new Vector3(3.2f, 3.5f, 2f),
+            AFLScoringZone.ScoreType.Behind, scoringTeam, "BehindZoneR");
+
+        return goalRoot.transform;
+    }
+
+    static void CreateScoringZone(Transform parent, Vector3 localPos, Vector3 size,
+        AFLScoringZone.ScoreType type, AFLPlayer.Team scoringTeam, string name)
+    {
+        var zone = new GameObject(name);
+        zone.transform.SetParent(parent);
+        zone.layer = _groundLayer; // scenery — needs to stay on Ball's collidable set, not excluded by anything
+        zone.transform.localPosition = localPos;
+        var col = zone.AddComponent<BoxCollider>();
+        col.isTrigger = true;
+        col.size = size;
+        var comp = zone.AddComponent<AFLScoringZone>();
+        comp.type = type;
+        comp.scoringTeam = scoringTeam;
+    }
+
+    static void CreatePost(Transform parent, Vector3 localPos, float height, string name)
+    {
+        var post = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        post.name = name;
+        post.layer = _groundLayer;
+        post.transform.SetParent(parent);
+        post.transform.localPosition = localPos + Vector3.up * (height / 2f);
+        post.transform.localScale = new Vector3(0.25f, height / 2f, 0.25f);
+        post.GetComponent<Renderer>().sharedMaterial = SolidColorMaterial(Color.white);
+    }
+
+    static AFLBall BuildBall()
+    {
+        var ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        ball.name = "Ball";
+        ball.layer = _ballLayer;
+        ball.transform.position = new Vector3(0, 1.2f, 0);
+        ball.transform.localScale = new Vector3(0.4f, 0.28f, 0.4f); // oval-ish AFL ball silhouette
+        ball.GetComponent<Renderer>().sharedMaterial = SolidColorMaterial(new Color(0.6f, 0.35f, 0.15f));
+
+        // A small capsule (oriented along Z, the ball's long axis once its
+        // transform is scaled) reads closer to a real football's shape
+        // than the default SphereCollider CreatePrimitive gives you.
+        Object.DestroyImmediate(ball.GetComponent<SphereCollider>());
+        var capsule = ball.AddComponent<CapsuleCollider>();
+        capsule.direction = 2; // Z-axis
+        capsule.radius = 0.5f;
+        capsule.height = 1.2f;
+
+        var aflBall = ball.AddComponent<AFLBall>();
+        // AFLBall.groundMask defaults to ~0 (everything) via its own field
+        // initializer, and playerMask has no default at all — both get
+        // narrowed/set explicitly in BuildManagers once all three layers
+        // are known to exist.
+        return aflBall;
+    }
+
+    // Same real-3D-model import pattern proven in the old project (see its
+    // BuildScript.cs BuildCharacterModel3D for the full history of why each
+    // step is here): glTFast-imported GLB, texture explicitly re-linked
+    // (Unity's OBJ/GLB importers don't reliably auto-link), colliders
+    // stripped off the visual since the CharacterController on the parent
+    // is the only collider this character needs.
+    // Diagnostic-only toggle, see PerformMinimalDiagnosticBuild's comment.
+    public static bool SkipCharacterModelsForDiagnostic = false;
+
+    static void BuildCharacterModel3D(Transform parent, string modelPath)
+    {
+        if (SkipCharacterModelsForDiagnostic) return;
+        var prefabRoot = AssetDatabase.LoadAssetAtPath<GameObject>(modelPath);
+        if (prefabRoot == null)
+        {
+            Debug.LogWarning("[BuildCharacterModel3D] Could not load " + modelPath + " — character will have no visual.");
+            return;
+        }
+        var instance = Object.Instantiate(prefabRoot, parent);
+        instance.name = "Visual";
+        instance.transform.localPosition = new Vector3(0, 1f, 0);
+        instance.transform.localScale = Vector3.one * 2f;
+        foreach (var col in instance.GetComponentsInChildren<Collider>()) Object.DestroyImmediate(col);
+
+        var modelDir = System.IO.Path.GetDirectoryName(modelPath);
+        string texPath = null;
+        foreach (var candidate in System.IO.Directory.GetFiles(modelDir, "*.png"))
+        {
+            texPath = candidate.Replace('\\', '/');
+            break;
+        }
+        var diffuseTex = texPath != null ? AssetDatabase.LoadAssetAtPath<Texture2D>(texPath) : null;
+        if (diffuseTex != null)
+        {
+            var mat = new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard"));
+            mat.mainTexture = diffuseTex;
+            if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", diffuseTex);
+            foreach (var mr in instance.GetComponentsInChildren<MeshRenderer>()) mr.sharedMaterial = mat;
+        }
+        // GLB imports (all three models used here) carry their own
+        // embedded materials/textures via glTFast already — the PNG-scan
+        // above is a fallback for the OBJ-based models from the old
+        // roster, harmless no-op when a GLB's folder has no loose PNG.
+    }
+
+    static AFLPlayer BuildPlayer(string name, AFLPlayer.Team team, Vector3 position,
+        string modelPath, bool isUser, Transform attackingGoal)
+    {
+        var go = new GameObject(name);
+        go.layer = _playerLayer;
+        go.transform.position = position;
+
+        var cc = go.AddComponent<CharacterController>();
+        cc.height = 2f;
+        cc.center = new Vector3(0, 1f, 0);
+
+        var p = go.AddComponent<AFLPlayer>();
+        p.team = team;
+        p.isUserControlled = isUser;
+
+        BuildCharacterModel3D(go.transform, modelPath);
+
+        if (!isUser)
+        {
+            var brain = go.AddComponent<AFLBotBrain>();
+            brain.attackingGoal = attackingGoal;
+            brain.skill = 0.6f;
+        }
+
+        return p;
+    }
+
+    static AFLBroadcastCamera BuildCamera(Transform followTarget, AFLBall ball)
+    {
+        var cameraGo = new GameObject("Main Camera");
+        var cam = cameraGo.AddComponent<Camera>();
+        cam.tag = "MainCamera";
+        cam.backgroundColor = new Color(0.55f, 0.75f, 0.95f);
+        cam.clearFlags = CameraClearFlags.SolidColor;
+
+        var rig = cameraGo.AddComponent<AFLBroadcastCamera>();
+        rig.target = followTarget;
+        rig.ball = ball;
+        // Ground/scenery only — never the Player layer, or the SphereCast
+        // collision-avoidance treats the followed player's own
+        // CharacterController as an obstruction and pulls the camera in
+        // against their back.
+        rig.collisionMask = 1 << _groundLayer;
+        cameraGo.transform.position = followTarget.position + new Vector3(0, 2.6f, -7.5f);
+
+        return rig;
+    }
+
+    static void BuildManagers(AFLBall ball, AFLBroadcastCamera cam, Transform centreCircle)
+    {
+        var gm = new GameObject("GameManager");
+        var manager = gm.AddComponent<AFLGameManager>();
+        manager.ball = ball;
+        manager.cam = cam;
+        manager.centreCircle = centreCircle;
+        manager.userTeam = AFLPlayer.Team.Home;
+
+        // AFLBall.playerMask has no field-initializer default (unlike
+        // groundMask, which does — both narrowed to the real dedicated
+        // layers now that they exist, rather than the old single-Default
+        // shortcut.
+        ball.playerMask = 1 << _playerLayer;
+        ball.groundMask = 1 << _groundLayer;
+    }
+
+    // Standard pattern for programmatically registering a Tags & Layers
+    // entry — layers 0-7 are Unity's reserved built-ins, user layers start
+    // at 8. Reuses an existing slot with a matching name if this method
+    // has already run once for the same project (idempotent across
+    // repeated builds).
+    static int EnsureLayer(string name)
+    {
+        var tagManagerAssets = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/TagManager.asset");
+        var tagManager = new SerializedObject(tagManagerAssets[0]);
+        var layersProp = tagManager.FindProperty("layers");
+
+        for (int i = 8; i < layersProp.arraySize; i++)
+        {
+            if (layersProp.GetArrayElementAtIndex(i).stringValue == name) return i;
+        }
+        for (int i = 8; i < layersProp.arraySize; i++)
+        {
+            var sp = layersProp.GetArrayElementAtIndex(i);
+            if (string.IsNullOrEmpty(sp.stringValue))
+            {
+                sp.stringValue = name;
+                tagManager.ApplyModifiedPropertiesWithoutUndo();
+                AssetDatabase.SaveAssets();
+                return i;
+            }
+        }
+        throw new System.Exception("No free layer slots available for '" + name + "'");
+    }
+
+    static void BuildLighting()
+    {
+        var lightGo = new GameObject("Directional Light");
+        var light = lightGo.AddComponent<Light>();
+        light.type = LightType.Directional;
+        light.intensity = 1.1f;
+        lightGo.transform.rotation = Quaternion.Euler(55, -30, 0);
+    }
+
+    static Material SolidColorMaterial(Color color)
+    {
+        var mat = new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard"));
+        mat.color = color;
+        return mat;
+    }
+}
