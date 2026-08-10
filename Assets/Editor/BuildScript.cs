@@ -27,7 +27,11 @@ public static class BuildScript
 
     public static void PerformWebGLBuild()
     {
-        PlayerSettings.productName = "Mount Duneed Cats AFL";
+        // Real trademark fix (2026-08-10, direct request): "AFL" is the
+        // Australian Football League's trademarked name — same category of
+        // risk as the earlier "Chaotic Sports" rename away from "Olympics".
+        // "Footy" is the generic/colloquial term for the sport, not a mark.
+        PlayerSettings.productName = "Mount Duneed Cats Footy";
         PlayerSettings.WebGL.template = "PROJECT:Responsive";
 
         AssetDatabase.Refresh(); // pick up any newly-added model/texture files before the Build* calls load them
@@ -59,20 +63,23 @@ public static class BuildScript
         // enough to prove the game works." 3 per side (matches the earlier
         // ruck/rover+forward+defender sizing), each side's own model tinted
         // so Home vs Away reads clearly despite reusing one mesh 3×.
-        var homeTint = new Color(0.55f, 0.75f, 1f);   // cool blue — Home
-        var awayTint = new Color(1f, 0.6f, 0.55f);    // warm red — Away
+        var homeTint = new Color(0.35f, 0.6f, 1f);    // cool blue — Home
+        var awayTint = new Color(1f, 0.4f, 0.35f);    // warm red — Away
 
-        var croc = BuildPlayer("HomeCroc1", AFLPlayer.Team.Home, new Vector3(0, 1, -4),
+        // Wider spread than the original spawn spots — from the (now
+        // closer/lower, see AFLBroadcastCamera) follow camera, the old
+        // tighter cluster read as characters standing on top of each other.
+        var croc = BuildPlayer("HomeCroc1", AFLPlayer.Team.Home, new Vector3(0, 1, -5),
             "Assets/Models/CrocModel3DAI/CrocModel.glb", isUser: true, attackingGoal: null, tint: homeTint);
-        BuildPlayer("HomeCroc2", AFLPlayer.Team.Home, new Vector3(-4, 1, -6),
+        BuildPlayer("HomeCroc2", AFLPlayer.Team.Home, new Vector3(-6, 1, -8),
             "Assets/Models/CrocModel3DAI/CrocModel.glb", isUser: false, attackingGoal: goalNorth, tint: homeTint);
-        BuildPlayer("HomeCroc3", AFLPlayer.Team.Home, new Vector3(4, 1, -7),
+        BuildPlayer("HomeCroc3", AFLPlayer.Team.Home, new Vector3(6, 1, -9),
             "Assets/Models/CrocModel3DAI/CrocModel.glb", isUser: false, attackingGoal: goalNorth, tint: homeTint);
-        BuildPlayer("AwayRoo1", AFLPlayer.Team.Away, new Vector3(0, 1, 4),
+        BuildPlayer("AwayRoo1", AFLPlayer.Team.Away, new Vector3(0, 1, 5),
             "Assets/Models/RooModel3DAI/RooModel.glb", isUser: false, attackingGoal: goalSouth, tint: awayTint);
-        BuildPlayer("AwayRoo2", AFLPlayer.Team.Away, new Vector3(-4, 1, 6),
+        BuildPlayer("AwayRoo2", AFLPlayer.Team.Away, new Vector3(-6, 1, 8),
             "Assets/Models/RooModel3DAI/RooModel.glb", isUser: false, attackingGoal: goalSouth, tint: awayTint);
-        BuildPlayer("AwayRoo3", AFLPlayer.Team.Away, new Vector3(4, 1, 7),
+        BuildPlayer("AwayRoo3", AFLPlayer.Team.Away, new Vector3(6, 1, 9),
             "Assets/Models/RooModel3DAI/RooModel.glb", isUser: false, attackingGoal: goalSouth, tint: awayTint);
 
         var cam = BuildCamera(croc.transform, ball);
@@ -261,23 +268,21 @@ public static class BuildScript
         // fallback for OBJ-based models, harmless no-op when a GLB's folder
         // has no loose PNG.
 
-        // Team tint: since the same crocodile/kangaroo mesh is reused 3×
-        // per side, a light multiply-tint on each renderer's own material
-        // instance (not the shared imported asset) is what makes Home vs
-        // Away readable at a glance without needing distinct character art
-        // for every roster slot.
-        if (tint.HasValue)
-        {
-            foreach (var mr in instance.GetComponentsInChildren<MeshRenderer>())
-            {
-                var mat = new Material(mr.sharedMaterial);
-                Color baseColor = mat.HasProperty("_BaseColor") ? mat.GetColor("_BaseColor") : mat.color;
-                Color blended = Color.Lerp(baseColor, tint.Value, 0.35f);
-                if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", blended);
-                mat.color = blended;
-                mr.sharedMaterial = mat;
-            }
-        }
+        // Team tint: DEFERRED, not implemented (2026-08-10). Tried setting
+        // the GLB material's real base-tint property directly
+        // ("baseColorFactor" on glTFast's "glTF/PbrMetallicRoughness"
+        // shader, since this project has no URP/custom SRP active) —
+        // confirmed correct at build time (read back byte-for-byte right
+        // after SetColor) but invisible in the actual running WebGL build.
+        // Also tried rebuilding the material on Unity's own "Standard"
+        // shader with the same extracted texture — also had no visible
+        // effect for a reason not yet root-caused, despite that exact
+        // shader fallback rendering correctly elsewhere in this build
+        // (SolidColorMaterial's field/goalpost colors). Rather than ship
+        // more unverified guessing, leaving characters on their original
+        // imported material — Home/Away are still distinguishable via the
+        // HUD scoreboard and which player you're controlling.
+        _ = tint; // parameter kept for when this gets revisited
     }
 
     static AFLPlayer BuildPlayer(string name, AFLPlayer.Team team, Vector3 position,
@@ -323,7 +328,10 @@ public static class BuildScript
         // CharacterController as an obstruction and pulls the camera in
         // against their back.
         rig.collisionMask = 1 << _groundLayer;
-        cameraGo.transform.position = followTarget.position + new Vector3(0, 2.6f, -7.5f);
+        // Matches AFLBroadcastCamera's own distance/height defaults so
+        // there's no jarring snap on the very first frame before
+        // SmoothDamp converges.
+        cameraGo.transform.position = followTarget.position + new Vector3(0, 1.9f, -6f);
 
         return rig;
     }

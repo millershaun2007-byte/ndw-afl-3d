@@ -15,9 +15,15 @@ namespace AFL
 
         [Header("Framing")]
         public Vector3 pivotOffset = new Vector3(0f, 1.55f, 0f);
-        public float distance = 7.5f;
-        public float height = 2.6f;
-        [Range(0f, 1f)] public float ballBias = 0.35f;      // lean toward the ball in flight
+        // Polish pass (2026-08-10): pulled closer and lower — the original
+        // 7.5/2.6/pitch-14 combo read as an elevated "blimp cam" (verified
+        // via a real screenshot: horizon high in frame, characters small
+        // and centrally clustered). This sits closer to a real broadcast
+        // over-the-shoulder angle without losing the wide field-awareness
+        // the follow camera needs.
+        public float distance = 6f;
+        public float height = 1.9f;
+        [Range(0f, 1f)] public float ballBias = 0.4f;      // lean toward the ball in flight
         public float ballBiasMaxDistance = 45f;
 
         [Header("Feel")]
@@ -40,7 +46,7 @@ namespace AFL
         public float collisionBuffer = 0.25f;
 
         Camera _cam;
-        float _yaw, _pitch = 14f;
+        float _yaw, _pitch = 8f;
         Vector3 _posVel, _smoothPivot, _pivotVel;
         float _currentDistance;
 
