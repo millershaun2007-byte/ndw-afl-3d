@@ -25,157 +25,6 @@ public static class BuildScript
     // physics matrix below without touching Ball×Ground).
     static int _groundLayer, _playerLayer, _ballLayer;
 
-    // Diagnostic-only: isolates whether the "level0 is corrupted" WASM
-    // runtime error (hit 2026-08-10 on every real build of the full scene,
-    // including from a completely clean Library) is caused by something in
-    // the AFLGameKit.cs scene content, or something more fundamental about
-    // this project's build config. Builds only field+camera+light — no
-    // AFLPlayer/AFLBall/AFLGameManager/AFLBotBrain components anywhere.
-    public static void PerformMinimalDiagnosticBuild()
-    {
-        PlayerSettings.productName = "Mount Duneed Cats AFL";
-        PlayerSettings.WebGL.template = "PROJECT:Responsive";
-        AssetDatabase.Refresh();
-
-        var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-        BuildField();
-        var camGo = new GameObject("Main Camera");
-        var cam = camGo.AddComponent<Camera>();
-        cam.tag = "MainCamera";
-        camGo.transform.position = new Vector3(0, 5, -10);
-        camGo.transform.LookAt(Vector3.zero);
-        BuildLighting();
-
-        System.IO.Directory.CreateDirectory("Assets/Scenes");
-        DoMinimalDiagnosticBuildTail(scene);
-    }
-
-    // Stage 2: full scene (players/ball/goals/managers) but with
-    // SkipCharacterModelsForDiagnostic true — isolates whether the GLB
-    // character imports are the corruption source vs the AFL component
-    // structure itself.
-    public static void PerformNoModelsDiagnosticBuild()
-    {
-        SkipCharacterModelsForDiagnostic = true;
-        PerformWebGLBuild();
-    }
-
-    // Stage 3: field + ball (AFLBall, Rigidbody, CapsuleCollider) + camera
-    // only — no players, no goals, no AFLGameManager. Isolates whether
-    // AFLBall itself is the corruption source.
-    public static void PerformBallOnlyDiagnosticBuild()
-    {
-        PlayerSettings.productName = "Mount Duneed Cats AFL";
-        PlayerSettings.WebGL.template = "PROJECT:Responsive";
-        AssetDatabase.Refresh();
-
-        _groundLayer = EnsureLayer("Ground");
-        _playerLayer = EnsureLayer("Player");
-        _ballLayer = EnsureLayer("Ball");
-        Physics.IgnoreLayerCollision(_ballLayer, _playerLayer, true);
-
-        var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-        BuildField();
-        var ball = BuildBall();
-        ball.playerMask = 1 << _playerLayer;
-        ball.groundMask = 1 << _groundLayer;
-        var camGo = new GameObject("Main Camera");
-        var cam = camGo.AddComponent<Camera>();
-        cam.tag = "MainCamera";
-        camGo.transform.position = new Vector3(0, 5, -10);
-        camGo.transform.LookAt(Vector3.zero);
-        BuildLighting();
-
-        System.IO.Directory.CreateDirectory("Assets/Scenes");
-        DoMinimalDiagnosticBuildTail(scene);
-    }
-
-    // Stage 4: field + a plain Rigidbody+CapsuleCollider sphere (NO AFLBall
-    // script attached at all) + camera. Isolates whether the corruption is
-    // about the AFLBall MonoBehaviour class specifically, or just having
-    // any dynamic Rigidbody object in the scene.
-    public static void PerformPlainRigidbodyDiagnosticBuild()
-    {
-        PlayerSettings.productName = "Mount Duneed Cats AFL";
-        PlayerSettings.WebGL.template = "PROJECT:Responsive";
-        AssetDatabase.Refresh();
-
-        var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-        BuildField();
-
-        var ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        ball.name = "PlainBall";
-        ball.transform.position = new Vector3(0, 1.2f, 0);
-        ball.transform.localScale = new Vector3(0.4f, 0.28f, 0.4f);
-        Object.DestroyImmediate(ball.GetComponent<SphereCollider>());
-        var capsule = ball.AddComponent<CapsuleCollider>();
-        capsule.direction = 2;
-        capsule.radius = 0.5f;
-        capsule.height = 1.2f;
-        ball.AddComponent<Rigidbody>();
-
-        var camGo = new GameObject("Main Camera");
-        var cam = camGo.AddComponent<Camera>();
-        cam.tag = "MainCamera";
-        camGo.transform.position = new Vector3(0, 5, -10);
-        camGo.transform.LookAt(Vector3.zero);
-        BuildLighting();
-
-        System.IO.Directory.CreateDirectory("Assets/Scenes");
-        DoMinimalDiagnosticBuildTail(scene);
-    }
-
-    // Stage 5: plain rigidbody ball + a trivial DiagTest component whose
-    // only field is `LayerMask testMask = ~0;` — tests whether the `~0`
-    // LayerMask field-initializer pattern itself is what corrupts scene
-    // serialization.
-    public static void PerformLayerMaskDiagnosticBuild()
-    {
-        PlayerSettings.productName = "Mount Duneed Cats AFL";
-        PlayerSettings.WebGL.template = "PROJECT:Responsive";
-        AssetDatabase.Refresh();
-
-        var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-        BuildField();
-
-        var ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        ball.name = "PlainBall";
-        ball.transform.position = new Vector3(0, 1.2f, 0);
-        ball.AddComponent<DiagTest>();
-
-        var camGo = new GameObject("Main Camera");
-        var cam = camGo.AddComponent<Camera>();
-        cam.tag = "MainCamera";
-        camGo.transform.position = new Vector3(0, 5, -10);
-        camGo.transform.LookAt(Vector3.zero);
-        BuildLighting();
-
-        System.IO.Directory.CreateDirectory("Assets/Scenes");
-        DoMinimalDiagnosticBuildTail(scene);
-    }
-
-    static void DoMinimalDiagnosticBuildTail(UnityEngine.SceneManagement.Scene scene)
-    {
-        EditorSceneManager.SaveScene(scene, "Assets/Scenes/AflField.unity");
-        EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene("Assets/Scenes/AflField.unity", true) };
-
-        var outputPath = System.Environment.GetEnvironmentVariable("NDW_BUILD_OUTPUT") ?? "Build/WebGL";
-        System.IO.Directory.CreateDirectory(outputPath);
-        PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Gzip;
-        PlayerSettings.WebGL.decompressionFallback = true;
-
-        var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
-        {
-            scenes = new[] { "Assets/Scenes/AflField.unity" },
-            locationPathName = outputPath,
-            target = BuildTarget.WebGL,
-            options = BuildOptions.None
-        });
-        var summary = report.summary;
-        Debug.Log($"NDW_BUILD_RESULT={summary.result} totalSize={summary.totalSize} errors={summary.totalErrors} warnings={summary.totalWarnings}");
-        if (summary.result != UnityEditor.Build.Reporting.BuildResult.Succeeded) EditorApplication.Exit(1);
-    }
-
     public static void PerformWebGLBuild()
     {
         PlayerSettings.productName = "Mount Duneed Cats AFL";
@@ -200,28 +49,31 @@ public static class BuildScript
         var goalSouth = BuildGoal(new Vector3(0, 0, -20), Quaternion.Euler(0, 180, 0), "GoalSouth", AFLPlayer.Team.Away);
         var ball = BuildBall();
 
-        // First playable slice: 3v3 (matches the "ruck/rover + forward +
-        // defender, 3 on 3" number from the earlier scoping discussion),
-        // using six of the strongest, gameplay-appropriate characters from
-        // the 24-character library rather than just reusing one model per
-        // side — crocodile/kangaroo/emu were already proven importing and
-        // texturing correctly; dragon/lion/unicorn are the next-best batch
-        // (dragon was explicitly built "arms and legs for the footy", lion
-        // and unicorn both came out clean with no logo issues), freshly
-        // compressed with the same weld/simplify/resize pipeline. Only the
-        // crocodile is user-controlled; everyone else runs AFLBotBrain.
-        var croc = BuildPlayer("HomeCroc", AFLPlayer.Team.Home, new Vector3(0, 1, -4),
-            "Assets/Models/CrocModel3DAI/CrocModel.glb", isUser: true, attackingGoal: null);
-        var roo = BuildPlayer("HomeRoo", AFLPlayer.Team.Home, new Vector3(-4, 1, -6),
-            "Assets/Models/RooModel3DAI/RooModel.glb", isUser: false, attackingGoal: goalNorth);
-        var dragon = BuildPlayer("HomeDragon", AFLPlayer.Team.Home, new Vector3(4, 1, -7),
-            "Assets/Models/DragonModel3DAI/DragonModel.glb", isUser: false, attackingGoal: goalNorth);
-        var emu = BuildPlayer("AwayEmu", AFLPlayer.Team.Away, new Vector3(0, 1, 4),
-            "Assets/Models/EmuModel3DAI/EmuModel.glb", isUser: false, attackingGoal: goalSouth);
-        var lion = BuildPlayer("AwayLion", AFLPlayer.Team.Away, new Vector3(-4, 1, 6),
-            "Assets/Models/LionModel3DAI/LionModel.glb", isUser: false, attackingGoal: goalSouth);
-        var unicorn = BuildPlayer("AwayUnicorn", AFLPlayer.Team.Away, new Vector3(4, 1, 7),
-            "Assets/Models/UnicornModel3DAI/UnicornModel.glb", isUser: false, attackingGoal: goalSouth);
+        // Roster cut down to 2 models per direct review feedback (2026-08-10):
+        // the marking contest needs a character that can legibly jump and
+        // reach, which rules out anything not bipedal/upright with clearly
+        // separated arms. Of the six originally wired in, only crocodile and
+        // kangaroo qualify — dragon's wings clip other players in a pack,
+        // and lion/unicorn are quadruped-style models not rebuilt upright.
+        // "Build two characters, not six. One per team, recoloured, is
+        // enough to prove the game works." 3 per side (matches the earlier
+        // ruck/rover+forward+defender sizing), each side's own model tinted
+        // so Home vs Away reads clearly despite reusing one mesh 3×.
+        var homeTint = new Color(0.55f, 0.75f, 1f);   // cool blue — Home
+        var awayTint = new Color(1f, 0.6f, 0.55f);    // warm red — Away
+
+        var croc = BuildPlayer("HomeCroc1", AFLPlayer.Team.Home, new Vector3(0, 1, -4),
+            "Assets/Models/CrocModel3DAI/CrocModel.glb", isUser: true, attackingGoal: null, tint: homeTint);
+        BuildPlayer("HomeCroc2", AFLPlayer.Team.Home, new Vector3(-4, 1, -6),
+            "Assets/Models/CrocModel3DAI/CrocModel.glb", isUser: false, attackingGoal: goalNorth, tint: homeTint);
+        BuildPlayer("HomeCroc3", AFLPlayer.Team.Home, new Vector3(4, 1, -7),
+            "Assets/Models/CrocModel3DAI/CrocModel.glb", isUser: false, attackingGoal: goalNorth, tint: homeTint);
+        BuildPlayer("AwayRoo1", AFLPlayer.Team.Away, new Vector3(0, 1, 4),
+            "Assets/Models/RooModel3DAI/RooModel.glb", isUser: false, attackingGoal: goalSouth, tint: awayTint);
+        BuildPlayer("AwayRoo2", AFLPlayer.Team.Away, new Vector3(-4, 1, 6),
+            "Assets/Models/RooModel3DAI/RooModel.glb", isUser: false, attackingGoal: goalSouth, tint: awayTint);
+        BuildPlayer("AwayRoo3", AFLPlayer.Team.Away, new Vector3(4, 1, 7),
+            "Assets/Models/RooModel3DAI/RooModel.glb", isUser: false, attackingGoal: goalSouth, tint: awayTint);
 
         var cam = BuildCamera(croc.transform, ball);
         BuildManagers(ball, cam, centreCircle);
@@ -363,12 +215,8 @@ public static class BuildScript
     // (Unity's OBJ/GLB importers don't reliably auto-link), colliders
     // stripped off the visual since the CharacterController on the parent
     // is the only collider this character needs.
-    // Diagnostic-only toggle, see PerformMinimalDiagnosticBuild's comment.
-    public static bool SkipCharacterModelsForDiagnostic = false;
-
-    static void BuildCharacterModel3D(Transform parent, string modelPath)
+    static void BuildCharacterModel3D(Transform parent, string modelPath, Color? tint)
     {
-        if (SkipCharacterModelsForDiagnostic) return;
         var prefabRoot = AssetDatabase.LoadAssetAtPath<GameObject>(modelPath);
         if (prefabRoot == null)
         {
@@ -396,14 +244,32 @@ public static class BuildScript
             if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", diffuseTex);
             foreach (var mr in instance.GetComponentsInChildren<MeshRenderer>()) mr.sharedMaterial = mat;
         }
-        // GLB imports (all three models used here) carry their own
-        // embedded materials/textures via glTFast already — the PNG-scan
-        // above is a fallback for the OBJ-based models from the old
-        // roster, harmless no-op when a GLB's folder has no loose PNG.
+        // GLB imports (both models used here) carry their own embedded
+        // materials/textures via glTFast already — the PNG-scan above is a
+        // fallback for OBJ-based models, harmless no-op when a GLB's folder
+        // has no loose PNG.
+
+        // Team tint: since the same crocodile/kangaroo mesh is reused 3×
+        // per side, a light multiply-tint on each renderer's own material
+        // instance (not the shared imported asset) is what makes Home vs
+        // Away readable at a glance without needing distinct character art
+        // for every roster slot.
+        if (tint.HasValue)
+        {
+            foreach (var mr in instance.GetComponentsInChildren<MeshRenderer>())
+            {
+                var mat = new Material(mr.sharedMaterial);
+                Color baseColor = mat.HasProperty("_BaseColor") ? mat.GetColor("_BaseColor") : mat.color;
+                Color blended = Color.Lerp(baseColor, tint.Value, 0.35f);
+                if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", blended);
+                mat.color = blended;
+                mr.sharedMaterial = mat;
+            }
+        }
     }
 
     static AFLPlayer BuildPlayer(string name, AFLPlayer.Team team, Vector3 position,
-        string modelPath, bool isUser, Transform attackingGoal)
+        string modelPath, bool isUser, Transform attackingGoal, Color? tint = null)
     {
         var go = new GameObject(name);
         go.layer = _playerLayer;
@@ -417,7 +283,7 @@ public static class BuildScript
         p.team = team;
         p.isUserControlled = isUser;
 
-        BuildCharacterModel3D(go.transform, modelPath);
+        BuildCharacterModel3D(go.transform, modelPath, tint);
 
         if (!isUser)
         {
@@ -460,7 +326,7 @@ public static class BuildScript
         manager.userTeam = AFLPlayer.Team.Home;
 
         // AFLBall.playerMask has no field-initializer default (unlike
-        // groundMask, which does — both narrowed to the real dedicated
+        // groundMask, which does) — both narrowed to the real dedicated
         // layers now that they exist, rather than the old single-Default
         // shortcut.
         ball.playerMask = 1 << _playerLayer;
