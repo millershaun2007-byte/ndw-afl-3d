@@ -79,6 +79,11 @@ public static class BuildScript
         BuildManagers(ball, cam, centreCircle);
         BuildLighting();
 
+        // Name must stay "TouchBridge" — the HTML control bar targets it by
+        // name via unityInstance.SendMessage('TouchBridge', ...).
+        var touchBridgeGo = new GameObject("TouchBridge");
+        touchBridgeGo.AddComponent<AFLTouchBridge>();
+
         System.IO.Directory.CreateDirectory("Assets/Scenes");
         EditorSceneManager.SaveScene(scene, "Assets/Scenes/AflField.unity");
         EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene("Assets/Scenes/AflField.unity", true) };

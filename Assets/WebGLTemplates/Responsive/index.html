@@ -15,28 +15,37 @@
       #app { display: flex; flex-direction: column; width: 100%; height: 100%; background: #1a2f1a; }
       #canvas-wrap { flex: 1 1 auto; min-height: 0; position: relative; }
       #unity-canvas { width: 100%; height: 100%; display: block; background: {{{ BACKGROUND_FILENAME ? 'url(\'Build/' + BACKGROUND_FILENAME.replace(/'/g, '%27') + '\') center / cover' : BACKGROUND_COLOR }}}; }
-      #control-bar { flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
-        padding: 10px clamp(8px, 3vw, 18px); gap: clamp(8px, 3vw, 14px); background: #16241a;
+      #control-bar { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
+        padding: 10px clamp(8px, 3vw, 18px); gap: clamp(8px, 2vw, 14px); background: #16241a;
         border-top: 2px solid rgba(255,255,255,0.08); }
-      /* Real design change 2026-08-10 — the analog joystick was removed
-         entirely (Shaun's explicit call: it stayed the single clearest
-         unfixable problem across many real attempts — direction bugs,
+      /* Real design change 2026-08-10 — this game's earlier version tried a
+         freeform drag joystick and it was the single clearest unfixable
+         control problem across many real attempts (direction bugs,
          "stumbling around," genuinely too hard for a kid to aim
-         precisely). Movement is now a single hold-to-run MOVE button —
-         each side only ever advances straight down its own fixed lane
-         toward its own goal. No steering exists anywhere in this game
-         anymore. TO BALL (steer-to-ball assist) is gone too, since
-         there's no more steering left to assist. */
-      .action-btn { width: clamp(44px, 12vw, 88px); height: clamp(44px, 12vw, 88px); border-radius: 16px;
-        border: 2px solid rgba(255,255,255,0.35); color: #fff; font-size: clamp(0.58rem, 1.9vw, 1.05rem);
+         precisely). This rewrite needs real 2D movement (no more fixed
+         lane), so instead of bringing the joystick back, movement is a
+         D-pad — four discrete, combinable directions, no angle-aiming
+         required. Matches the app's own existing convention (Creature
+         Chaos's DPad, see CLAUDE.md) rather than inventing a new pattern. */
+      #dpad { position: relative; width: clamp(120px, 34vw, 168px); height: clamp(120px, 34vw, 168px); flex-shrink: 0; }
+      .dpad-btn { position: absolute; width: clamp(40px, 11vw, 56px); height: clamp(40px, 11vw, 56px);
+        background: #1f8f3d; border: 2px solid rgba(255,255,255,0.35); border-radius: 12px; color: #fff;
+        font-size: clamp(1rem, 3vw, 1.4rem); display: flex; align-items: center; justify-content: center;
+        touch-action: none; user-select: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+      .dpad-btn.active { background: #3fc463; }
+      .dpad-up    { top: 0; left: 50%; transform: translateX(-50%); }
+      .dpad-down  { bottom: 0; left: 50%; transform: translateX(-50%); }
+      .dpad-left  { left: 0; top: 50%; transform: translateY(-50%); }
+      .dpad-right { right: 0; top: 50%; transform: translateY(-50%); }
+      .action-btn { width: clamp(48px, 13vw, 76px); height: clamp(48px, 13vw, 76px); border-radius: 16px;
+        border: 2px solid rgba(255,255,255,0.35); color: #fff; font-size: clamp(0.5rem, 1.7vw, 0.85rem);
         font-weight: 800; display: flex; align-items: center; justify-content: center; touch-action: none;
-        user-select: none; cursor: pointer; -webkit-tap-highlight-color: transparent; flex-shrink: 0; }
-      #move-btn { background: #1f8f3d; }
+        user-select: none; cursor: pointer; -webkit-tap-highlight-color: transparent; flex-shrink: 0; text-align: center; }
       #jump-btn { background: #2fae4d; }
       #kick-btn { background: #e8720f; }
-      #ground-btn { background: #8a5a2b; font-size: clamp(0.55rem, 1.7vw, 0.9rem); }
-      #handball-btn { background: #3a7fd6; font-size: clamp(0.5rem, 1.6vw, 0.85rem); }
-      #action-row { display: flex; gap: clamp(5px, 2vw, 14px); }
+      #handball-btn { background: #3a7fd6; }
+      #tackle-btn { background: #b23a5a; }
+      #action-row { display: flex; gap: clamp(5px, 1.6vw, 10px); }
     </style>
   </head>
   <body>
@@ -45,12 +54,17 @@
         <canvas id="unity-canvas" width={{{ WIDTH }}} height={{{ HEIGHT }}} tabindex="-1"></canvas>
       </div>
       <div id="control-bar">
+        <div id="dpad">
+          <div id="dpad-up" class="dpad-btn dpad-up">▲</div>
+          <div id="dpad-left" class="dpad-btn dpad-left">◀</div>
+          <div id="dpad-right" class="dpad-btn dpad-right">▶</div>
+          <div id="dpad-down" class="dpad-btn dpad-down">▼</div>
+        </div>
         <div id="action-row">
-          <div id="move-btn" class="action-btn">MOVE</div>
-          <div id="jump-btn" class="action-btn">JUMP</div>
-          <div id="ground-btn" class="action-btn">GROUND</div>
-          <div id="handball-btn" class="action-btn">HANDBALL</div>
+          <div id="jump-btn" class="action-btn">MARK</div>
           <div id="kick-btn" class="action-btn">KICK</div>
+          <div id="handball-btn" class="action-btn">H-BALL</div>
+          <div id="tackle-btn" class="action-btn">TACKLE</div>
         </div>
       </div>
     </div>
@@ -95,37 +109,51 @@
       });
 
       // ---- Real HTML control bar, talking to Unity via SendMessage ----
-      // (TouchBridge.cs, GameObject name "TouchBridge" — must match)
+      // (AFLTouchBridge.cs, GameObject name "TouchBridge" — must match)
       function sendToUnity(method, value) {
         if (unityInstanceRef) unityInstanceRef.SendMessage('TouchBridge', method, value);
       }
 
-      // Real design change 2026-08-10 — held (not tapped), same pattern as
-      // KICK: while pressed, the player advances straight down their own
-      // fixed lane toward their own goal. Released, they stop. No
-      // steering/direction to send at all anymore — the joystick this
-      // replaced was the single clearest unfixable control problem across
-      // many real attempts.
-      var moveBtn = document.getElementById('move-btn');
-      moveBtn.addEventListener('pointerdown', function (e) { e.preventDefault(); sendToUnity('SetMoveForwardHeld', '1'); });
-      moveBtn.addEventListener('pointerup', function () { sendToUnity('SetMoveForwardHeld', '0'); });
-      moveBtn.addEventListener('pointercancel', function () { sendToUnity('SetMoveForwardHeld', '0'); });
-      moveBtn.addEventListener('pointerleave', function () { sendToUnity('SetMoveForwardHeld', '0'); });
+      // D-pad: each direction is a discrete held button (not a drag), so
+      // there's no angle to aim — up to 2 opposite-adjacent directions can
+      // be held together for a diagonal, same as a real game-pad D-pad.
+      // Sends the combined (x,y) vector to AFLInput on every change, which
+      // AFLPlayer converts into camera-relative 3D movement exactly like
+      // WASD already does — this is an input scheme change, not a change
+      // to the game itself (still fully 3D).
+      var dpadState = { up: false, down: false, left: false, right: false };
+      function updateDpadVector() {
+        var x = (dpadState.right ? 1 : 0) - (dpadState.left ? 1 : 0);
+        var y = (dpadState.up ? 1 : 0) - (dpadState.down ? 1 : 0);
+        sendToUnity('SetMoveVector', x + ',' + y);
+      }
+      function bindDpad(id, key) {
+        var el = document.getElementById(id);
+        el.addEventListener('pointerdown', function (e) { e.preventDefault(); dpadState[key] = true; el.classList.add('active'); updateDpadVector(); });
+        function release() { dpadState[key] = false; el.classList.remove('active'); updateDpadVector(); }
+        el.addEventListener('pointerup', release);
+        el.addEventListener('pointercancel', release);
+        el.addEventListener('pointerleave', release);
+      }
+      bindDpad('dpad-up', 'up');
+      bindDpad('dpad-down', 'down');
+      bindDpad('dpad-left', 'left');
+      bindDpad('dpad-right', 'right');
 
       var jumpBtn = document.getElementById('jump-btn');
-      jumpBtn.addEventListener('pointerdown', function (e) { e.preventDefault(); sendToUnity('QueueJump', '1'); });
+      jumpBtn.addEventListener('pointerdown', function (e) { e.preventDefault(); sendToUnity('MarkPressed', ''); });
 
       var kickBtn = document.getElementById('kick-btn');
       kickBtn.addEventListener('pointerdown', function (e) { e.preventDefault(); sendToUnity('SetKickHeld', '1'); });
-      kickBtn.addEventListener('pointerup', function () { sendToUnity('SetKickHeld', '0'); sendToUnity('QueueKickReleased', '1'); });
-      kickBtn.addEventListener('pointercancel', function () { sendToUnity('SetKickHeld', '0'); });
-      kickBtn.addEventListener('pointerleave', function () { sendToUnity('SetKickHeld', '0'); });
+      kickBtn.addEventListener('pointerup', function () { sendToUnity('KickReleased', ''); });
+      kickBtn.addEventListener('pointercancel', function () { sendToUnity('KickReleased', ''); });
+      kickBtn.addEventListener('pointerleave', function () { sendToUnity('KickReleased', ''); });
 
       var handballBtn = document.getElementById('handball-btn');
-      handballBtn.addEventListener('pointerdown', function (e) { e.preventDefault(); sendToUnity('QueueHandball', '1'); });
+      handballBtn.addEventListener('pointerdown', function (e) { e.preventDefault(); sendToUnity('HandballPressed', ''); });
 
-      var groundBtn = document.getElementById('ground-btn');
-      groundBtn.addEventListener('pointerdown', function (e) { e.preventDefault(); sendToUnity('QueueGroundPickup', '1'); });
+      var tackleBtn = document.getElementById('tackle-btn');
+      tackleBtn.addEventListener('pointerdown', function (e) { e.preventDefault(); sendToUnity('TacklePressed', ''); });
     </script>
   </body>
 </html>
