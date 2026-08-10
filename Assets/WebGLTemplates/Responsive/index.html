@@ -18,29 +18,17 @@
       #control-bar { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
         padding: 10px clamp(8px, 3vw, 18px); gap: clamp(8px, 2vw, 14px); background: #16241a;
         border-top: 2px solid rgba(255,255,255,0.08); }
-      /* Real design change 2026-08-10 — this game's earlier version tried a
-         freeform drag joystick and it was the single clearest unfixable
-         control problem across many real attempts (direction bugs,
-         "stumbling around," genuinely too hard for a kid to aim
-         precisely). This rewrite needs real 2D movement (no more fixed
-         lane), so instead of bringing the joystick back, movement is a
-         D-pad — four discrete, combinable directions, no angle-aiming
-         required. Matches the app's own existing convention (Creature
-         Chaos's DPad, see CLAUDE.md) rather than inventing a new pattern. */
-      #dpad { position: relative; width: clamp(120px, 34vw, 168px); height: clamp(120px, 34vw, 168px); flex-shrink: 0; }
-      .dpad-btn { position: absolute; width: clamp(40px, 11vw, 56px); height: clamp(40px, 11vw, 56px);
-        background: #1f8f3d; border: 2px solid rgba(255,255,255,0.35); border-radius: 12px; color: #fff;
-        font-size: clamp(1rem, 3vw, 1.4rem); display: flex; align-items: center; justify-content: center;
-        touch-action: none; user-select: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
-      .dpad-btn.active { background: #3fc463; }
-      .dpad-up    { top: 0; left: 50%; transform: translateX(-50%); }
-      .dpad-down  { bottom: 0; left: 50%; transform: translateX(-50%); }
-      .dpad-left  { left: 0; top: 50%; transform: translateY(-50%); }
-      .dpad-right { right: 0; top: 50%; transform: translateY(-50%); }
+      /* Real design change 2026-08-10, direct real-device report: the D-pad
+         "just doesn't work for this game" — same real-world finding that
+         earlier killed a freeform drag joystick ("too hard for a kid to
+         aim precisely"). Back to a single hold-to-run MOVE button — every
+         player only ever advances straight down their own fixed attack
+         lane (AFLPlayer.attackDir). No steering input exists at all. */
       .action-btn { width: clamp(48px, 13vw, 76px); height: clamp(48px, 13vw, 76px); border-radius: 16px;
         border: 2px solid rgba(255,255,255,0.35); color: #fff; font-size: clamp(0.5rem, 1.7vw, 0.85rem);
         font-weight: 800; display: flex; align-items: center; justify-content: center; touch-action: none;
         user-select: none; cursor: pointer; -webkit-tap-highlight-color: transparent; flex-shrink: 0; text-align: center; }
+      #move-btn { background: #1f8f3d; }
       #jump-btn { background: #2fae4d; }
       #kick-btn { background: #e8720f; }
       #handball-btn { background: #3a7fd6; }
@@ -54,13 +42,8 @@
         <canvas id="unity-canvas" width={{{ WIDTH }}} height={{{ HEIGHT }}} tabindex="-1"></canvas>
       </div>
       <div id="control-bar">
-        <div id="dpad">
-          <div id="dpad-up" class="dpad-btn dpad-up">▲</div>
-          <div id="dpad-left" class="dpad-btn dpad-left">◀</div>
-          <div id="dpad-right" class="dpad-btn dpad-right">▶</div>
-          <div id="dpad-down" class="dpad-btn dpad-down">▼</div>
-        </div>
         <div id="action-row">
+          <div id="move-btn" class="action-btn">MOVE</div>
           <div id="jump-btn" class="action-btn">MARK</div>
           <div id="kick-btn" class="action-btn">KICK</div>
           <div id="handball-btn" class="action-btn">H-BALL</div>
@@ -114,31 +97,13 @@
         if (unityInstanceRef) unityInstanceRef.SendMessage('TouchBridge', method, value);
       }
 
-      // D-pad: each direction is a discrete held button (not a drag), so
-      // there's no angle to aim — up to 2 opposite-adjacent directions can
-      // be held together for a diagonal, same as a real game-pad D-pad.
-      // Sends the combined (x,y) vector to AFLInput on every change, which
-      // AFLPlayer converts into camera-relative 3D movement exactly like
-      // WASD already does — this is an input scheme change, not a change
-      // to the game itself (still fully 3D).
-      var dpadState = { up: false, down: false, left: false, right: false };
-      function updateDpadVector() {
-        var x = (dpadState.right ? 1 : 0) - (dpadState.left ? 1 : 0);
-        var y = (dpadState.up ? 1 : 0) - (dpadState.down ? 1 : 0);
-        sendToUnity('SetMoveVector', x + ',' + y);
-      }
-      function bindDpad(id, key) {
-        var el = document.getElementById(id);
-        el.addEventListener('pointerdown', function (e) { e.preventDefault(); dpadState[key] = true; el.classList.add('active'); updateDpadVector(); });
-        function release() { dpadState[key] = false; el.classList.remove('active'); updateDpadVector(); }
-        el.addEventListener('pointerup', release);
-        el.addEventListener('pointercancel', release);
-        el.addEventListener('pointerleave', release);
-      }
-      bindDpad('dpad-up', 'up');
-      bindDpad('dpad-down', 'down');
-      bindDpad('dpad-left', 'left');
-      bindDpad('dpad-right', 'right');
+      // Held (not tapped): while pressed, the player advances straight
+      // down their own fixed lane. Released, they stop.
+      var moveBtn = document.getElementById('move-btn');
+      moveBtn.addEventListener('pointerdown', function (e) { e.preventDefault(); sendToUnity('SetMoveForwardHeld', '1'); });
+      moveBtn.addEventListener('pointerup', function () { sendToUnity('SetMoveForwardHeld', '0'); });
+      moveBtn.addEventListener('pointercancel', function () { sendToUnity('SetMoveForwardHeld', '0'); });
+      moveBtn.addEventListener('pointerleave', function () { sendToUnity('SetMoveForwardHeld', '0'); });
 
       var jumpBtn = document.getElementById('jump-btn');
       jumpBtn.addEventListener('pointerdown', function (e) { e.preventDefault(); sendToUnity('MarkPressed', ''); });

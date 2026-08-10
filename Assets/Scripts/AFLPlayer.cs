@@ -20,6 +20,14 @@ namespace AFL
         public Transform ballHold;          // empty at chest/hands
         public Transform handsAnchor;       // empty at top of reach
 
+        // Real design change (2026-08-10, direct real-device report): the
+        // free-2D D-pad "just doesn't work for this game" — same real-world
+        // finding that killed the earlier analog joystick. The
+        // user-controlled player now only ever advances straight down this
+        // fixed world-space direction (set at spawn to each team's own
+        // attacking end) while MoveForwardHeld is true — no steering.
+        public Vector3 attackDir = Vector3.forward;
+
         [Header("Movement")]
         public float walkSpeed = 3.4f;
         public float runSpeed = 7.0f;
@@ -109,19 +117,12 @@ namespace AFL
         // ---- input ---------------------------------------------------------
         void HandleInput()
         {
-            Vector2 mv = AFLInput.Move;
-            Vector3 camF = Vector3.forward, camR = Vector3.right;
-            if (_cam)
-            {
-                camF = Vector3.ProjectOnPlane(_cam.transform.forward, Vector3.up).normalized;
-                camR = Vector3.ProjectOnPlane(_cam.transform.right, Vector3.up).normalized;
-            }
-            Vector3 wish = (camF * mv.y + camR * mv.x);
-            if (wish.sqrMagnitude > 1f) wish.Normalize();
-
-            float target = AFLInput.Sprint ? sprintSpeed : (wish.magnitude > 0.6f ? runSpeed : walkSpeed);
+            // No steering — hold to advance straight down attackDir,
+            // release to stop. See attackDir's own comment for why.
+            bool moving = AFLInput.MoveForwardHeld;
+            float target = AFLInput.Sprint ? sprintSpeed : runSpeed;
             if (HasBall) target *= 0.94f;                       // carrying costs a touch
-            SetMoveIntent(wish, target);
+            SetMoveIntent(moving ? attackDir : Vector3.zero, target);
 
             if (AFLInput.MarkDown) AttemptContest();
             if (AFLInput.Tackle)   AttemptTackle();

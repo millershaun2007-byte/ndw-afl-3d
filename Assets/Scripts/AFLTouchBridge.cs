@@ -1,21 +1,19 @@
-using System.Globalization;
 using UnityEngine;
 
 namespace AFL
 {
     // =======================================================================
-    //  TOUCH BRIDGE  — HTML D-pad + action buttons -> AFLInput
+    //  TOUCH BRIDGE  — HTML control bar -> AFLInput
     // =======================================================================
     // GameObject name must stay "TouchBridge" — the HTML control bar
     // (Assets/WebGLTemplates/Responsive/index.html) targets it by name via
     // unityInstance.SendMessage('TouchBridge', method, value).
     //
-    // A D-pad, not an analog joystick, by deliberate choice: an earlier
-    // version of this game shipped a freeform drag joystick and it was the
-    // single clearest unfixable control problem across many real attempts
-    // — precise angle-aiming is genuinely hard for a young kid on a phone
-    // screen. Four discrete directions (combinable for diagonals) give real
-    // 2D movement without needing that precision.
+    // Single hold-to-move button, not a D-pad or joystick — real-device
+    // testing found the D-pad "just doesn't work for this game" (matching
+    // the earlier, separate finding that an analog joystick was
+    // unworkable). Every player only ever advances straight down their own
+    // fixed attack lane (AFLPlayer.attackDir) while held.
     [AddComponentMenu("AFL/AFL Touch Bridge")]
     public class AFLTouchBridge : MonoBehaviour
     {
@@ -24,15 +22,7 @@ namespace AFL
             AFLInput.ClearOneShotTouchFlags();
         }
 
-        // "x,y", each -1/0/1 — the D-pad's currently-held direction combo.
-        public void SetMoveVector(string csv)
-        {
-            var parts = csv.Split(',');
-            if (parts.Length != 2) return;
-            float x = float.Parse(parts[0], CultureInfo.InvariantCulture);
-            float y = float.Parse(parts[1], CultureInfo.InvariantCulture);
-            AFLInput.TouchMove = new Vector2(x, y);
-        }
+        public void SetMoveForwardHeld(string v) { AFLInput.TouchMoveForward = v == "1"; }
 
         public void MarkPressed(string _) { AFLInput.TouchMarkDown = true; }
 

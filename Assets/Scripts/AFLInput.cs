@@ -12,22 +12,22 @@ namespace AFL
     // the single point of truth, matching its own header comment above.
     public static class AFLInput
     {
-        internal static Vector2 TouchMove;
+        internal static bool TouchMoveForward;
         internal static bool TouchMarkDown;   // one-shot, cleared after one frame
         internal static bool TouchKickHeld;
         internal static bool TouchKickUp;     // one-shot
         internal static bool TouchHandball;   // one-shot
         internal static bool TouchTackle;     // one-shot
 
-        public static Vector2 Move
-        {
-            get
-            {
-                Vector2 kb = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
-                Vector2 combined = kb + TouchMove;
-                return combined.sqrMagnitude > 1f ? combined.normalized : combined;
-            }
-        }
+        // Real design change (2026-08-10, direct real-device report): a
+        // free-aim D-pad "just doesn't work for this game" — matches the
+        // same real-device finding that killed the earlier analog joystick
+        // ("too hard for a kid to aim precisely"). Movement is a single
+        // hold-to-run button again: each player always advances straight
+        // down their own fixed attack lane (AFLPlayer.attackDir), no
+        // steering at all. AFLPlayer reads this directly rather than
+        // through a Move vector now.
+        public static bool MoveForwardHeld => Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow) || TouchMoveForward;
         public static Vector2 Look   => new Vector2(Input.GetAxis("Mouse X"), Input.GetAxis("Mouse Y"));
         public static bool Sprint    => Input.GetKey(KeyCode.LeftShift);
         public static bool MarkDown  => Input.GetKeyDown(KeyCode.Space) || TouchMarkDown;   // jump / mark / gather

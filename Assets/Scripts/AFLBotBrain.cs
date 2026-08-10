@@ -127,11 +127,18 @@ namespace AFL
 
         void Chase(Vector3 pos, AFLBall ball)
         {
-            // Only spread out while the ball is still loose/being chased —
-            // once genuinely close enough to actually contest it, approach
-            // the real position so the timing/reach checks still work.
+            // Real fix (2026-08-10): used to drop the approach offset once
+            // within 2.5 units so bots could actually reach the ball — but
+            // that meant the final approach still beelined to the exact
+            // same coordinate as the opposing team's nearest player,
+            // producing occasional full character interpenetration (caught
+            // on a real screenshot, not every run — Unity's per-session
+            // Random seed meant it didn't reproduce every time). CanReach()
+            // and AttemptTackle() already tolerate ~1.6-1.8 units, well
+            // within the 0.9-1.6 unit offset range, so there's no need to
+            // ever fully drop it.
             float distToBall = Vector3.Distance(transform.position, ball.transform.position);
-            MoveTo(distToBall > 2.5f ? pos + _approachOffset : pos, _p.runSpeed);
+            MoveTo(pos + _approachOffset, _p.runSpeed);
             if (distToBall < 1.6f && ball.Carrier == null && Random.value < 0.15f)
                 _p.AttemptContest();
         }

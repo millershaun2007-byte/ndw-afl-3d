@@ -299,6 +299,11 @@ public static class BuildScript
         var p = go.AddComponent<AFLPlayer>();
         p.team = team;
         p.isUserControlled = isUser;
+        // Home attacks GoalNorth (+Z), Away attacks GoalSouth (-Z) — see
+        // BuildGoal's own +Z/-Z placement. Faced correctly from spawn too,
+        // matching the fixed-lane movement direction from the first frame.
+        p.attackDir = team == AFLPlayer.Team.Home ? Vector3.forward : Vector3.back;
+        go.transform.rotation = Quaternion.LookRotation(p.attackDir, Vector3.up);
 
         BuildCharacterModel3D(go.transform, modelPath, tint);
 

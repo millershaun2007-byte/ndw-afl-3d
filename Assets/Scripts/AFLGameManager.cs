@@ -173,7 +173,7 @@ namespace AFL
             }
 
             GUI.Label(new Rect(Screen.width - 300, Screen.height - 110, 300, 110),
-                "WASD move · Shift sprint\nSpace jump/mark/gather\nLMB hold+release kick\nRMB handball · E tackle · Q switch", _small);
+                "Hold W to run · Shift sprint\nSpace jump/mark/gather\nLMB hold+release kick\nRMB handball · E tackle · Q switch", _small);
         }
     }
 }
