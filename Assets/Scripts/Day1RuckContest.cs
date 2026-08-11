@@ -28,9 +28,10 @@ namespace AFL.Day1
         // missed by a mile. Lowered so the ball's absolute peak
         // (groundY + peakHeight) sits within reach of standing height +
         // raised arms + the hop in HopRoutine below.
-        public float throwDuration = 2.0f;
+        public float throwDuration = 2.6f;
         public float peakHeight = 2.1f;
         public float groundY = 1.0f;
+        public float hopDuration = 0.45f;
 
         // Grading window — generous, per issue #6's own 0.25s floor rule
         // (this is well above it) and #2's "never punish below neutral"
@@ -39,9 +40,11 @@ namespace AFL.Day1
         public float perfectWindow = 0.5f;
 
         float _t;
-        bool _humanPressed, _botPressed;
-        float _humanPressT = -1f, _botPressT = -1f;
-        float _botPressAt;
+        bool _humanPressed;
+        float _humanPressT = -1f;
+        float _botPressT;
+        float _hopFireAt;
+        bool _hopFired;
         bool _resolved;
         float _resolvedAt;
         string _message = "Centre bounce...";
@@ -52,24 +55,39 @@ namespace AFL.Day1
         void BeginThrow()
         {
             _t = 0f;
-            _humanPressed = false; _botPressed = false;
-            _humanPressT = -1f; _botPressT = -1f;
+            _humanPressed = false;
+            _humanPressT = -1f;
+            _hopFired = false;
             _resolved = false;
             _message = "Centre bounce...";
-            // Bot commits at a scripted moment worse than a human's
-            // achievable best (real per-frame press, jitter deliberately
-            // wider than the perfect window) — same fairness principle as
-            // the rest of this project: bots must not be mechanically
-            // better than a person at the same timed press.
             float ideal = throwDuration * 0.5f;
-            _botPressAt = ideal + Random.Range(-0.35f, 0.35f);
+            // Bot's own timestamp is a grading reference only now, not a
+            // trigger — see the real fix below.
+            _botPressT = ideal + Random.Range(-0.35f, 0.35f);
+            // Real fix (2026-08-11, Shaun: "needs to stick arms up and
+            // tap they really do look like the static ones in the
+            // original game" — this is the SAME bug class issue #2
+            // (the mark spec) already names: "do not require the jump
+            // arc and the ball arc to coincidentally intersect... decide
+            // the outcome, then perform it." The previous version fired
+            // Hop() the instant a button was pressed, so the arm-raise
+            // happened at a random moment relative to the ball rather
+            // than in visible sync with it — at typical human/bot press
+            // times that moment could easily fall before the ball was
+            // even airborne or after it had already landed, which reads
+            // exactly like "nothing is animating," matching the report.
+            // Scheduling both hops to fire at the same moment, chosen so
+            // HopRoutine's own internal peak (dur/2 after it starts)
+            // lands exactly on the ball's peak, guarantees the reach is
+            // always visible and always synced — win or lose.
+            _hopFireAt = ideal - hopDuration / 2f;
         }
 
         void Update()
         {
             if (_resolved)
             {
-                if (Time.time - _resolvedAt > 1.8f) BeginThrow();
+                if (Time.time - _resolvedAt > 2.2f) BeginThrow();
                 return;
             }
 
@@ -82,19 +100,19 @@ namespace AFL.Day1
             {
                 _humanPressed = true;
                 _humanPressT = _t;
-                Hop(crocVisual);
-            }
-            if (!_botPressed && _t >= _botPressAt)
-            {
-                _botPressed = true;
-                _botPressT = _t;
-                Hop(rooVisual);
+                // Pressed after the synced moment already fired — still
+                // give a visible (if late) reach rather than nothing.
+                if (_hopFired) Hop(crocVisual);
             }
 
-            if ((_humanPressed && _botPressed) || _t >= throwDuration)
+            if (!_hopFired && _t >= _hopFireAt)
             {
-                Resolve();
+                _hopFired = true;
+                Hop(rooVisual);   // the bot always contests, in sync with the ball
+                if (_humanPressed) Hop(crocVisual);   // pressed in time — synced with the bot and the ball
             }
+
+            if (!_resolved && _t >= throwDuration) Resolve();
         }
 
         void Resolve()
@@ -104,9 +122,9 @@ namespace AFL.Day1
             float ideal = throwDuration * 0.5f;
 
             float humanErr = _humanPressed ? Mathf.Abs(_humanPressT - ideal) : 999f;
-            float botErr = _botPressed ? Mathf.Abs(_botPressT - ideal) : 999f;
+            float botErr = Mathf.Abs(_botPressT - ideal);
 
-            if (!_humanPressed && !_botPressed) { _message = "Nobody jumped — ball up!"; return; }
+            if (!_humanPressed) { _message = "Too slow — Roos win the tap!"; return; }
 
             _message = humanErr <= botErr ? "Crocs win the tap!" : "Roos win the tap!";
         }
@@ -158,7 +176,7 @@ namespace AFL.Day1
             Quaternion leftStart = leftArm ? leftArm.localRotation : Quaternion.identity;
             Quaternion rightStart = rightArm ? rightArm.localRotation : Quaternion.identity;
 
-            float dur = 0.45f;
+            float dur = hopDuration;
             float el = 0f;
             while (el < dur)
             {
