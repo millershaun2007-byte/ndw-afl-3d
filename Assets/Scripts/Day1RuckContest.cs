@@ -118,8 +118,16 @@ namespace AFL.Day1
         // and away from where it was contested — a real "tapped away",
         // not just a touch. Home (Croc) attacks +Z, Away (Roo) attacks -Z
         // in this project's existing convention.
+        //
+        // Real fix (2026-08-11, same "needs to be clearer who wins" pass)
+        // — this used to start the instant the hop fired, so the ball
+        // was already flying away while the winner's jump was still
+        // rising. Waiting until the winner's hop reaches its own peak,
+        // plus a short hold, gives a real "caught it, then tapped it
+        // away" beat instead of two things happening at once.
         System.Collections.IEnumerator TapBallAway(bool crocWins)
         {
+            yield return new WaitForSeconds(hopDuration / 2f + 0.15f);
             Vector3 start = ball.position;
             Vector3 dir = new Vector3(crocWins ? -0.6f : 0.6f, -0.3f, crocWins ? 1f : -1f).normalized;
             Vector3 end = start + dir * 3.2f + Vector3.down * 0.6f;
@@ -164,16 +172,26 @@ namespace AFL.Day1
         // hands sit at world y≈1.48, barely moved in X from the
         // character's own stance. Ball peaks at groundY + peakHeight =
         // 1.0 + 2.1 = 3.1. A full 1.5-unit hop brings hand height to
-        // ≈2.98 — genuine contact. The loser's shorter hop (0.55x) tops
-        // out well below that on purpose.
+        // ≈2.98 — genuine contact.
+        //
+        // Real fix (2026-08-11, Shaun: "sorry that needs to be clearer
+        // who wins", then "if croc barely moved thats not good") — two
+        // adjustments in a row that needed balancing against each other.
+        // First pass (0.85x/70°) was too close to call at a glance.
+        // Second pass (0.2x/20°) over-corrected — a character that barely
+        // moves reads as unresponsive/broken, not as "lost the contest,"
+        // especially when it's the player's own side. Settled on a real,
+        // visible jump attempt (0.5x height, 60° arms — about a third of
+        // the winner's height) that's unambiguous either way: clearly a
+        // genuine try, clearly not as high as the winner's.
         System.Collections.IEnumerator HopRoutine(Transform t, bool reachesBall)
         {
             Vector3 start = t.localPosition;
-            float heightScale = reachesBall ? 1.5f : 0.85f;
+            float heightScale = reachesBall ? 1.5f : 0.5f;
             Vector3 towardCentre = reachesBall
                 ? new Vector3(-Mathf.Sign(start.x) * 0.55f, 0, 0)
                 : Vector3.zero;
-            float armAngle = reachesBall ? 140f : 70f;
+            float armAngle = reachesBall ? 140f : 60f;
 
             var leftArm = FindDeepChild(t, "LeftArm");
             var rightArm = FindDeepChild(t, "RightArm");
