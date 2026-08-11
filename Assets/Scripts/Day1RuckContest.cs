@@ -17,26 +17,10 @@ namespace AFL.Day1
         public Transform rooVisual;
         public Transform ball;
 
-        // Ball arc: rises and falls over this many seconds, peak at the
-        // midpoint — the moment a real tap should happen. Long and gentle
-        // on purpose (this is a child on a touchscreen, not a speedrun).
-        //
-        // Real fix (2026-08-11, Shaun: "they also need to be able to...
-        // reach the ball at its peak") — peakHeight was 3.2, well above
-        // anything a ~2.1-unit-tall character's raised-arm hop could
-        // plausibly reach, so even a perfectly-timed press looked like it
-        // missed by a mile. Lowered so the ball's absolute peak
-        // (groundY + peakHeight) sits within reach of standing height +
-        // raised arms + the hop in HopRoutine below.
         public float throwDuration = 2.6f;
         public float peakHeight = 2.1f;
         public float groundY = 1.0f;
         public float hopDuration = 0.45f;
-
-        // Grading window — generous, per issue #6's own 0.25s floor rule
-        // (this is well above it) and #2's "never punish below neutral"
-        // principle carried down to the simplest possible case: a miss is
-        // just a miss, never worse than not trying.
         public float perfectWindow = 0.5f;
 
         float _t;
@@ -61,25 +45,7 @@ namespace AFL.Day1
             _resolved = false;
             _message = "Centre bounce...";
             float ideal = throwDuration * 0.5f;
-            // Bot's own timestamp is a grading reference only now, not a
-            // trigger — see the real fix below.
             _botPressT = ideal + Random.Range(-0.35f, 0.35f);
-            // Real fix (2026-08-11, Shaun: "needs to stick arms up and
-            // tap they really do look like the static ones in the
-            // original game" — this is the SAME bug class issue #2
-            // (the mark spec) already names: "do not require the jump
-            // arc and the ball arc to coincidentally intersect... decide
-            // the outcome, then perform it." The previous version fired
-            // Hop() the instant a button was pressed, so the arm-raise
-            // happened at a random moment relative to the ball rather
-            // than in visible sync with it — at typical human/bot press
-            // times that moment could easily fall before the ball was
-            // even airborne or after it had already landed, which reads
-            // exactly like "nothing is animating," matching the report.
-            // Scheduling both hops to fire at the same moment, chosen so
-            // HopRoutine's own internal peak (dur/2 after it starts)
-            // lands exactly on the ball's peak, guarantees the reach is
-            // always visible and always synced — win or lose.
             _hopFireAt = ideal - hopDuration / 2f;
         }
 
@@ -92,60 +58,97 @@ namespace AFL.Day1
             }
 
             _t += Time.deltaTime;
-            float frac = Mathf.Clamp01(_t / throwDuration);
-            float height = Mathf.Sin(frac * Mathf.PI) * peakHeight;
-            if (ball) ball.position = new Vector3(0f, groundY + height, 0f);
+
+            // Ball follows the free arc only up until contact — after that
+            // the tap-away coroutine below owns its position.
+            if (!_hopFired)
+            {
+                float frac = Mathf.Clamp01(_t / throwDuration);
+                float height = Mathf.Sin(frac * Mathf.PI) * peakHeight;
+                if (ball) ball.position = new Vector3(0f, groundY + height, 0f);
+            }
 
             if (!_humanPressed && Day1Input.TapDown)
             {
                 _humanPressed = true;
                 _humanPressT = _t;
-                // Pressed after the synced moment already fired — still
-                // give a visible (if late) reach rather than nothing.
-                if (_hopFired) Hop(crocVisual);
             }
 
             if (!_hopFired && _t >= _hopFireAt)
             {
                 _hopFired = true;
-                Hop(rooVisual);   // the bot always contests, in sync with the ball
-                if (_humanPressed) Hop(crocVisual);   // pressed in time — synced with the bot and the ball
+                ResolveAndContest();
             }
 
-            if (!_resolved && _t >= throwDuration) Resolve();
+            // A late press after the contest already resolved gets nothing
+            // extra — the beat has passed, matching "no press = no jump"
+            // rather than a confusing second animation on top of the result.
         }
 
-        void Resolve()
+        // Real fix (2026-08-11, Shaun: "just need the reach up and tap to
+        // have a clear winner if the jump is timed correct one person
+        // clearly above the other tapping the ball away from the
+        // centre"). Both characters used to jump identically regardless
+        // of who actually won, so the outcome only ever showed up as
+        // text. The winner is now decided at the moment of contest, not
+        // at the end of the full throw, and drives three different
+        // things: which character's jump reaches full height (the
+        // winner) vs a visibly shorter one (the loser), and which
+        // direction the ball gets tapped away in afterward.
+        void ResolveAndContest()
         {
-            _resolved = true;
-            _resolvedAt = Time.time;
             float ideal = throwDuration * 0.5f;
-
             float humanErr = _humanPressed ? Mathf.Abs(_humanPressT - ideal) : 999f;
             float botErr = Mathf.Abs(_botPressT - ideal);
+            bool crocWins = _humanPressed && humanErr <= botErr;
 
-            if (!_humanPressed) { _message = "Too slow — Roos win the tap!"; return; }
+            _message = _humanPressed
+                ? (crocWins ? "Crocs win the tap!" : "Roos win the tap!")
+                : "Too slow — Roos win the tap!";
 
-            _message = humanErr <= botErr ? "Crocs win the tap!" : "Roos win the tap!";
+            Hop(crocVisual, crocWins);
+            Hop(rooVisual, !crocWins);
+            StartCoroutine(TapBallAway(crocWins));
+
+            _resolved = true;
+            _resolvedAt = Time.time;
+        }
+
+        // Ball leaves the centre toward the winning side's attacking end
+        // and away from where it was contested — a real "tapped away",
+        // not just a touch. Home (Croc) attacks +Z, Away (Roo) attacks -Z
+        // in this project's existing convention.
+        System.Collections.IEnumerator TapBallAway(bool crocWins)
+        {
+            Vector3 start = ball.position;
+            Vector3 dir = new Vector3(crocWins ? -0.6f : 0.6f, -0.3f, crocWins ? 1f : -1f).normalized;
+            Vector3 end = start + dir * 3.2f + Vector3.down * 0.6f;
+            float dur = 0.6f;
+            float el = 0f;
+            while (el < dur)
+            {
+                el += Time.deltaTime;
+                float f = Mathf.Clamp01(el / dur);
+                // A little arc on the way out so it reads as knocked away,
+                // not teleported.
+                float arc = Mathf.Sin(f * Mathf.PI) * 0.5f;
+                ball.position = Vector3.Lerp(start, end, f) + Vector3.up * arc;
+                yield return null;
+            }
         }
 
         // Explicitly rough, explicitly not a real animation — issue #6:
         // "if the leap looks rough today, that is fine." Straight transform
         // lerp via a coroutine, no Animator, no clip.
         //
-        // Real fix (2026-08-11, Shaun's direct playtest: "they are not
-        // able to jump extend there arms and tap the ball") — the first
-        // version only moved the whole body up, no arm motion at all, so
-        // it read as a bob, not a reach. Issue #6's own build list says
-        // "pressing it makes your ruck go up FOR THE TAP" — the reach is
-        // part of the spec, not an extra. Rotating LeftArm/RightArm by
-        // 140°/-140° on the local Z axis was confirmed empirically (a
-        // static render, not guessed) to raise both arms symmetrically
-        // overhead — other axes tried put one arm up and one arm across
-        // the body, which is wrong for this rig's bone orientation.
-        void Hop(Transform t)
+        // The winner reaches full height and genuinely closes the gap to
+        // where the ball was (see the reach-distance fix below); the
+        // loser's jump is deliberately shorter (0.55x height, no
+        // lean-toward-centre) so the two are visibly different — one
+        // clearly above the other, per Shaun's direct request.
+        void Hop(Transform t, bool reachesBall)
         {
-            if (t) StartCoroutine(HopRoutine(t));
+            if (t) StartCoroutine(HopRoutine(t, reachesBall));
         }
 
         static Transform FindDeepChild(Transform parent, string name)
@@ -155,22 +158,23 @@ namespace AFL.Day1
             return null;
         }
 
-        // Real fix (2026-08-11, Shaun: "not just plausible completely
-        // possible" — reach must genuinely close the gap to the ball,
-        // measured directly, not eyeballed). Standing with arms raised
-        // 140° on Z, hands measured at world y≈1.48, barely moved in X
-        // from the character's own standing position (raising an arm
-        // straight overhead does not reach it forward). Ball peaks at
-        // groundY + peakHeight = 1.0 + 2.0 = 3.0. A vertical hop of 1.5
-        // brings hand height to ≈1.48 + 1.5 = 2.98 — a ~2cm gap at the
-        // scale of a 2-unit-tall character, i.e. contact, not "close."
-        // The horizontal gap (character stands 0.55 from the ball's
-        // x=0) is closed by leaning the whole body toward centre during
-        // the hop, since the arm raise alone does not reach sideways.
-        System.Collections.IEnumerator HopRoutine(Transform t)
+        // Reach math (measured directly, not eyeballed — see this file's
+        // git history for the actual hand-position measurements this is
+        // based on): standing with arms raised 140° on the rig's Z axis,
+        // hands sit at world y≈1.48, barely moved in X from the
+        // character's own stance. Ball peaks at groundY + peakHeight =
+        // 1.0 + 2.1 = 3.1. A full 1.5-unit hop brings hand height to
+        // ≈2.98 — genuine contact. The loser's shorter hop (0.55x) tops
+        // out well below that on purpose.
+        System.Collections.IEnumerator HopRoutine(Transform t, bool reachesBall)
         {
             Vector3 start = t.localPosition;
-            Vector3 towardCentre = new Vector3(-Mathf.Sign(start.x) * 0.55f, 0, 0);
+            float heightScale = reachesBall ? 1.5f : 0.85f;
+            Vector3 towardCentre = reachesBall
+                ? new Vector3(-Mathf.Sign(start.x) * 0.55f, 0, 0)
+                : Vector3.zero;
+            float armAngle = reachesBall ? 140f : 70f;
+
             var leftArm = FindDeepChild(t, "LeftArm");
             var rightArm = FindDeepChild(t, "RightArm");
             Quaternion leftStart = leftArm ? leftArm.localRotation : Quaternion.identity;
@@ -183,9 +187,9 @@ namespace AFL.Day1
                 el += Time.deltaTime;
                 float f = el / dur;
                 float wave = Mathf.Sin(f * Mathf.PI);   // 0 -> 1 -> 0
-                t.localPosition = start + Vector3.up * wave * 1.5f + towardCentre * wave;
-                if (leftArm) leftArm.localRotation = leftStart * Quaternion.Euler(0, 0, wave * 140f);
-                if (rightArm) rightArm.localRotation = rightStart * Quaternion.Euler(0, 0, -wave * 140f);
+                t.localPosition = start + Vector3.up * wave * heightScale + towardCentre * wave;
+                if (leftArm) leftArm.localRotation = leftStart * Quaternion.Euler(0, 0, wave * armAngle);
+                if (rightArm) rightArm.localRotation = rightStart * Quaternion.Euler(0, 0, -wave * armAngle);
                 yield return null;
             }
             t.localPosition = start;
