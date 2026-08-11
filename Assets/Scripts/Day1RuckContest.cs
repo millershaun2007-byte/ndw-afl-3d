@@ -51,11 +51,25 @@ namespace AFL.Day1
         bool _ballFrozen;
         bool _hopFired;
         bool _resolved;
+        bool _sequenceComplete;
         float _resolvedAt;
         string _message = "Centre bounce...";
         GUIStyle _style;
 
-        void Start() { BeginThrow(); }
+        Vector3 _crocRoverStart;
+        Quaternion _crocRoverStartRot;
+        Vector3 _rooRoverStart;
+        Quaternion _rooRoverStartRot;
+
+        void Start()
+        {
+            // Captured once — RunStraight moves the rover's real position
+            // and rotation, so without resetting it each round the rover
+            // would keep drifting further downfield every single contest.
+            if (crocRover) { _crocRoverStart = crocRover.position; _crocRoverStartRot = crocRover.rotation; }
+            if (rooRover) { _rooRoverStart = rooRover.position; _rooRoverStartRot = rooRover.rotation; }
+            BeginThrow();
+        }
 
         void BeginThrow()
         {
@@ -65,6 +79,9 @@ namespace AFL.Day1
             _ballFrozen = false;
             _hopFired = false;
             _resolved = false;
+            _sequenceComplete = false;
+            if (crocRover) { crocRover.position = _crocRoverStart; crocRover.rotation = _crocRoverStartRot; }
+            if (rooRover) { rooRover.position = _rooRoverStart; rooRover.rotation = _rooRoverStartRot; }
             _message = "Centre bounce...";
             float ideal = throwDuration * 0.5f;
             _botPressT = ideal + Random.Range(-0.35f, 0.35f);
@@ -94,7 +111,14 @@ namespace AFL.Day1
         {
             if (_resolved)
             {
-                if (Time.time - _resolvedAt > 2.2f) BeginThrow();
+                // Real fix (2026-08-12) — adding the catch-pause-then-run
+                // sequence made the full post-resolve chain (tap flight +
+                // catch pause + run) longer than the old fixed 2.2s reset
+                // window, which would have reset the scene mid-run. The
+                // reset now waits on _sequenceComplete (set at the true end
+                // of TapBallAway) rather than a timer that predates the run
+                // existing at all.
+                if (_sequenceComplete && Time.time - _resolvedAt > 1.2f) BeginThrow();
                 return;
             }
 
@@ -201,9 +225,30 @@ namespace AFL.Day1
             yield return new WaitForSeconds(hopDuration / 2f + 0.15f);
             Vector3 start = ball.position;
             Transform rover = crocWins ? crocRover : rooRover;
-            // Receive height around chest level, not ground — reads as a
-            // catch rather than the ball rolling to their feet.
-            Vector3 end = rover ? rover.position + Vector3.up * 1.3f : start + Vector3.down * 0.6f;
+            // Real fix (2026-08-12, Shaun: "receiving the ball in the back
+            // of the head need to receive ball in chest or hands"). The old
+            // point sat dead-centre above the rover's own pivot with no
+            // forward offset at all — whether that reads as "chest" or
+            // "back of the head" was down to luck, not design. The rover's
+            // rest facing already points the same way the ball is coming
+            // from (it's also the eventual run direction — the rover
+            // stands further from goal than both the ruck and the goal
+            // itself, so one facing serves catching and running alike), so
+            // rover.forward is the correct direction to offset toward.
+            // Chest height, not head height.
+            //
+            // Real fix (2026-08-12, Shaun: "kangaroo get ball in mouth") —
+            // the fixed forward/up offset above was tuned by eye against
+            // one character (Croc) and didn't generalise: a kangaroo's
+            // very different proportions (upright stance, head position)
+            // put that same offset near its mouth instead of its chest.
+            // Same principle as the run's hand-tracking fix — target the
+            // real RightHand bone instead of a guessed body-relative
+            // offset, so it adapts to whatever this specific character's
+            // actual proportions are rather than needing separate tuning
+            // per species.
+            var roverHand = rover ? FindDeepChild(rover, "RightHand") : null;
+            Vector3 end = roverHand ? roverHand.position : (rover ? rover.position + rover.forward * 0.4f + Vector3.up * 1.1f : start + Vector3.down * 0.6f);
             float dur = 0.6f;
             float el = 0f;
             while (el < dur)
@@ -223,6 +268,136 @@ namespace AFL.Day1
             // is enough to make the handoff read as one continuous phase
             // rather than the ball just stopping.
             _message = crocWins ? "Crocs' rover gets it!" : "Roos' rover gets it!";
+
+            // Day 3, first slice (2026-08-12, Shaun: "after they receive the
+            // ball slight pause then they run... just run straight ahead").
+            // A real catch beat before the run starts — receiving and
+            // immediately bolting would read as one blurred motion, not two
+            // distinct things happening.
+            yield return new WaitForSeconds(catchPause);
+
+            // Real fix, same message — run direction is NOT "whichever way
+            // the rover happens to be facing" (Shaun: "they face the wrong
+            // way, if they run the opposite way to what's set up that's
+            // fine"). It's defined directly from the tap: the ball travels
+            // from the ruck to the rover, who stands behind their own ruck
+            // player, so the run is the mirror of that — straight toward
+            // their own goalposts, which is also "opposite the direction
+            // the ball was just tapped", per Shaun's own read of it. Croc's
+            // rover taps in from -Z, so runs +Z; Roo's is the reverse.
+            float runDir = crocWins ? 1f : -1f;
+            yield return RunStraight(rover, runDir);
+
+            _message = crocWins ? "Crocs run it out!" : "Roos run it out!";
+            // Reset countdown starts from here, not from when the contest
+            // first resolved — Update()'s existing reset logic now waits
+            // the right amount after the FULL sequence (tap, catch, run)
+            // finishes, not from the moment the ruck contest alone
+            // resolved. _sequenceComplete is what actually unblocks the
+            // reset (see Update) — this timestamp alone doesn't.
+            _resolvedAt = Time.time;
+            _sequenceComplete = true;
+        }
+
+        public float catchPause = 0.5f;
+        // Real fix (2026-08-12, Shaun: "run of a bit far", then "can be a
+        // slower like 4 step run"). 14 units / 1.8s was a full sprint pace
+        // with no acceleration — cut down to a short, deliberate few-step
+        // jog instead. runSpeed on AFLPlayer (the six-player game's own
+        // player script) calibrates its Run animation state at 7 units/sec
+        // and Walk at half that (3.5) — this run now moves at ~4 units/sec,
+        // matching Walk-ish pace rather than a full Run blend.
+        public float runDistance = 6f;
+        public float runDuration = 1.5f;
+
+        // Straight-line only, per the canonical plan's control rule — no
+        // steering, the ball/handoff always puts the player in the right
+        // lane so a straight run is always correct. No kick yet (that's
+        // the next slice); this ends on an honest placeholder message, not
+        // a stall into not-yet-built work.
+        System.Collections.IEnumerator RunStraight(Transform t, float zDir)
+        {
+            if (!t) yield break;
+            var animator = t.GetComponentInChildren<Animator>();
+            t.rotation = Quaternion.Euler(0, zDir > 0 ? 0 : 180, 0);
+
+            // Real fix (2026-08-12, Shaun: "looks like they are balancing
+            // the ball on there tummy"). The ball used to follow a fixed
+            // offset from the rover's ROOT transform — completely
+            // detached from where the hands actually are, so it could
+            // never look held, only carried on an invisible shelf. Track
+            // the real LeftHand/RightHand bones instead (same
+            // FindDeepChild pattern HopRoutine already uses for arms), so
+            // the ball genuinely follows whatever the hands are doing.
+            var leftHand = FindDeepChild(t, "LeftHand");
+            var rightHand = FindDeepChild(t, "RightHand");
+
+            Vector3 start = t.position;
+            Vector3 end = start + new Vector3(0, 0, zDir * runDistance);
+            // Real fix (2026-08-12, Shaun: "same problem" after the hand-
+            // tracking fix — the ball attachment was correct, but nothing
+            // was actually reaching the hands to attach to. Read directly
+            // from CrocRiggedAIAnimator.controller: Idle only transitions
+            // to Walk once Speed exceeds ~4.55. My previous velocity curve
+            // peaked at ~6 for one instant at the midpoint and spent most
+            // of the run below that threshold — the character was in Idle
+            // (still arms, ball parked near the idle hand position — which
+            // reads exactly as "balancing on the tummy") for nearly the
+            // whole run. The animator's Speed parameter doesn't have to
+            // match the actual translation speed — AFLPlayer only does
+            // that because its movement pace happens to already sit above
+            // this same threshold. Here, decoupled on purpose: physical
+            // movement stays at the slower "4 step jog" pace Shaun asked
+            // for, while the animator gets a sustained value comfortably
+            // over 4.55 so it actually reaches and holds Walk instead of
+            // brushing past the threshold for one frame.
+            const float animSpeed = 5.5f;
+            float el = 0f;
+            while (el < runDuration)
+            {
+                el += Time.deltaTime;
+                float f = Mathf.Clamp01(el / runDuration);
+                // Real fix (2026-08-12, "strange looking run" report) —
+                // this used to move at constant speed with an instant
+                // start/stop. SmoothStep gives a real accelerate-then-
+                // decelerate arc for the physical movement instead.
+                float smoothF = Mathf.SmoothStep(0f, 1f, f);
+                t.position = Vector3.Lerp(start, end, smoothF);
+                if (ball)
+                {
+                    // Real fix (2026-08-12, Shaun: "arms moving when it
+                    // runs just ball in middle of its chest still"). The
+                    // midpoint of both hands was the bug — a normal run
+                    // cycle swings the hands in OPPOSITE phase (left
+                    // forward as right swings back), so their midpoint
+                    // mostly cancels out and barely moves even though each
+                    // hand individually swings a lot. Tracking one hand
+                    // (tucked-under-the-arm carry, not a two-handed cradle)
+                    // actually shows the motion instead of averaging it away.
+                    if (rightHand) ball.position = rightHand.position;
+                    else if (leftHand) ball.position = leftHand.position;
+                    else ball.position = t.position + Vector3.up * 1.1f;
+                }
+                if (animator)
+                {
+                    // Trapezoid: quick ramp up/down at the very ends (still
+                    // damped besides), sustained comfortably above the
+                    // 4.55 Walk threshold for the middle of the run so the
+                    // transition actually completes and holds, not a
+                    // triangular peak that only grazes it.
+                    float rampF = Mathf.Clamp01(Mathf.Min(f, 1f - f) / 0.15f);
+                    animator.SetFloat("Speed", animSpeed * rampF, 0.1f, Time.deltaTime);
+                }
+                yield return null;
+            }
+            t.position = end;
+            if (ball)
+            {
+                if (rightHand) ball.position = rightHand.position;
+                else if (leftHand) ball.position = leftHand.position;
+                else ball.position = end + Vector3.up * 1.1f;
+            }
+            if (animator) animator.SetFloat("Speed", 0f, 0.1f, Time.deltaTime);
         }
 
         // Explicitly rough, explicitly not a real animation — issue #6:

@@ -238,7 +238,21 @@ public static class Day1BuildScript
         var animator = instance.GetComponent<Animator>() ?? instance.GetComponentInChildren<Animator>();
         if (!animator) animator = instance.AddComponent<Animator>();
         animator.avatar = null; // Generic — no Humanoid avatar, no retargeting, matches the working six-player game.
-        string controllerPath = $"Assets/_Generated/{name}RiggedAIAnimator.controller";
+        // Real fix (2026-08-12) — this used to derive the controller
+        // filename from `name`, the character's own display/GameObject
+        // name ("Croc", "Roo", but also "CrocRover", "RooRover"), which
+        // only happened to work for the ruck pair by coincidence. For the
+        // rovers it built a path to a file that's never existed
+        // ("CrocRoverRiggedAIAnimator.controller"), so LoadAssetAtPath
+        // silently returned null and every rover has been running with no
+        // controller at all since rovers were introduced — confirmed via
+        // a live console log (Playwright): animator.runtimeAnimatorController
+        // was NULL on the deployed build, which is why no amount of Speed-
+        // parameter tuning ever changed anything. The species (which
+        // determines the real controller filename) is reliably the model
+        // folder name, not the character's own display name.
+        string species = System.IO.Path.GetFileName(modelFolder).Replace("RiggedAI", "");
+        string controllerPath = $"Assets/_Generated/{species}RiggedAIAnimator.controller";
         var controller = AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>(controllerPath);
         if (controller) animator.runtimeAnimatorController = controller;
         else Debug.LogWarning($"Day1BuildScript: no controller at {controllerPath} for {name}, leaving Animator uncontrolled.");
