@@ -117,25 +117,28 @@ public static class BuildScript
         // Roster: 3 per side, one mesh per team recoloured. The first
         // player on each side is the designated Ruck — the one who
         // contests the centre throw-up at the start of every chain (see
-        // AFLGameManager.FindRuck). The other two are lead/forward options
-        // once their team has the ball (AFLBotBrain.LeadForGoal).
+        // AFLGameManager.FindRuck). Positions here are just spawn/idle
+        // defaults — AFLGameManager teleports everyone to fixed per-beat
+        // slots the moment the match actually starts.
         var homeTint = new Color(0.35f, 0.6f, 1f);    // cool blue — Home
         var awayTint = new Color(1f, 0.4f, 0.35f);    // warm red — Away
 
-        var croc = BuildPlayer("HomeCroc1", AFLPlayer.Team.Home, new Vector3(0, 1, -5),
-            "Assets/Models/CrocRiggedAI", isUser: true, attackingGoal: goalNorth, isRuck: true, tint: homeTint);
+        BuildPlayer("HomeCroc1", AFLPlayer.Team.Home, new Vector3(0, 1, -5),
+            "Assets/Models/CrocRiggedAI", isUser: true, isRuck: true, tint: homeTint);
         BuildPlayer("HomeCroc2", AFLPlayer.Team.Home, new Vector3(-6, 1, -8),
-            "Assets/Models/CrocRiggedAI", isUser: false, attackingGoal: goalNorth, isRuck: false, tint: homeTint);
+            "Assets/Models/CrocRiggedAI", isUser: false, isRuck: false, tint: homeTint);
         BuildPlayer("HomeCroc3", AFLPlayer.Team.Home, new Vector3(6, 1, -9),
-            "Assets/Models/CrocRiggedAI", isUser: false, attackingGoal: goalNorth, isRuck: false, tint: homeTint);
+            "Assets/Models/CrocRiggedAI", isUser: false, isRuck: false, tint: homeTint);
         BuildPlayer("AwayRoo1", AFLPlayer.Team.Away, new Vector3(0, 1, 5),
-            "Assets/Models/RooRiggedAI", isUser: false, attackingGoal: goalSouth, isRuck: true, tint: awayTint);
+            "Assets/Models/RooRiggedAI", isUser: false, isRuck: true, tint: awayTint);
         BuildPlayer("AwayRoo2", AFLPlayer.Team.Away, new Vector3(-6, 1, 8),
-            "Assets/Models/RooRiggedAI", isUser: false, attackingGoal: goalSouth, isRuck: false, tint: awayTint);
+            "Assets/Models/RooRiggedAI", isUser: false, isRuck: false, tint: awayTint);
         BuildPlayer("AwayRoo3", AFLPlayer.Team.Away, new Vector3(6, 1, 9),
-            "Assets/Models/RooRiggedAI", isUser: false, attackingGoal: goalSouth, isRuck: false, tint: awayTint);
+            "Assets/Models/RooRiggedAI", isUser: false, isRuck: false, tint: awayTint);
 
-        var cam = BuildCamera(croc.transform);
+        BuildBoundaryWalls(18f, 23f);
+
+        var cam = BuildCamera();
         BuildManagers(ball, cam, centreCircle, goalNorth, goalSouth);
         BuildLighting();
 
@@ -492,7 +495,7 @@ public static class BuildScript
     }
 
     static AFLPlayer BuildPlayer(string name, AFLPlayer.Team team, Vector3 position,
-        string modelPath, bool isUser, Transform attackingGoal, bool isRuck, Color? tint = null)
+        string modelPath, bool isUser, bool isRuck, Color? tint = null)
     {
         var go = new GameObject(name);
         go.layer = _playerLayer;
@@ -506,26 +509,24 @@ public static class BuildScript
         p.team = team;
         p.isUserControlled = isUser;
         p.isRuck = isRuck;
-        // Faced toward their own attacking end from spawn — matches
-        // whichever goal BuildManagers/AFLBotBrain will send them toward.
+        // Faced toward their own attacking end from spawn — AFLGameManager
+        // re-snaps this at the start of every beat, so this initial value
+        // only matters for the very first frame before that runs.
         Vector3 faceDir = team == AFLPlayer.Team.Home ? Vector3.forward : Vector3.back;
         go.transform.rotation = Quaternion.LookRotation(faceDir, Vector3.up);
 
         BuildCharacterModel3D(go.transform, modelPath, tint);
 
-        // Every player gets a brain now, including the human-designated
-        // one — isUserControlled is the only gate AFLBotBrain/AFLPlayer
-        // check, so control handing away from someone mid-chain no longer
-        // leaves them standing frozen. Issue #1: "HomeCroc1 built with no
-        // AFLBotBrain... permanently frozen once control leaves it."
-        var brain = go.AddComponent<AFLBotBrain>();
-        brain.attackingGoal = attackingGoal;
-        brain.skill = 0.28f;
-
+        // No per-player bot brain any more (2026-08-11 beat rewrite) —
+        // AFLGameManager now drives every bot decision directly (movement
+        // via TakeBeatControl, taps via BotTap), since the beat system
+        // needs full control over exactly when and how a bot acts. The
+        // old AFLBotBrain's free-roam chase/contest logic doesn't apply
+        // once nobody navigates anywhere on their own any more.
         return p;
     }
 
-    static AFLBroadcastCamera BuildCamera(Transform followTarget)
+    static AFLBroadcastCamera BuildCamera()
     {
         var cameraGo = new GameObject("Main Camera");
         var cam = cameraGo.AddComponent<Camera>();
@@ -534,19 +535,18 @@ public static class BuildScript
         cam.clearFlags = CameraClearFlags.SolidColor;
 
         var rig = cameraGo.AddComponent<AFLBroadcastCamera>();
-        rig.target = followTarget;
-        // Ground AND Player (2026-08-11 fix — was Ground-only, which let
-        // the camera clip straight through any OTHER player during a
-        // contest/centre bounce; see the matching comment in
-        // AFLBroadcastCamera.LateUpdate() for why). The followed player's
-        // own CharacterController is explicitly excluded in code there via
-        // a target-root check, so this doesn't reintroduce the old
-        // "camera jams into its own target's back" bug.
+        // Ground AND Player, same reasoning as before this rewrite: lets
+        // the camera pull in front of an obstruction instead of clipping
+        // through it. There's no continuous follow any more (see
+        // AFLBroadcastCamera's own header comment) — AFLGameManager's
+        // first CutTo() call, from BeginRuckTap() in Start(), places the
+        // camera for real; this starting transform only matters for the
+        // one frame before that runs.
         rig.collisionMask = (1 << _groundLayer) | (1 << _playerLayer);
-        // Matches AFLBroadcastCamera's own distance/height defaults so
-        // there's no jarring snap on the very first frame before
-        // SmoothDamp converges.
-        cameraGo.transform.position = followTarget.position + new Vector3(0, 1.9f, -6f);
+        rig.fieldHalfWidth = 18f;
+        rig.fieldHalfLength = 23f;
+        cameraGo.transform.position = new Vector3(0, 8f, -14f);
+        cameraGo.transform.LookAt(Vector3.zero);
 
         return rig;
     }
@@ -554,20 +554,48 @@ public static class BuildScript
     static void BuildManagers(AFLBall ball, AFLBroadcastCamera cam, Transform centreCircle, Transform goalNorth, Transform goalSouth)
     {
         var gm = new GameObject("GameManager");
+        var prompt = gm.AddComponent<AFLBeatPrompt>();
         var manager = gm.AddComponent<AFLGameManager>();
         manager.ball = ball;
         manager.cam = cam;
+        manager.prompt = prompt;
         manager.centreCircle = centreCircle;
         manager.goalNorth = goalNorth;
         manager.goalSouth = goalSouth;
         manager.userTeam = AFLPlayer.Team.Home;
+        manager.fieldHalfWidth = 18f;
+        manager.fieldHalfLength = 23f;
+    }
 
-        // AFLBall.playerMask has no field-initializer default (unlike
-        // groundMask, which does) — both narrowed to the real dedicated
-        // layers now that they exist, rather than the old single-Default
-        // shortcut.
-        ball.playerMask = 1 << _playerLayer;
-        ball.groundMask = 1 << _groundLayer;
+    // Real, physical boundary — issue #1: "there is no boundary collider
+    // and no invisible wall anywhere, so the plane simply ends," confirmed
+    // by Shaun's own player running off the edge and falling. Four thin,
+    // tall, invisible walls just outside the field bounds stop both the
+    // ball and every CharacterController physically, on top of (not
+    // instead of) AFLGameManager's own per-frame invariant checks — belt
+    // and braces, since a fast-enough kick could in principle still clip
+    // past a check that only runs once a frame.
+    static void BuildBoundaryWalls(float halfWidth, float halfLength)
+    {
+        float wallHeight = 12f;
+        float wallThickness = 2f;
+        CreateWall("WallNorth", new Vector3(0, wallHeight / 2f, halfLength + wallThickness / 2f),
+            new Vector3(halfWidth * 2f + wallThickness * 2f, wallHeight, wallThickness));
+        CreateWall("WallSouth", new Vector3(0, wallHeight / 2f, -halfLength - wallThickness / 2f),
+            new Vector3(halfWidth * 2f + wallThickness * 2f, wallHeight, wallThickness));
+        CreateWall("WallEast", new Vector3(halfWidth + wallThickness / 2f, wallHeight / 2f, 0),
+            new Vector3(wallThickness, wallHeight, halfLength * 2f + wallThickness * 2f));
+        CreateWall("WallWest", new Vector3(-halfWidth - wallThickness / 2f, wallHeight / 2f, 0),
+            new Vector3(wallThickness, wallHeight, halfLength * 2f + wallThickness * 2f));
+    }
+
+    static void CreateWall(string name, Vector3 pos, Vector3 size)
+    {
+        var go = new GameObject(name);
+        go.layer = _groundLayer;   // solid to both players and the ball's ground checks
+        go.transform.position = pos;
+        var col = go.AddComponent<BoxCollider>();
+        col.size = size;
     }
 
     // Standard pattern for programmatically registering a Tags & Layers

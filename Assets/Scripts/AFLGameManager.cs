@@ -2,31 +2,29 @@ using UnityEngine;
 
 namespace AFL
 {
-    // Rebuilt 2026-08-11 per issue #1 / docs/FOOTY-REBUILD.md. Replaces the
-    // old 4-quarter/clock/behind-tally match sim with the scoped 5-goal
-    // chain: centre throw-up -> whoever wins it runs/kicks to a forward
-    // option -> forward option contests the mark -> mark taken = set shot,
-    // mark lost = straight back to centre. First team to 5 goals wins.
-    //
-    // Defence uses the SAME mark contest and the SAME MARK button as
-    // attack — issue #1's preferred symmetric-scoring option: "one
-    // mechanic, two uses, and the kid is never just watching." There is no
-    // separate spoil input; a defending player who wins the contest simply
-    // denies the attacking team's mark (see OnContestSettled).
-    public enum AFLPhase { Centre, OpenPlay, MarkContest, SetShot, Celebration }
+    // =======================================================================
+    //  GAME MANAGER — strict beat state machine (2026-08-11 full rewrite)
+    // =======================================================================
+    // Replaces the free-movement/continuous-contest design entirely, per
+    // the rewrite brief on issue #1 after two real human playtests both
+    // found MOVE/MARK/KICK effectively non-functional in practice. The
+    // whole match is now five discrete beats, each with exactly one live
+    // input (a single tap against AFLBeatPrompt's sweep/ring), each with a
+    // camera cut, each with players placed at fixed, distinct positions —
+    // never navigating toward a shared point, which is what caused the
+    // "four arms, two heads" fusing. See AFLBeatPrompt for the shared
+    // "one verb" mechanic and AFLPlayer for forward-only movement.
+    public enum AFLBeat { RuckTap, ClearanceKick, MarkContest, SetShot, Celebration }
 
     [AddComponentMenu("AFL/AFL Game Manager")]
     public class AFLGameManager : MonoBehaviour
     {
         public static AFLGameManager Instance { get; private set; }
-        // Set true only while a set shot is being lined up — every
-        // AFLBotBrain checks this and holds still, so the field doesn't
-        // keep playing out behind a kid who's lining up their shot.
-        public static bool BotsFrozen { get; private set; }
 
         [Header("Refs")]
         public AFLBall ball;
         public AFLBroadcastCamera cam;
+        public AFLBeatPrompt prompt;
         public Transform centreCircle;
         public Transform goalNorth;   // Home's attacking goal
         public Transform goalSouth;   // Away's attacking goal
@@ -34,32 +32,26 @@ namespace AFL
 
         [Header("Match")]
         public const int GoalsToWin = 5;
-        public float restartDelay = 2.2f;
-        public float centreBounceHeight = 8f;
+        public float restartDelay = 2.0f;
 
-        // Must stay roughly in step with BuildField's Field scale
-        // (3.5 x 1 x 4.5 on a 10-unit plane = a 35x45 unit ground).
-        [Header("Field bounds")]
+        [Header("Field bounds — also used to keep the camera off the edge")]
         public float fieldHalfWidth = 18f;
         public float fieldHalfLength = 23f;
-        public float looseBallTimeout = 4.5f;
+
+        // Watchdog: issue #1 section 7 — "any beat that has not advanced
+        // within a few seconds forces a reset to the centre throw-up."
+        public float beatWatchdogSeconds = 7f;
 
         public int HomeGoals { get; private set; }
         public int AwayGoals { get; private set; }
-        public AFLPhase Phase { get; private set; } = AFLPhase.Centre;
+        public AFLBeat Beat { get; private set; }
 
-        AFLPlayer _controlled;
-        AFLPlayer.Team _attackingTeam;
+        AFLPlayer.Team _actingTeam;   // whose chain this is
+        AFLPlayer _ruck, _receiver, _shooter, _defender;
+        Vector3 _clearanceAimTarget;   // world position the clearance kick aims toward
         string _message = "";
-        float _messageUntil, _scoreLock, _restartAt = -1f, _looseSince = -1f;
+        float _messageUntil, _restartAt = -1f, _beatStartedAt, _scoreLock;
         bool _matchOver;
-
-        // set shot state
-        AFLPlayer _shotTaker;
-        Transform _shotGoal;
-        float _shotAimAngle, _shotAimDir = 1f;
-        const float ShotAimSweep = 26f;   // degrees either side of straight-at-goal
-        const float ShotAimSpeed = 70f;   // degrees/sec
 
         GUIStyle _big, _small;
 
@@ -68,201 +60,329 @@ namespace AFL
             Instance = this;
             if (!ball) ball = FindAnyObjectByType<AFLBall>();
             if (!cam) cam = FindAnyObjectByType<AFLBroadcastCamera>();
+            if (!prompt) prompt = FindAnyObjectByType<AFLBeatPrompt>();
         }
 
-        void Start() { BeginCentre(); }
+        void Start()
+        {
+            _actingTeam = userTeam;
+            BeginRuckTap();
+        }
 
         void Update()
         {
             if (_matchOver) return;
 
-            CheckBoundary();
-            TrackLooseBall();
+            EnforceInvariants();
 
-            switch (Phase)
+            // Watchdog — no beat should ever be able to stall the game.
+            if (_restartAt < 0f && Time.time - _beatStartedAt > beatWatchdogSeconds)
             {
-                case AFLPhase.Centre:   UpdateCentre(); break;
-                case AFLPhase.OpenPlay: UpdateOpenPlay(); break;
-                case AFLPhase.SetShot:  UpdateSetShot(); break;
-                // MarkContest has no per-frame work of its own — it's
-                // resolved entirely by OnContestSettled, called out of
-                // AFLPlayer.OnContestResult the instant a contest lands.
+                Announce("Taking too long — resetting", 1.6f);
+                QueueRestart(0.4f);
             }
 
-            if (_restartAt > 0f && Time.time >= _restartAt) BeginCentre();
-        }
-
-        // ---------------------------------------------------------------
-        //  CENTRE
-        // ---------------------------------------------------------------
-        void BeginCentre()
-        {
-            _restartAt = -1f;
-            _looseSince = -1f;
-            BotsFrozen = false;
-            Phase = AFLPhase.Centre;
-
-            Vector3 c = centreCircle ? centreCircle.position : Vector3.zero;
-            if (ball) ball.ResetTo(c + Vector3.up * centreBounceHeight);
-
-            var ruck = FindRuck(userTeam);
-            if (ruck)
+            switch (Beat)
             {
-                TakeControl(ruck);
-                if (cam) cam.CutTo(ruck.transform);
+                case AFLBeat.RuckTap: UpdateRuckTapBeat(); break;
+                case AFLBeat.ClearanceKick: UpdateClearanceKickBeat(); break;
+                case AFLBeat.MarkContest: UpdateMarkContestBeat(); break;
+                case AFLBeat.SetShot: UpdateSetShotBeat(); break;
             }
-            Announce("Centre bounce");
-        }
 
-        void UpdateCentre()
-        {
-            if (ball && ball.Carrier != null) OnPossessionGained(ball.Carrier);
-        }
-
-        static AFLPlayer FindRuck(AFLPlayer.Team t)
-        {
-            foreach (var p in AFLPlayer.All) if (p.team == t && p.isRuck) return p;
-            return null;
-        }
-
-        // ---------------------------------------------------------------
-        //  OPEN PLAY — someone has the ball, running/kicking it forward
-        // ---------------------------------------------------------------
-        void OnPossessionGained(AFLPlayer carrier)
-        {
-            if (Phase == AFLPhase.OpenPlay && _attackingTeam == carrier.team) return;
-
-            Phase = AFLPhase.OpenPlay;
-            _attackingTeam = carrier.team;
-            _looseSince = -1f;
-            SetAttackTarget(carrier);
-
-            if (carrier.team == userTeam)
+            if (_restartAt > 0f && Time.time >= _restartAt)
             {
-                TakeControl(carrier);
-                if (cam) cam.CutTo(carrier.transform);
+                _actingTeam = _actingTeam == AFLPlayer.Team.Home ? AFLPlayer.Team.Away : AFLPlayer.Team.Home;
+                BeginRuckTap();
             }
-            else
+        }
+
+        // ---------------------------------------------------------------
+        //  INVARIANTS — issue #1 section 7: ball and every player must
+        //  always be above ground and inside bounds, or get reset. This is
+        //  the structural fix for "ran off the edge of the ground plane
+        //  and fell" — a backstop in case the physical boundary walls
+        //  (BuildScript) are ever bypassed by a fast-enough kick.
+        // ---------------------------------------------------------------
+        void EnforceInvariants()
+        {
+            if (ball)
             {
-                // Defending: control whichever of ours is nearest the ball,
-                // ready to contest the mark when it comes.
-                var defender = NearestTeammateToBall(userTeam, null);
-                if (defender)
+                Vector3 p = ball.transform.position;
+                bool bad = Mathf.Abs(p.x) > fieldHalfWidth + 1f || Mathf.Abs(p.z) > fieldHalfLength + 1f || p.y < -3f;
+                if (bad && ball.Carrier == null && _restartAt < 0f)
                 {
-                    TakeControl(defender);
-                    if (cam) cam.CutTo(defender.transform);
+                    Announce("Out of bounds — ball up", 1.4f);
+                    QueueRestart(0.4f);
                 }
             }
-            Announce((carrier.team == AFLPlayer.Team.Home ? "Crocs" : "Roos") + " have it");
-        }
 
-        void UpdateOpenPlay()
-        {
-            if (ball == null) return;
-            if (ball.Carrier) SetAttackTarget(ball.Carrier);
-
-            if (ball.Carrier == null && ball.InFlight && ball.WasKicked)
-            {
-                Phase = AFLPhase.MarkContest;
-                var receiver = NearestTeammateToBall(userTeam, null);
-                if (receiver)
-                {
-                    TakeControl(receiver);
-                    if (cam) cam.CutTo(receiver.transform);
-                }
-                Announce("Contest!");
-            }
-        }
-
-        // Aim the carrier at a forward option: nearest teammate to their
-        // attacking goal, excluding themselves. This is the whole of
-        // "curve toward the ball instead of a fixed lane" once you're
-        // actually holding the ball — moveTarget just switches from the
-        // ball itself (while chasing) to this.
-        void SetAttackTarget(AFLPlayer carrier)
-        {
-            AFLPlayer best = null; float bestD = float.MaxValue;
-            Transform goal = carrier.team == AFLPlayer.Team.Home ? goalNorth : goalSouth;
             foreach (var p in AFLPlayer.All)
             {
-                if (p.team != carrier.team || p == carrier) continue;
-                float d = goal ? (p.transform.position - goal.position).sqrMagnitude
-                               : (p.transform.position - carrier.transform.position).sqrMagnitude;
-                if (d < bestD) { bestD = d; best = p; }
+                Vector3 pos = p.transform.position;
+                bool bad = Mathf.Abs(pos.x) > fieldHalfWidth + 2f || Mathf.Abs(pos.z) > fieldHalfLength + 2f || pos.y < -3f;
+                if (bad)
+                {
+                    Vector3 safe = ClampInsideField(pos);
+                    safe.y = 1f;
+                    TeleportPlayer(p, safe);
+                }
             }
-            carrier.moveTarget = best ? best.transform : goal;
+        }
+
+        Vector3 ClampInsideField(Vector3 p)
+        {
+            p.x = Mathf.Clamp(p.x, -fieldHalfWidth + 2f, fieldHalfWidth - 2f);
+            p.z = Mathf.Clamp(p.z, -fieldHalfLength + 2f, fieldHalfLength - 2f);
+            return p;
+        }
+
+        static void TeleportPlayer(AFLPlayer p, Vector3 pos)
+        {
+            var cc = p.GetComponent<CharacterController>();
+            if (cc) cc.enabled = false;
+            p.transform.position = pos;
+            if (cc) cc.enabled = true;
         }
 
         // ---------------------------------------------------------------
-        //  MARK CONTEST result -> set shot or straight back to centre
+        //  BEAT 1 — RUCK TAP: sweep arrow picks which rover gets the ball.
         // ---------------------------------------------------------------
-        public void OnContestSettled(AFLPlayer settledBy, MarkGrade grade)
+        AFLPlayer _leftOption, _rightOption;
+
+        void BeginRuckTap()
         {
-            if (Phase != AFLPhase.MarkContest) return;
+            _restartAt = -1f;
+            _beatStartedAt = Time.time;
+            _botCommitAt = -1f;
+            Beat = AFLBeat.RuckTap;
 
-            bool cleanMarkForAttack = (grade == MarkGrade.Screamer || grade == MarkGrade.Clunk)
-                                    && settledBy.team == _attackingTeam;
+            _ruck = FindRuck(_actingTeam);
+            var teammates = TeammatesOf(_actingTeam, _ruck);
+            _leftOption = teammates.Count > 0 ? teammates[0] : _ruck;
+            _rightOption = teammates.Count > 1 ? teammates[1] : _ruck;
 
-            if (cleanMarkForAttack)
+            Vector3 c = centreCircle ? centreCircle.position : Vector3.zero;
+            Vector3 attackDir = _actingTeam == AFLPlayer.Team.Home ? Vector3.forward : Vector3.back;
+
+            PlaceAtSlot(_ruck, c, attackDir);
+            PlaceAtSlot(_leftOption, c + Cross(attackDir) * -6f + attackDir * 6f, attackDir);
+            PlaceAtSlot(_rightOption, c + Cross(attackDir) * 6f + attackDir * 6f, attackDir);
+            SpreadRemainingPlayers(c, attackDir);
+
+            if (ball) ball.ResetTo(c + Vector3.up * 1.2f);
+
+            TakeBeatControl(_ruck);
+            if (cam) cam.CutTo(_ruck.transform, attackDir);
+
+            if (prompt) prompt.BeginSweep("Tap MARK: aim the ruck tap", 0f);
+            Announce("Ruck tap — " + TeamName(_actingTeam));
+        }
+
+        void UpdateRuckTapBeat()
+        {
+            if (!ResolveSingleTap(_ruck)) return;
+            var (grade, _) = prompt.Resolve();
+            prompt.Stop();
+
+            // Sweep value picks left vs right option; grade decides how
+            // cleanly it arrives (a poor tap still goes somewhere playable
+            // — issue #1: nothing here should be able to just fail dead).
+            AFLPlayer target = prompt.CurrentValue < 0f ? _leftOption : _rightOption;
+            _receiver = target ? target : _ruck;
+
+            if (ball) ball.Attach(_receiver);
+            AnnounceGrade("Tap", grade);
+            BeginClearanceKick();
+        }
+
+        // ---------------------------------------------------------------
+        //  BEAT 2 — CLEARANCE KICK: same arrow, power auto-set by distance.
+        // ---------------------------------------------------------------
+        AFLPlayer _forwardOption;
+
+        void BeginClearanceKick()
+        {
+            _beatStartedAt = Time.time;
+            _botCommitAt = -1f;
+            Beat = AFLBeat.ClearanceKick;
+
+            var teammates = TeammatesOf(_actingTeam, _receiver);
+            _forwardOption = teammates.Count > 0 ? teammates[0] : _receiver;
+
+            Vector3 attackDir = _actingTeam == AFLPlayer.Team.Home ? Vector3.forward : Vector3.back;
+            _receiver.SnapFacing(attackDir);
+
+            TakeBeatControl(_receiver);
+            if (cam) cam.CutToSide(_receiver.transform, attackDir);
+
+            if (prompt) prompt.BeginSweep("Tap MARK: kick it forward", 0f);
+            Announce(TeamName(_actingTeam) + " clear it");
+        }
+
+        void UpdateClearanceKickBeat()
+        {
+            if (_receiver) _receiver.SetKickChargeVisual(Mathf.InverseLerp(-1f, 1f, prompt.CurrentValue));
+            if (!ResolveSingleTap(_receiver)) return;
+            var (grade, _) = prompt.Resolve();
+            prompt.Stop();
+
+            Vector3 attackDir = _actingTeam == AFLPlayer.Team.Home ? Vector3.forward : Vector3.back;
+            // Aim comes entirely from the arrow now, never facing (issue
+            // #1 section 4) — a small yaw offset driven by CurrentValue,
+            // clean grade = straighter, poor grade = more skew.
+            float skewDeg = prompt.CurrentValue * 22f;
+            Vector3 aim = Quaternion.Euler(0f, skewDeg, 0f) * attackDir;
+
+            _receiver.Kick(Mathf.Lerp(0.55f, 1f, grade), aim);
+            AnnounceGrade("Kick", grade);
+
+            Transform goal = _actingTeam == AFLPlayer.Team.Home ? goalNorth : goalSouth;
+            _clearanceAimTarget = _forwardOption ? _forwardOption.transform.position
+                                                  : (goal ? goal.position : _receiver.transform.position + aim * 15f);
+            BeginMarkContest();
+        }
+
+        // ---------------------------------------------------------------
+        //  BEAT 3 — MARK CONTEST: closing ring on the descending ball.
+        //  Attacker taps for a mark, defender's bot/human taps to spoil —
+        //  same ring, same rules, whichever side times it closer wins
+        //  (issue #1: defence reuses the identical mechanic).
+        // ---------------------------------------------------------------
+        void BeginMarkContest()
+        {
+            _beatStartedAt = Time.time;
+            _botCommitAt = -1f;
+            Beat = AFLBeat.MarkContest;
+
+            var defendingTeam = _actingTeam == AFLPlayer.Team.Home ? AFLPlayer.Team.Away : AFLPlayer.Team.Home;
+            _defender = FindRuck(defendingTeam) ?? _ruck;
+
+            Vector3 landing = _clearanceAimTarget;
+            Vector3 attackDir = _actingTeam == AFLPlayer.Team.Home ? Vector3.forward : Vector3.back;
+
+            if (_forwardOption) PlaceAtSlot(_forwardOption, landing, attackDir);
+            PlaceAtSlot(_defender, landing + Cross(attackDir) * 1.6f, -attackDir);
+
+            TakeBeatControl(_actingTeam == userTeam ? _forwardOption : _defender);
+            if (cam) cam.CutToSide((_forwardOption ? _forwardOption.transform : _defender.transform), attackDir);
+
+            float fallTime = ball ? Mathf.Clamp(ball.EstimateFallTime(landing.y + 3f), 0.8f, 2.4f) : 1.4f;
+            if (prompt) { prompt.ringDuration = fallTime; prompt.BeginRing("Tap MARK as the ring closes!"); }
+            Announce("Contest!");
+        }
+
+        void UpdateMarkContestBeat()
+        {
+            if (!prompt.IsLive) return;
+
+            bool attackerTapped = false, defenderTapped = false;
+            if (_actingTeam == userTeam) { attackerTapped = AFLInput.MarkDown; defenderTapped = BotTap(_defender); }
+            else { defenderTapped = AFLInput.MarkDown; attackerTapped = BotTap(_forwardOption); }
+
+            // First side to actually tap resolves the contest — matches a
+            // real jump-for-it feel (whoever commits first gets graded);
+            // if the ring finishes with nobody tapping, that's a clean drop.
+            if (!attackerTapped && !defenderTapped && prompt.CurrentValue < 1f) return;
+
+            var (grade, _) = attackerTapped || defenderTapped ? prompt.Resolve() : (0.05f, 0f);
+            prompt.Stop();
+
+            bool attackerWon = attackerTapped && grade >= 0.30f;
+            bool defenderSpoiled = defenderTapped && grade >= 0.45f && !attackerWon;
+
+            if (attackerWon)
             {
-                BeginSetShot(settledBy);
+                if (_forwardOption) { _forwardOption.Jump(); ball.Attach(_forwardOption); }
+                AnnounceGrade(grade >= 0.85f ? "SPECKY MARK!" : "Mark!", grade);
+                BeginSetShot(_forwardOption ?? _receiver);
+            }
+            else if (defenderSpoiled)
+            {
+                if (_defender) _defender.Jump();
+                Announce("Spoiled! Back to the centre", 1.8f);
+                if (ball) ball.Spoil(_defender ? _defender.transform.position : _clearanceAimTarget);
+                QueueRestart();
             }
             else
             {
-                // Spoiled, fumbled, or intercepted by the defending team —
-                // any of those means no shot for whoever was attacking.
-                // Issue #1: "mark lost = no shot, straight back to centre."
-                Announce("No shot — back to the centre", 2f);
-                QueueCentreRestart();
+                Announce("Dropped — back to the centre", 1.8f);
+                if (ball) ball.ResetTo(_clearanceAimTarget + Vector3.up * 0.5f);
+                QueueRestart();
             }
         }
 
+        // Bots share the identical visible cue rather than a hidden
+        // calculation — issue #1 section 6. Reaction delay is deliberately
+        // worse than the touch bridge's own round trip, and skill sits
+        // below the perfect band, so a bot is beatable, not just "fair."
+        // One shared timer slot is enough: RuckTap/ClearanceKick/SetShot
+        // only ever have one relevant player (human XOR bot), and
+        // MarkContest's two calls (attacker/defender) only ever have one
+        // bot side active at a time too, since TakeBeatControl always
+        // hands control to exactly one of the two.
+        float _botCommitAt = -1f;
+        bool BotTap(AFLPlayer bot)
+        {
+            if (!bot || bot.isUserControlled) return false;
+            if (_botCommitAt < 0f)
+            {
+                float reactionDelay = 0.22f + Random.Range(0f, 0.25f);   // worse than real touch latency
+                _botCommitAt = _beatStartedAt + reactionDelay + Random.Range(0.15f, 0.55f);
+            }
+            if (Time.time >= _botCommitAt) { _botCommitAt = -1f; return true; }
+            return false;
+        }
+
+        // Single-relevant-player beats (RuckTap/ClearanceKick/SetShot):
+        // human presses MARK if it's their player, otherwise resolves on
+        // the same bot timer as MarkContest.
+        bool ResolveSingleTap(AFLPlayer relevant)
+        {
+            if (relevant && relevant.isUserControlled) return AFLInput.MarkDown;
+            return BotTap(relevant);
+        }
+
         // ---------------------------------------------------------------
-        //  SET SHOT — freeze the field, one swinging arrow, one tap
+        //  BEAT 4 — SET SHOT: the one mechanic that already worked —
+        //  reused as the template for every other beat above.
         // ---------------------------------------------------------------
         void BeginSetShot(AFLPlayer marker)
         {
-            Phase = AFLPhase.SetShot;
-            BotsFrozen = true;
-            _shotTaker = marker;
-            _shotGoal = marker.team == AFLPlayer.Team.Home ? goalNorth : goalSouth;
-            _shotAimAngle = 0f;
-            _shotAimDir = 1f;
-            marker.moveTarget = null;
-            marker.SetMoveIntent(Vector3.zero, 0f);
+            _beatStartedAt = Time.time;
+            _botCommitAt = -1f;
+            Beat = AFLBeat.SetShot;
+            _shooter = marker;
 
-            TakeControl(marker);
-            if (cam) cam.CutToSetShot(marker.transform, _shotGoal);
+            Transform goal = _actingTeam == AFLPlayer.Team.Home ? goalNorth : goalSouth;
+            Vector3 toGoal = goal ? (goal.position - marker.transform.position) : marker.transform.forward;
+            toGoal.y = 0f; toGoal.Normalize();
+            marker.SnapFacing(toGoal);
+
+            TakeBeatControl(marker);
+            if (cam) cam.CutToSide(marker.transform, toGoal);
+
+            if (prompt) prompt.BeginSweep("Tap MARK: shot at goal!", 0f);
             Announce("Set shot!");
         }
 
-        void UpdateSetShot()
+        void UpdateSetShotBeat()
         {
-            if (_shotTaker == null || _shotGoal == null) { QueueCentreRestart(); return; }
+            if (_shooter) _shooter.SetKickChargeVisual(Mathf.InverseLerp(-1f, 1f, prompt.CurrentValue));
+            if (!ResolveSingleTap(_shooter)) return;
+            var (grade, _) = prompt.Resolve();
+            prompt.Stop();
 
-            _shotAimAngle += _shotAimDir * ShotAimSpeed * Time.deltaTime;
-            if (_shotAimAngle > ShotAimSweep) { _shotAimAngle = ShotAimSweep; _shotAimDir = -1f; }
-            if (_shotAimAngle < -ShotAimSweep) { _shotAimAngle = -ShotAimSweep; _shotAimDir = 1f; }
+            Transform goal = _actingTeam == AFLPlayer.Team.Home ? goalNorth : goalSouth;
+            Vector3 toGoal = goal ? (goal.position - _shooter.transform.position) : _shooter.transform.forward;
+            toGoal.y = 0f; toGoal.Normalize();
+            float skewDeg = prompt.CurrentValue * 18f;
+            Vector3 aimed = Quaternion.Euler(0f, skewDeg, 0f) * toGoal;
 
-            if (AFLInput.MarkDown) FireSetShot();
-        }
-
-        void FireSetShot()
-        {
-            Vector3 toGoal = _shotGoal.position - _shotTaker.transform.position; toGoal.y = 0f;
-            float dist = toGoal.magnitude;
-            toGoal.Normalize();
-            Vector3 aimed = Quaternion.Euler(0f, _shotAimAngle, 0f) * toGoal;
-
-            // Power auto-set from distance — the aim arrow is the only
-            // decision. Issue #1: "the most forgiving thing in the game."
-            float power = Mathf.Clamp01(dist / 28f);
-            _shotTaker.Kick(power, aimed);
-
-            BotsFrozen = false;
-            Phase = AFLPhase.Celebration;
-            QueueCentreRestart();
-            Announce("Shot away!");
+            _shooter.Kick(Mathf.Lerp(0.6f, 1f, grade), aimed);
+            AnnounceGrade("Shot away", grade);
+            Beat = AFLBeat.Celebration;
+            QueueRestart();
         }
 
         // ---------------------------------------------------------------
@@ -282,122 +402,145 @@ namespace AFL
                 if ((t == AFLPlayer.Team.Home ? HomeGoals : AwayGoals) >= GoalsToWin)
                 {
                     _matchOver = true;
+                    if (prompt) prompt.Stop();
                     Announce((t == AFLPlayer.Team.Home ? "CROCS WIN!" : "ROOS WIN!"), 999f);
                     return;
                 }
             }
             else
             {
-                // No separate behind tally — a miss just says so and
-                // restarts. Issue #1: delete the behind bookkeeping.
                 Announce((t == AFLPlayer.Team.Home ? "Crocs" : "Roos") + " miss — no score");
             }
-            QueueCentreRestart();
+            if (_restartAt < 0f) QueueRestart();
         }
 
         // ---------------------------------------------------------------
-        //  SAFETY NET — no phase should ever be able to stall the game.
-        //  Issue #1: "no boundary rule anywhere... a kick leaving the
-        //  plane must never stall the game."
+        //  HELPERS
         // ---------------------------------------------------------------
-        void CheckBoundary()
+        static AFLPlayer FindRuck(AFLPlayer.Team t)
         {
-            if (!ball || _matchOver || _restartAt > 0f) return;
-            Vector3 p = ball.transform.position;
-            bool outOfBounds = Mathf.Abs(p.x) > fieldHalfWidth || Mathf.Abs(p.z) > fieldHalfLength || p.y < -4f;
-            if (outOfBounds)
+            foreach (var p in AFLPlayer.All) if (p.team == t && p.isRuck) return p;
+            foreach (var p in AFLPlayer.All) if (p.team == t) return p;
+            return null;
+        }
+
+        static System.Collections.Generic.List<AFLPlayer> TeammatesOf(AFLPlayer.Team t, AFLPlayer exclude)
+        {
+            var list = new System.Collections.Generic.List<AFLPlayer>();
+            foreach (var p in AFLPlayer.All) if (p.team == t && p != exclude) list.Add(p);
+            return list;
+        }
+
+        static Vector3 Cross(Vector3 flatDir) => Vector3.Cross(Vector3.up, flatDir).normalized;
+
+        static void PlaceAtSlot(AFLPlayer p, Vector3 pos, Vector3 facing)
+        {
+            if (!p) return;
+            pos.y = 1f;
+            TeleportPlayer(p, pos);
+            p.SnapFacing(facing);
+        }
+
+        // Every player not actively involved in this beat still gets a
+        // distinct, spread-out slot — never the same point as anyone else
+        // (issue #1 section 8: "distinct destination slots per player
+        // rather than a shared target point" is what actually fixes the
+        // fusing, not collision alone).
+        void SpreadRemainingPlayers(Vector3 focus, Vector3 attackDir)
+        {
+            int i = 0;
+            foreach (var p in AFLPlayer.All)
             {
-                Announce("Out of bounds — ball up", 1.6f);
-                QueueCentreRestart(0.6f);
+                if (p == _ruck || p == _leftOption || p == _rightOption) continue;
+                float side = (i % 2 == 0) ? 1f : -1f;
+                float back = 4f + i * 2f;
+                Vector3 slot = focus + Cross(attackDir) * side * (8f + i) - attackDir * back;
+                PlaceAtSlot(p, slot, attackDir);
+                i++;
             }
         }
 
-        void TrackLooseBall()
+        // Drives forward-advance for whichever player is active this beat,
+        // WITHOUT touching isUserControlled — that flag is fixed at spawn
+        // (BuildScript) and must stay a stable "is this Shaun's own
+        // character" fact, not something that flips depending on whose
+        // beat it currently is. A bot's own movement never reads
+        // AFLInput, so it needs an explicit push here; the human's own
+        // player already reads AFLInput.MoveHeld directly in
+        // AFLPlayer.Update() and needs nothing from this method at all.
+        void TakeBeatControl(AFLPlayer active)
         {
-            if (ball == null || Phase == AFLPhase.SetShot) return;
-            if (ball.Carrier == null)
-            {
-                if (_looseSince < 0f) _looseSince = Time.time;
-                else if (Time.time - _looseSince > looseBallTimeout && _restartAt < 0f)
-                {
-                    Announce("Ball up", 1.4f);
-                    QueueCentreRestart(0.6f);
-                }
-            }
-            else _looseSince = -1f;
+            foreach (var pl in AFLPlayer.All) if (!pl.isUserControlled) pl.SetMoveHeld(false);
+            if (active && !active.isUserControlled) active.SetMoveHeld(true);
         }
 
-        void QueueCentreRestart(float delay = -1f)
+        void QueueRestart(float delay = -1f)
         {
             if (_matchOver) return;
+            if (prompt) prompt.Stop();
             _restartAt = Time.time + (delay > 0f ? delay : restartDelay);
         }
 
-        // ---------------------------------------------------------------
-        //  CONTROL
-        // ---------------------------------------------------------------
-        public void TakeControl(AFLPlayer p)
+        static string TeamName(AFLPlayer.Team t) => t == AFLPlayer.Team.Home ? "Crocs" : "Roos";
+
+        void AnnounceGrade(string label, float grade)
         {
-            if (!p || p == _controlled) return;
-            if (_controlled) _controlled.SetControlled(false);
-            _controlled = p;
-            _controlled.SetControlled(true);
+            string quality = grade >= 0.85f ? "Perfect!" : grade >= 0.6f ? "Good" : grade >= 0.3f ? "OK" : "Scrappy";
+            Announce($"{label} — {quality}");
         }
 
-        AFLPlayer NearestTeammateToBall(AFLPlayer.Team t, AFLPlayer exclude)
-        {
-            if (!ball) return null;
-            AFLPlayer best = null; float bestD = float.MaxValue;
-            foreach (var p in AFLPlayer.All)
-            {
-                if (p.team != t || p == exclude) continue;
-                float d = (p.transform.position - ball.transform.position).sqrMagnitude;
-                if (d < bestD) { bestD = d; best = p; }
-            }
-            return best;
-        }
-
-        // ---------------------------------------------------------------
-        //  MESSAGES / MINIMAL HUD  — two counters + target, nothing else.
-        //  Issue #1: delete the clock/quarters/behind tally and the old
-        //  keyboard-hint debug overlay.
-        // ---------------------------------------------------------------
-        public void AnnounceMark(AFLPlayer p, MarkGrade g)
-        {
-            Announce(g == MarkGrade.Screamer ? "SPECKY MARK!" : "Mark!");
-        }
-
-        public void Announce(string msg, float seconds = 2.5f)
+        public void Announce(string msg, float seconds = 2.2f)
         {
             _message = msg;
             _messageUntil = Time.time + seconds;
         }
 
+        // ---------------------------------------------------------------
+        //  HUD — issue #1 section 9: one line, large, high contrast, dark
+        //  panel behind it, size derived from viewport height. The beat
+        //  prompt itself (arrow/ring) is drawn by AFLBeatPrompt; this is
+        //  just the score line and the transient status message.
+        // ---------------------------------------------------------------
         void OnGUI()
         {
-            if (_big == null)
-            {
-                _big = new GUIStyle(GUI.skin.label) { fontSize = 26, fontStyle = FontStyle.Bold };
-                _small = new GUIStyle(GUI.skin.label) { fontSize = 15 };
-            }
+            EnsureStyles();
 
-            GUI.Label(new Rect(20, 14, 700, 40),
-                string.Format("CROCS {0} — ROOS {1}   ·  first to {2}", HomeGoals, AwayGoals, GoalsToWin), _big);
+            int pad = Mathf.RoundToInt(Screen.height * 0.02f);
+            int scoreH = Mathf.RoundToInt(Screen.height * 0.08f);
+            GUI.color = new Color(0f, 0f, 0f, 0.6f);
+            GUI.DrawTexture(new Rect(pad, pad, Screen.width - pad * 2, scoreH), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+            GUI.Label(new Rect(pad, pad, Screen.width - pad * 2, scoreH),
+                $"CROCS {HomeGoals} — ROOS {AwayGoals}   ·  first to {GoalsToWin}", _big);
 
             if (Time.time < _messageUntil)
-                GUI.Label(new Rect(20, 52, 800, 30), _message, _small);
+            {
+                int msgY = pad * 2 + scoreH;
+                int msgH = Mathf.RoundToInt(Screen.height * 0.055f);
+                GUI.color = new Color(0f, 0f, 0f, 0.55f);
+                GUI.DrawTexture(new Rect(pad, msgY, Screen.width - pad * 2, msgH), Texture2D.whiteTexture);
+                GUI.color = Color.white;
+                GUI.Label(new Rect(pad, msgY, Screen.width - pad * 2, msgH), _message, _small);
+            }
+        }
 
-            if (Phase == AFLPhase.SetShot)
+        void EnsureStyles()
+        {
+            if (_big != null) return;
+            _big = new GUIStyle(GUI.skin.label)
             {
-                GUI.Label(new Rect(Screen.width / 2f - 110, Screen.height - 70, 260, 26),
-                    "aim: " + _shotAimAngle.ToString("+0;-0") + "°  —  tap MARK to kick", _small);
-            }
-            else if (_controlled != null && _controlled.HasBall && _controlled.KickCharge > 0f)
+                fontSize = Mathf.RoundToInt(Screen.height * 0.05f),
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleLeft,
+                normal = { textColor = Color.white }
+            };
+            _small = new GUIStyle(GUI.skin.label)
             {
-                GUI.Box(new Rect(20, Screen.height - 46, 240, 22), GUIContent.none);
-                GUI.Box(new Rect(22, Screen.height - 44, 236 * _controlled.KickCharge, 18), GUIContent.none);
-                GUI.Label(new Rect(270, Screen.height - 48, 300, 24), "Kick power", _small);
-            }
+                fontSize = Mathf.RoundToInt(Screen.height * 0.035f),
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleLeft,
+                normal = { textColor = new Color(1f, 0.9f, 0.5f) }
+            };
         }
     }
 }

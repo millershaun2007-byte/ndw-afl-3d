@@ -18,19 +18,19 @@
       #control-bar { flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
         padding: 10px clamp(8px, 3vw, 18px); gap: clamp(14px, 4vw, 26px); background: #16241a;
         border-top: 2px solid rgba(255,255,255,0.08); }
-      /* Three buttons only (2026-08-11 rebuild, issue #1): MOVE curves
-         toward the ball/attack target instead of a fixed lane, MARK is the
-         one timed press used for both attacking (jump for the mark) and
-         defending (jump to deny it) and also fires the set-shot, KICK
-         charges and releases while carrying. Handball/Tackle are gone
-         along with their buttons. */
-      .action-btn { width: clamp(56px, 16vw, 84px); height: clamp(56px, 16vw, 84px); border-radius: 18px;
-        border: 2px solid rgba(255,255,255,0.35); color: #fff; font-size: clamp(0.6rem, 2vw, 0.95rem);
+      /* Two buttons only (2026-08-11 beat rewrite, issue #1): MOVE is
+         hold-to-advance in a fixed direction, nothing else — no steering.
+         MARK is the single tap every beat uses (ruck tap, clearance kick,
+         mark contest, set shot all read the same button, graded against
+         whatever AFLBeatPrompt is currently drawing on screen). KICK is
+         gone — there is no more charge-and-release, since aim/power now
+         always come from the same tap-against-the-arrow mechanic. */
+      .action-btn { width: clamp(64px, 20vw, 100px); height: clamp(64px, 20vw, 100px); border-radius: 20px;
+        border: 2px solid rgba(255,255,255,0.35); color: #fff; font-size: clamp(0.65rem, 2.2vw, 1.05rem);
         font-weight: 800; display: flex; align-items: center; justify-content: center; touch-action: none;
         user-select: none; cursor: pointer; -webkit-tap-highlight-color: transparent; flex-shrink: 0; text-align: center; }
       #move-btn { background: #1f8f3d; }
       #mark-btn { background: #2fae4d; }
-      #kick-btn { background: #e8720f; }
     </style>
   </head>
   <body>
@@ -41,7 +41,6 @@
       <div id="control-bar">
         <div id="move-btn" class="action-btn">MOVE</div>
         <div id="mark-btn" class="action-btn">MARK</div>
-        <div id="kick-btn" class="action-btn">KICK</div>
       </div>
     </div>
     <script src="Build/{{{ LOADER_FILENAME }}}"></script>
@@ -97,23 +96,18 @@
         if (unityInstanceRef) unityInstanceRef.SendMessage('TouchBridge', method, value);
       }
 
-      // Held (not tapped): while pressed, curve toward the current attack
-      // target (AFLPlayer.moveTarget — the ball while chasing, a forward
-      // teammate while carrying). Released, stop.
+      // Held (not tapped): while pressed, advance forward — a fixed
+      // direction set once per beat by AFLGameManager, never steered by
+      // this button. Released, stop.
       var moveBtn = document.getElementById('move-btn');
       moveBtn.addEventListener('pointerdown', function (e) { e.preventDefault(); sendToUnity('SetMoveHeld', '1'); });
       moveBtn.addEventListener('pointerup', function () { sendToUnity('SetMoveHeld', '0'); });
       moveBtn.addEventListener('pointercancel', function () { sendToUnity('SetMoveHeld', '0'); });
       moveBtn.addEventListener('pointerleave', function () { sendToUnity('SetMoveHeld', '0'); });
 
+      // The one verb every beat uses — see AFLBeatPrompt.
       var markBtn = document.getElementById('mark-btn');
       markBtn.addEventListener('pointerdown', function (e) { e.preventDefault(); sendToUnity('MarkPressed', ''); });
-
-      var kickBtn = document.getElementById('kick-btn');
-      kickBtn.addEventListener('pointerdown', function (e) { e.preventDefault(); sendToUnity('SetKickHeld', '1'); });
-      kickBtn.addEventListener('pointerup', function () { sendToUnity('KickReleased', ''); });
-      kickBtn.addEventListener('pointercancel', function () { sendToUnity('KickReleased', ''); });
-      kickBtn.addEventListener('pointerleave', function () { sendToUnity('KickReleased', ''); });
     </script>
   </body>
 </html>
