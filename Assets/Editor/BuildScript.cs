@@ -1,6 +1,8 @@
 using UnityEngine;
 using UnityEditor;
+using UnityEditor.Animations;
 using UnityEditor.SceneManagement;
+using System.Linq;
 using AFL;
 
 // Rebuild of BuildScript for the AFLGameKit.cs architecture (2026-08-10 full
@@ -121,17 +123,17 @@ public static class BuildScript
         var awayTint = new Color(1f, 0.4f, 0.35f);    // warm red — Away
 
         var croc = BuildPlayer("HomeCroc1", AFLPlayer.Team.Home, new Vector3(0, 1, -5),
-            "Assets/Models/CrocModel3DAI/CrocModel.glb", isUser: true, attackingGoal: goalNorth, isRuck: true, tint: homeTint);
+            "Assets/Models/CrocRiggedAI", isUser: true, attackingGoal: goalNorth, isRuck: true, tint: homeTint);
         BuildPlayer("HomeCroc2", AFLPlayer.Team.Home, new Vector3(-6, 1, -8),
-            "Assets/Models/CrocModel3DAI/CrocModel.glb", isUser: false, attackingGoal: goalNorth, isRuck: false, tint: homeTint);
+            "Assets/Models/CrocRiggedAI", isUser: false, attackingGoal: goalNorth, isRuck: false, tint: homeTint);
         BuildPlayer("HomeCroc3", AFLPlayer.Team.Home, new Vector3(6, 1, -9),
-            "Assets/Models/CrocModel3DAI/CrocModel.glb", isUser: false, attackingGoal: goalNorth, isRuck: false, tint: homeTint);
+            "Assets/Models/CrocRiggedAI", isUser: false, attackingGoal: goalNorth, isRuck: false, tint: homeTint);
         BuildPlayer("AwayRoo1", AFLPlayer.Team.Away, new Vector3(0, 1, 5),
-            "Assets/Models/RooModel3DAI/RooModel.glb", isUser: false, attackingGoal: goalSouth, isRuck: true, tint: awayTint);
+            "Assets/Models/RooRiggedAI", isUser: false, attackingGoal: goalSouth, isRuck: true, tint: awayTint);
         BuildPlayer("AwayRoo2", AFLPlayer.Team.Away, new Vector3(-6, 1, 8),
-            "Assets/Models/RooModel3DAI/RooModel.glb", isUser: false, attackingGoal: goalSouth, isRuck: false, tint: awayTint);
+            "Assets/Models/RooRiggedAI", isUser: false, attackingGoal: goalSouth, isRuck: false, tint: awayTint);
         BuildPlayer("AwayRoo3", AFLPlayer.Team.Away, new Vector3(6, 1, 9),
-            "Assets/Models/RooModel3DAI/RooModel.glb", isUser: false, attackingGoal: goalSouth, isRuck: false, tint: awayTint);
+            "Assets/Models/RooRiggedAI", isUser: false, attackingGoal: goalSouth, isRuck: false, tint: awayTint);
 
         var cam = BuildCamera(croc.transform);
         BuildManagers(ball, cam, centreCircle, goalNorth, goalSouth);
@@ -254,24 +256,128 @@ public static class BuildScript
         return aflBall;
     }
 
-    // Real character models replaced with primitives (2026-08-11, issue #1
-    // play-report thread) — the six Meshy/3D-AI-Studio GLBs turned out to
-    // have no skeleton, no animation clips, and are each a single welded
-    // mesh with limbs/tail floating disconnected from the body at the
-    // source-geometry level (confirmed directly in the Editor: every model
-    // imports as one MeshRenderer, zero bones, zero clips). No Unity
-    // setting or C# fixes that — it needs the source models regenerated or
-    // externally rigged, which is a real, separate, art-side task. Rather
-    // than let broken art keep blocking every gameplay test (which is what
-    // happened for two days), swap to simple readable primitives now:
-    // capsule body, sphere head, a small dark "nose" so facing is never
-    // ambiguous, solid team colour. This is a straight drop-in swap point
-    // — BuildPlayer still passes a model path, just unused for now — real
-    // rigged models come back in later by restoring the GLB-loading body
-    // this replaced (see git history on this file) once that work is done.
-    static void BuildCharacterModel3D(Transform parent, string modelPath, Color? tint)
+    // Real rigged models (2026-08-11, issue #1 play-report thread, part 2).
+    // The original six GLBs had no skeleton at all — single welded mesh,
+    // zero bones, zero clips, limbs floating disconnected from the source
+    // geometry. Primitives (capsule+head) shipped first to unblock
+    // gameplay testing without waiting on art. Since then: ran crocodile
+    // and kangaroo through Meshy's auto-rig API (POST /openapi/v1/rigging)
+    // and got back a real 24-bone skeleton plus walking/running clips for
+    // both — confirmed by actually rendering the mid-stride pose, not just
+    // trusting a non-zero bone count, that the previously-floating tail
+    // and limbs now follow the skeleton correctly. modelFolder now points
+    // at a folder containing "*Rigged.glb" (the base skinned model) and
+    // "*Walking.glb" (source of the loop clip); falls back to a primitive
+    // if a species doesn't have a rigged folder yet.
+    static void BuildCharacterModel3D(Transform parent, string modelFolder, Color? tint)
     {
-        _ = modelPath; // kept as a swap point for real rigged models later
+        string riggedPath = FindGlbInFolder(modelFolder, "Rigged");
+        if (riggedPath == null) { BuildPrimitiveVisual(parent, tint); return; }
+
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(riggedPath);
+        var instance = Object.Instantiate(prefab, parent);
+        instance.name = "Visual";
+        instance.transform.localPosition = Vector3.zero;
+        instance.transform.localRotation = Quaternion.identity;
+        foreach (var col in instance.GetComponentsInChildren<Collider>()) Object.DestroyImmediate(col);
+
+        var animator = instance.GetComponent<Animator>() ?? instance.GetComponentInChildren<Animator>();
+        if (!animator) animator = instance.AddComponent<Animator>();
+
+        string walkPath = FindGlbInFolder(modelFolder, "Walking");
+        AnimationClip walkClip = walkPath != null
+            ? AssetDatabase.LoadAllAssetsAtPath(walkPath).OfType<AnimationClip>().FirstOrDefault()
+            : null;
+        string species = System.IO.Path.GetFileName(modelFolder);
+        animator.runtimeAnimatorController = BuildAnimatorController(species, walkClip);
+
+        var player = parent.GetComponent<AFLPlayer>();
+        if (player) player.animator = animator;
+
+        // Team tint: same deferred status as before — GLB ships its own
+        // baked jersey texture, no straightforward single-material tint
+        // point. Not chased again here; team is still readable from the
+        // HUD and whichever player you're controlling.
+        _ = tint;
+
+        // Anchors derived from the real, now-clean rendered bounds — safe
+        // again now that the source geometry doesn't have stray floating
+        // parts inflating it. See git history on this file for the
+        // primitive-era version of this comment explaining why it was
+        // temporarily replaced with fixed defaults.
+        var renderers = instance.GetComponentsInChildren<Renderer>();
+        if (renderers.Length > 0 && player)
+        {
+            var b = renderers[0].bounds;
+            for (int i = 1; i < renderers.Length; i++) b.Encapsulate(renderers[i].bounds);
+            float modelHeight = Mathf.Max(0.5f, b.max.y - parent.position.y);
+            float reachY = Mathf.Clamp(modelHeight * 0.9f, 1.6f, 2.7f);
+            float holdY = Mathf.Clamp(modelHeight * 0.5f, 0.9f, 1.6f);
+            player.handsAnchor = CreateAnchor(parent, "Hands", new Vector3(0f, reachY, 0.28f));
+            player.ballHold = CreateAnchor(parent, "BallHold", new Vector3(0.32f, holdY, 0.32f));
+        }
+    }
+
+    static string FindGlbInFolder(string folder, string suffix)
+    {
+        if (!System.IO.Directory.Exists(folder)) return null;
+        foreach (var f in System.IO.Directory.GetFiles(folder, "*" + suffix + ".glb"))
+            return f.Replace('\\', '/');
+        return null;
+    }
+
+    // Minimal 2-state Idle/Walk blend — Idle is a bare state with no
+    // motion (holds the rigged model's own bind pose), Walk loops the
+    // clip pulled from the *Walking.glb export. AFLPlayer.DriveAnimator()
+    // already feeds a Speed parameter every frame; this is the smallest
+    // controller that actually uses it. One controller asset per species,
+    // reused build to build.
+    static RuntimeAnimatorController BuildAnimatorController(string species, AnimationClip walkClip)
+    {
+        System.IO.Directory.CreateDirectory("Assets/_Generated");
+        string path = "Assets/_Generated/" + species + "Animator.controller";
+        var controller = UnityEditor.Animations.AnimatorController.CreateAnimatorControllerAtPath(path);
+        // Real bug, caught by the playtest harness spamming ~4M log lines
+        // in under a minute: AFLPlayer.DriveAnimator() also calls
+        // SetBool("Airborne",...)/SetBool("HasBall",...)/
+        // SetFloat("KickCharge",...) every single frame for every player —
+        // this controller only declared Speed, so Unity logged a "does not
+        // exist" error on all three, every frame. Nothing here actually
+        // uses the other three parameters yet (only Speed drives the
+        // Idle/Walk transition below), but they still need to exist on
+        // the controller or DriveAnimator()'s calls throw regardless of
+        // whether anything is wired to react to them.
+        controller.AddParameter("Speed", AnimatorControllerParameterType.Float);
+        controller.AddParameter("Airborne", AnimatorControllerParameterType.Bool);
+        controller.AddParameter("HasBall", AnimatorControllerParameterType.Bool);
+        controller.AddParameter("KickCharge", AnimatorControllerParameterType.Float);
+        var sm = controller.layers[0].stateMachine;
+        var idle = sm.AddState("Idle");
+        sm.defaultState = idle;
+
+        if (walkClip != null)
+        {
+            var walk = sm.AddState("Walk");
+            walk.motion = walkClip;
+
+            var toWalk = idle.AddTransition(walk);
+            toWalk.hasExitTime = false;
+            toWalk.duration = 0.15f;
+            toWalk.AddCondition(AnimatorConditionMode.Greater, 0.3f, "Speed");
+
+            var toIdle = walk.AddTransition(idle);
+            toIdle.hasExitTime = false;
+            toIdle.duration = 0.15f;
+            toIdle.AddCondition(AnimatorConditionMode.Less, 0.3f, "Speed");
+        }
+        return controller;
+    }
+
+    // Primitive fallback (2026-08-11) for any species without a rigged
+    // folder yet — capsule body, sphere head, a small dark "nose" so
+    // facing is never ambiguous, solid team colour.
+    static void BuildPrimitiveVisual(Transform parent, Color? tint)
+    {
         Color c = tint ?? Color.white;
         var mat = SolidColorMaterial(c);
 
@@ -286,16 +392,11 @@ public static class BuildScript
         var head = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         head.name = "Head";
         head.transform.SetParent(body.transform, false);
-        // Local to the (0.7,1,0.7)-scaled capsule — divide out the parent
-        // scale so the head reads as a normal round sphere, not squashed.
         head.transform.localScale = new Vector3(0.5f / 0.7f, 0.5f, 0.5f / 0.7f);
         head.transform.localPosition = new Vector3(0f, 0.62f, 0f);
         head.GetComponent<Renderer>().sharedMaterial = mat;
         Object.DestroyImmediate(head.GetComponent<Collider>());
 
-        // Small dark marker on the front of the head — the one thing every
-        // play report this project has ever had in common is not being
-        // able to tell which way a character is facing at a glance.
         var nose = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         nose.name = "FacingMarker";
         nose.transform.SetParent(head.transform, false);
@@ -304,12 +405,9 @@ public static class BuildScript
         nose.GetComponent<Renderer>().sharedMaterial = SolidColorMaterial(new Color(0.08f, 0.08f, 0.08f));
         Object.DestroyImmediate(nose.GetComponent<Collider>());
 
-        // No custom hands/ballHold anchors here — AFLPlayer's own defaults
-        // (standingReach 2.20, ballHold at (0.35,1.15,0.35)) were already
-        // tuned for a roughly-2-unit-tall, 1x-scale body, which is exactly
-        // what this primitive is. The bounds-derived anchor code this
-        // replaced existed specifically to compensate for the broken GLBs'
-        // unpredictable proportions — not needed for known-good geometry.
+        // No custom hands/ballHold anchors — AFLPlayer's own defaults were
+        // already tuned for a roughly-2-unit-tall, 1x-scale body, which is
+        // exactly what this primitive is.
     }
 
     static Transform CreateAnchor(Transform parent, string n, Vector3 local)
