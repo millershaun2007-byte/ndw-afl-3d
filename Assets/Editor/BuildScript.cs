@@ -254,76 +254,62 @@ public static class BuildScript
         return aflBall;
     }
 
-    // Same real-3D-model import pattern proven in the old project (see its
-    // BuildScript.cs BuildCharacterModel3D for the full history of why each
-    // step is here): glTFast-imported GLB, texture explicitly re-linked
-    // (Unity's OBJ/GLB importers don't reliably auto-link), colliders
-    // stripped off the visual since the CharacterController on the parent
-    // is the only collider this character needs.
+    // Real character models replaced with primitives (2026-08-11, issue #1
+    // play-report thread) — the six Meshy/3D-AI-Studio GLBs turned out to
+    // have no skeleton, no animation clips, and are each a single welded
+    // mesh with limbs/tail floating disconnected from the body at the
+    // source-geometry level (confirmed directly in the Editor: every model
+    // imports as one MeshRenderer, zero bones, zero clips). No Unity
+    // setting or C# fixes that — it needs the source models regenerated or
+    // externally rigged, which is a real, separate, art-side task. Rather
+    // than let broken art keep blocking every gameplay test (which is what
+    // happened for two days), swap to simple readable primitives now:
+    // capsule body, sphere head, a small dark "nose" so facing is never
+    // ambiguous, solid team colour. This is a straight drop-in swap point
+    // — BuildPlayer still passes a model path, just unused for now — real
+    // rigged models come back in later by restoring the GLB-loading body
+    // this replaced (see git history on this file) once that work is done.
     static void BuildCharacterModel3D(Transform parent, string modelPath, Color? tint)
     {
-        var prefabRoot = AssetDatabase.LoadAssetAtPath<GameObject>(modelPath);
-        if (prefabRoot == null)
-        {
-            Debug.LogWarning("[BuildCharacterModel3D] Could not load " + modelPath + " — character will have no visual.");
-            return;
-        }
-        var instance = Object.Instantiate(prefabRoot, parent);
-        instance.name = "Visual";
-        instance.transform.localPosition = new Vector3(0, 1f, 0);
-        instance.transform.localScale = Vector3.one * 2f;
-        foreach (var col in instance.GetComponentsInChildren<Collider>()) Object.DestroyImmediate(col);
+        _ = modelPath; // kept as a swap point for real rigged models later
+        Color c = tint ?? Color.white;
+        var mat = SolidColorMaterial(c);
 
-        var modelDir = System.IO.Path.GetDirectoryName(modelPath);
-        string texPath = null;
-        foreach (var candidate in System.IO.Directory.GetFiles(modelDir, "*.png"))
-        {
-            texPath = candidate.Replace('\\', '/');
-            break;
-        }
-        var diffuseTex = texPath != null ? AssetDatabase.LoadAssetAtPath<Texture2D>(texPath) : null;
-        if (diffuseTex != null)
-        {
-            var mat = new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard"));
-            mat.mainTexture = diffuseTex;
-            if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", diffuseTex);
-            foreach (var mr in instance.GetComponentsInChildren<MeshRenderer>()) mr.sharedMaterial = mat;
-        }
-        // GLB imports (both models used here) carry their own embedded
-        // materials/textures via glTFast already — the PNG-scan above is a
-        // fallback for OBJ-based models, harmless no-op when a GLB's folder
-        // has no loose PNG.
+        var body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+        body.name = "Visual";
+        body.transform.SetParent(parent, false);
+        body.transform.localPosition = new Vector3(0f, 1f, 0f);   // matches the CharacterController's own center
+        body.transform.localScale = new Vector3(0.7f, 1f, 0.7f);  // capsule default height 2, radius 0.5
+        body.GetComponent<Renderer>().sharedMaterial = mat;
+        Object.DestroyImmediate(body.GetComponent<Collider>());
 
-        // Team tint: DEFERRED, not implemented (2026-08-10) — see git
-        // history on this file for what was already tried and didn't work.
-        // Home/Away are still distinguishable via the HUD scoreboard and
-        // which player you're controlling.
-        _ = tint; // parameter kept for when this gets revisited
+        var head = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        head.name = "Head";
+        head.transform.SetParent(body.transform, false);
+        // Local to the (0.7,1,0.7)-scaled capsule — divide out the parent
+        // scale so the head reads as a normal round sphere, not squashed.
+        head.transform.localScale = new Vector3(0.5f / 0.7f, 0.5f, 0.5f / 0.7f);
+        head.transform.localPosition = new Vector3(0f, 0.62f, 0f);
+        head.GetComponent<Renderer>().sharedMaterial = mat;
+        Object.DestroyImmediate(head.GetComponent<Collider>());
 
-        // Real fix (2026-08-11, issue #1's "one fact in two places" — hands
-        // don't match the model): standingReach used to be a hardcoded
-        // 2.20 while the visual sat at localScale=2 with a +1 offset, with
-        // nothing tying the two together. Deriving both anchors from this
-        // model's actual rendered bounds means an artist repositioning or
-        // resizing a model automatically becomes correct physics, instead
-        // of needing separately-tuned agreement that drifts the moment
-        // either side changes.
-        var renderers = instance.GetComponentsInChildren<Renderer>();
-        if (renderers.Length > 0)
-        {
-            var b = renderers[0].bounds;
-            for (int i = 1; i < renderers.Length; i++) b.Encapsulate(renderers[i].bounds);
-            float modelHeight = Mathf.Max(0.5f, b.max.y - parent.position.y);
+        // Small dark marker on the front of the head — the one thing every
+        // play report this project has ever had in common is not being
+        // able to tell which way a character is facing at a glance.
+        var nose = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        nose.name = "FacingMarker";
+        nose.transform.SetParent(head.transform, false);
+        nose.transform.localScale = Vector3.one * 0.32f;
+        nose.transform.localPosition = new Vector3(0f, 0f, 0.55f);
+        nose.GetComponent<Renderer>().sharedMaterial = SolidColorMaterial(new Color(0.08f, 0.08f, 0.08f));
+        Object.DestroyImmediate(nose.GetComponent<Collider>());
 
-            var player = parent.GetComponent<AFLPlayer>();
-            if (player)
-            {
-                float reachY = Mathf.Clamp(modelHeight * 0.9f, 1.6f, 2.7f);
-                float holdY = Mathf.Clamp(modelHeight * 0.5f, 0.9f, 1.6f);
-                player.handsAnchor = CreateAnchor(parent, "Hands", new Vector3(0f, reachY, 0.28f));
-                player.ballHold = CreateAnchor(parent, "BallHold", new Vector3(0.32f, holdY, 0.32f));
-            }
-        }
+        // No custom hands/ballHold anchors here — AFLPlayer's own defaults
+        // (standingReach 2.20, ballHold at (0.35,1.15,0.35)) were already
+        // tuned for a roughly-2-unit-tall, 1x-scale body, which is exactly
+        // what this primitive is. The bounds-derived anchor code this
+        // replaced existed specifically to compensate for the broken GLBs'
+        // unpredictable proportions — not needed for known-good geometry.
     }
 
     static Transform CreateAnchor(Transform parent, string n, Vector3 local)
@@ -378,11 +364,14 @@ public static class BuildScript
 
         var rig = cameraGo.AddComponent<AFLBroadcastCamera>();
         rig.target = followTarget;
-        // Ground/scenery only — never the Player layer, or the SphereCast
-        // collision-avoidance treats the followed player's own
-        // CharacterController as an obstruction and pulls the camera in
-        // against their back.
-        rig.collisionMask = 1 << _groundLayer;
+        // Ground AND Player (2026-08-11 fix — was Ground-only, which let
+        // the camera clip straight through any OTHER player during a
+        // contest/centre bounce; see the matching comment in
+        // AFLBroadcastCamera.LateUpdate() for why). The followed player's
+        // own CharacterController is explicitly excluded in code there via
+        // a target-root check, so this doesn't reintroduce the old
+        // "camera jams into its own target's back" bug.
+        rig.collisionMask = (1 << _groundLayer) | (1 << _playerLayer);
         // Matches AFLBroadcastCamera's own distance/height defaults so
         // there's no jarring snap on the very first frame before
         // SmoothDamp converges.

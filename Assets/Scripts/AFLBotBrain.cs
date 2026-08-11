@@ -75,7 +75,21 @@ namespace AFL
                 else HoldShape(focus);
                 return;
             }
-            if (ball.InFlight)
+            // Real bug, found 2026-08-11 by tracing the reported post-goal
+            // deadlock: AFLBall.InFlight is true for ANY uncarried ball,
+            // including one at rest on the ground — it just means "nobody's
+            // holding it," not "still airborne." This branch used to
+            // unconditionally return whenever the ball was uncarried, so
+            // once the ball bounced without being caught, no bot would EVER
+            // go pick it back up: ContestFlight()'s PredictReach() can only
+            // ever succeed for a trajectory still passing through a real
+            // catch-height window, which a settled/rolling ball never does
+            // again. The centre bounce would then just repeat forever every
+            // looseBallTimeout seconds with nothing visibly changing —
+            // exactly "waited 20+ seconds, nothing happened." Once it's
+            // touched the ground, fall through to a normal grounded chase
+            // instead of waiting on a catch that can't happen anymore.
+            if (ball.InFlight && !ball.HasBounced)
             {
                 if (isNearest) ContestFlight(ball);
                 else HoldShape(focus);

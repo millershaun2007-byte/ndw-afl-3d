@@ -74,9 +74,23 @@ namespace AFL
 
             float allowed = distance;
             Vector3 from = _smoothPivot + Vector3.up * height * 0.5f;
+            // Real bug, found 2026-08-11 from the "camera spawns/sits
+            // inside the pack" report: collisionMask only ever covered
+            // Ground, so the camera happily clipped straight through any
+            // OTHER player during a contest or centre bounce (the one
+            // exclusion that existed was only ever for the followed
+            // player's own body, via a Ground-only mask that never saw
+            // players at all). A camera clipped inside one character
+            // looking through them at another reads exactly like the
+            // reported "two heads, four arms" — likely the same bug, not
+            // a second one. BuildScript now includes the Player layer
+            // here; the target's own collider is explicitly ignored below
+            // so this still doesn't reintroduce the old "camera jams into
+            // its own target's back" problem.
             if (Physics.SphereCast(from, collisionRadius, (wanted - from).normalized,
                                    out RaycastHit hit, Vector3.Distance(from, wanted),
-                                   collisionMask, QueryTriggerInteraction.Ignore))
+                                   collisionMask, QueryTriggerInteraction.Ignore)
+                && hit.collider.transform.root != target)
                 allowed = Mathf.Max(1.6f, hit.distance - collisionBuffer);
 
             _currentDistance = Mathf.Lerp(_currentDistance, allowed, allowed < _currentDistance ? 1f : 3f * Time.deltaTime);
@@ -100,9 +114,26 @@ namespace AFL
             Vector3 pivot = target.position + pivotOffset;
             _smoothPivot = pivot;
             _pivotVel = Vector3.zero;
-            _currentDistance = distance;
+
+            // An instant cut with no collision check at all was the other
+            // half of the "camera inside the pack" bug — a handoff during
+            // a contest (several players clustered together) could snap
+            // straight into or through whoever's standing where the raw
+            // orbit position lands. Same SphereCast-and-pull-in logic
+            // LateUpdate() uses, just applied once instead of every frame.
             Quaternion orbit = Quaternion.Euler(8f, _yaw, 0f);
-            transform.position = pivot + orbit * Vector3.back * distance + Vector3.up * height;
+            Vector3 dir = orbit * Vector3.back;
+            Vector3 wanted = pivot + dir * distance + Vector3.up * height;
+            float allowed = distance;
+            Vector3 from = pivot + Vector3.up * height * 0.5f;
+            if (Physics.SphereCast(from, collisionRadius, (wanted - from).normalized,
+                                   out RaycastHit hit, Vector3.Distance(from, wanted),
+                                   collisionMask, QueryTriggerInteraction.Ignore)
+                && hit.collider.transform.root != target)
+                allowed = Mathf.Max(1.6f, hit.distance - collisionBuffer);
+            _currentDistance = allowed;
+
+            transform.position = pivot + dir * allowed + Vector3.up * height;
             transform.rotation = Quaternion.LookRotation(pivot + Vector3.up * 0.35f - transform.position, Vector3.up);
             _posVel = Vector3.zero;
         }

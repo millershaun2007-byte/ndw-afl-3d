@@ -85,6 +85,19 @@ namespace AFL
         bool _activeBid;
         float _kickCharge;
 
+        // Procedural whole-body motion (2026-08-11) — none of the character
+        // models have a skeleton or clips (confirmed directly in the Editor:
+        // single welded mesh, zero bones, zero animation, on all six), so
+        // there is no limb to animate. A hop/lean/squash cycle applied to
+        // the whole "Visual" child needs no rig at all and is most of what
+        // makes a character read as alive rather than a sliding statue —
+        // issue #1's play report: "rigid statues that slide across the
+        // ground" was the single most damning line in it.
+        Transform _visual;
+        bool _wasAirborne;
+        float _landedAt = -99f;
+        float _kickPulseAt = -99f;
+
         public bool IsAirborne { get; private set; }
         public bool HasBall => AFLBall.Instance && AFLBall.Instance.Carrier == this;
         public float KickCharge => _kickCharge;
@@ -100,6 +113,7 @@ namespace AFL
         void Awake()
         {
             _cc = GetComponent<CharacterController>();
+            _visual = transform.Find("Visual");
             if (!ballHold) ballHold = CreateAnchor("BallHold", new Vector3(0.35f, 1.15f, 0.35f));
 
             // If BuildScript already positioned a real Hands anchor from the
@@ -125,6 +139,7 @@ namespace AFL
             if (isUserControlled) HandleInput();
             ApplyMotion();
             DriveAnimator();
+            DriveProceduralMotion();
         }
 
         // ---- input ---------------------------------------------------------
@@ -189,6 +204,54 @@ namespace AFL
             animator.SetBool("Airborne", IsAirborne);
             animator.SetBool("HasBall", HasBall);
             animator.SetFloat("KickCharge", _kickCharge);
+        }
+
+        // Everything below is cosmetic — it only ever moves the Visual
+        // child's local transform, never the CharacterController root, so
+        // it can't affect collision, movement or contest logic no matter
+        // how it's tuned.
+        void DriveProceduralMotion()
+        {
+            if (!_visual) return;
+
+            // Landing squash: caught on the same grounded transition
+            // ApplyMotion() already detects, just observed here a frame
+            // later rather than duplicating the check.
+            if (_wasAirborne && !IsAirborne) _landedAt = Time.time;
+            _wasAirborne = IsAirborne;
+
+            float speed = _horizVel.magnitude;
+            float speedT = Mathf.Clamp01(speed / runSpeed);
+
+            // Hop/bob while moving — a kangaroo's run IS a hop, a croc's a
+            // waddle, and this one sine drives both well enough without
+            // needing per-species branching: height and rate scale with
+            // how fast the player is actually moving, so a standing player
+            // reads as still, not perpetually bouncing.
+            float hopRate = 6.5f + speed * 0.8f;
+            float hop = speedT > 0.02f ? Mathf.Abs(Mathf.Sin(Time.time * hopRate)) * speedT * 0.16f : 0f;
+            float roll = speedT > 0.02f ? Mathf.Sin(Time.time * hopRate) * speedT * 6f : 0f;   // side-to-side waddle, degrees
+            float lean = Mathf.Clamp(speedT * 10f, 0f, 10f);                                    // forward lean into a run
+
+            // Kick lunge: lean back through the charge, snap forward the
+            // instant the ball actually leaves (Kick() stamps _kickPulseAt).
+            float kickLean = 0f;
+            if (HasBall && _kickCharge > 0f) kickLean = -_kickCharge * 14f;    // winding up
+            float sinceKick = Time.time - _kickPulseAt;
+            if (sinceKick >= 0f && sinceKick < 0.25f)
+            {
+                float k = 1f - (sinceKick / 0.25f);
+                kickLean = 22f * k;                                            // the lunge itself
+            }
+
+            // Landing squash-and-stretch, decaying over ~0.18s.
+            float sinceLand = Time.time - _landedAt;
+            float squash = 0f;
+            if (sinceLand >= 0f && sinceLand < 0.18f) squash = (1f - sinceLand / 0.18f) * 0.22f;
+
+            _visual.localPosition = new Vector3(0f, 1f + hop, 0f);
+            _visual.localRotation = Quaternion.Euler(lean + kickLean, 0f, roll);
+            _visual.localScale = new Vector3(1f + squash * 0.6f, 1f - squash, 1f + squash * 0.6f);
         }
 
         // ---- THE TIMED JUMP -------------------------------------------------
@@ -314,6 +377,7 @@ namespace AFL
 
             ball.Release(dir.normalized * speed, transform.right * -18f, this, true);
             if (animator) animator.SetTrigger("Kick");
+            _kickPulseAt = Time.time;
         }
 
         public void SetControlled(bool on)

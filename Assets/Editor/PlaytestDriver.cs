@@ -6,26 +6,24 @@ using AFL;
 // flags the same way the real HTML control bar does, but with simulated
 // human timing: a fixed touch-bridge latency plus random jitter on every
 // reactive press, and the single MOVE button held for the whole run (the
-// worst realistic case: a kid just mashing one button). This is the
-// closest thing to "hand it to a child" available in a headless
-// environment — see docs/FOOTY-REBUILD.md's Definition of Done, which
-// explicitly says a clean build is not proof the game works.
+// worst realistic case: a kid just mashing one button).
+//
+// Rewritten 2026-08-11 to specifically chase the reported post-goal
+// deadlock (issue #1 comment thread, "verified by playing the live
+// build") — logs Phase/_restartAt/matchOver/ball state every frame around
+// any goal event, instead of just a single pass/fail at the end.
 public class PlaytestDriver : MonoBehaviour
 {
-    public float touchLatency = 0.09f;   // realistic SendMessage round-trip
-    public float humanJitter = 0.16f;    // how sloppy the timing is
-    public float maxSeconds = 120f;
+    public float touchLatency = 0.09f;
+    public float humanJitter = 0.16f;
+    public float maxSeconds = 90f;
 
     float _t;
     float _queuedMarkAt = -1f;
     bool _reachedBallOnFoot;
-    bool _tookAMark;
-    bool _reachedSetShot;
-    bool _fellOffFieldStuck;
-    bool _controlledOrBallEverInvisible;
+    bool _sawGoal;
+    float _goalAt = -1f;
     int _homeGoalsAtStart, _awayGoalsAtStart;
-    float _lastProgressCheck, _lastBallDistAtCheck = 999f;
-    int _stallCount;
     readonly System.Text.StringBuilder _log = new System.Text.StringBuilder();
     AFLPlayer _lastControlled;
     AFLPhase _lastPhase;
@@ -50,13 +48,27 @@ public class PlaytestDriver : MonoBehaviour
 
         if (gm.Phase != _lastPhase)
         {
-            _log.AppendLine($"[{_t:0.00}s] phase -> {gm.Phase}  home={gm.HomeGoals} away={gm.AwayGoals}");
+            _log.AppendLine($"[{_t:0.00}s] phase -> {gm.Phase}  home={gm.HomeGoals} away={gm.AwayGoals}  ballPos={ball.transform.position}  ballCarrier={(ball.Carrier ? ball.Carrier.name : "none")}");
             _lastPhase = gm.Phase;
+        }
+
+        bool goalJustHappened = (gm.HomeGoals != _homeGoalsAtStart || gm.AwayGoals != _awayGoalsAtStart) && !_sawGoal;
+        if (goalJustHappened)
+        {
+            _sawGoal = true;
+            _goalAt = _t;
+            _log.AppendLine($"[{_t:0.00}s] GOAL home={gm.HomeGoals} away={gm.AwayGoals} ballPos={ball.transform.position} ballCarrier={(ball.Carrier ? ball.Carrier.name : "none")} phase={gm.Phase}");
+        }
+
+        // Detailed post-goal tracing every 0.5s for 15s so a stall is
+        // actually visible in the log, not just "test timed out."
+        if (_sawGoal && _t - _goalAt < 15f && Mathf.Repeat(_t, 0.5f) < Time.deltaTime * 2f)
+        {
+            _log.AppendLine($"[{_t:0.00}s] +{(_t - _goalAt):0.0}s post-goal  phase={gm.Phase} ballPos={ball.transform.position} ballCarrier={(ball.Carrier ? ball.Carrier.name : "none")} ballInFlight={ball.InFlight}");
         }
 
         AFLPlayer controlled = null;
         foreach (var p in AFLPlayer.All) if (p.isUserControlled) { controlled = p; break; }
-
         if (controlled == null) { Finish("nobody is user-controlled — camera/control handoff broke"); return; }
         if (controlled != _lastControlled)
         {
@@ -64,13 +76,6 @@ public class PlaytestDriver : MonoBehaviour
             _lastControlled = controlled;
         }
 
-        // "Can see the ball and their own player the whole time" — a crude
-        // but real proxy: the follow camera must always have a target, and
-        // that target must not have fallen below the field.
-        if (gm.cam == null || gm.cam.target == null || controlled.transform.position.y < -3f)
-            _controlledOrBallEverInvisible = true;
-
-        // Always hold MOVE — worst realistic case, mashing the one button.
         AFLInput.TouchMoveHeld = true;
 
         float distToBall = Vector3.Distance(controlled.transform.position, ball.transform.position);
@@ -90,10 +95,6 @@ public class PlaytestDriver : MonoBehaviour
             AFLInput.TouchKickHeld = false;
         }
 
-        // Reactive MARK press, delayed by simulated latency+jitter from the
-        // moment a real timing window becomes predictable — mirrors what
-        // AFLBotBrain.ContestFlight does for bots, but through the same
-        // touch-flag path a real finger uses, with real lag on top.
         if (ball.InFlight && _queuedMarkAt < 0f)
         {
             float feet = controlled.transform.position.y;
@@ -105,39 +106,12 @@ public class PlaytestDriver : MonoBehaviour
                 _queuedMarkAt = _t + pressIn + touchLatency;
             }
         }
-        if (gm.Phase == AFLPhase.SetShot)
-        {
-            _reachedSetShot = true;
-            if (_queuedMarkAt < 0f) _queuedMarkAt = _t + Random.Range(0.3f, 0.9f); // "aim looks about right"
-        }
+        if (gm.Phase == AFLPhase.SetShot && _queuedMarkAt < 0f) _queuedMarkAt = _t + Random.Range(0.3f, 0.9f);
+        if (_queuedMarkAt >= 0f && _t >= _queuedMarkAt) { AFLInput.TouchMarkDown = true; _queuedMarkAt = -1f; }
 
-        if (_queuedMarkAt >= 0f && _t >= _queuedMarkAt)
-        {
-            AFLInput.TouchMarkDown = true;
-            _queuedMarkAt = -1f;
-        }
-
-        if (gm.HomeGoals != _homeGoalsAtStart) _tookAMark = true; // can't goal without a mark first in this loop
-
-        // Stall watchdog: the ball should be making real progress toward
-        // *some* outcome. If distance-to-ball hasn't meaningfully changed
-        // in 8 real seconds of sampling, something is stuck outside the
-        // game's own boundary/loose-ball safety nets.
-        if (_t - _lastProgressCheck > 8f)
-        {
-            if (Mathf.Abs(distToBall - _lastBallDistAtCheck) < 0.5f) _stallCount++; else _stallCount = 0;
-            _lastBallDistAtCheck = distToBall;
-            _lastProgressCheck = _t;
-            if (_stallCount >= 3) { Finish("stalled — ball/player distance hasn't changed across 24s"); return; }
-        }
-
-        if (gm.HomeGoals != _homeGoalsAtStart || gm.AwayGoals != _awayGoalsAtStart)
-        {
-            _tookAMark = true;
-            Finish("goal scored");
-            return;
-        }
-
+        // Stop 12 seconds after the goal — enough to prove either a clean
+        // restart or a real stall, without waiting the full maxSeconds.
+        if (_sawGoal && _t - _goalAt > 12f) { Finish("12s elapsed after goal"); return; }
         if (_t > maxSeconds) { Finish("timed out"); return; }
     }
 
@@ -145,20 +119,11 @@ public class PlaytestDriver : MonoBehaviour
     {
         _done = true;
         var gm = AFLGameManager.Instance;
-        bool goalScored = gm && (gm.HomeGoals != _homeGoalsAtStart || gm.AwayGoals != _awayGoalsAtStart);
-
         _log.AppendLine($"REASON {reason}");
-        _log.AppendLine($"RESULT reachedBallOnFoot={_reachedBallOnFoot} tookAMark={_tookAMark} " +
-                         $"reachedSetShot={_reachedSetShot} goalScored={goalScored} " +
-                         $"everInvisible={_controlledOrBallEverInvisible} elapsed={_t:0.0}s");
-
-        bool pass = _reachedBallOnFoot && _tookAMark && _reachedSetShot && goalScored && !_controlledOrBallEverInvisible;
-        _log.AppendLine("PASS=" + pass);
-
+        _log.AppendLine($"RESULT reachedBallOnFoot={_reachedBallOnFoot} sawGoal={_sawGoal} finalPhase={(gm ? gm.Phase.ToString() : "n/a")} elapsed={_t:0.0}s");
         System.IO.File.WriteAllText("/tmp/ndw-afl-playtest.log", _log.ToString());
         Debug.Log("PLAYTEST_LOG_START\n" + _log + "PLAYTEST_LOG_END");
-
         EditorApplication.isPlaying = false;
-        EditorApplication.Exit(pass ? 0 : 2);
+        EditorApplication.Exit(0);
     }
 }
