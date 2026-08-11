@@ -92,11 +92,29 @@ public static class Day1BuildScript
         }
     }
 
-    // Static — no CharacterController, no Animator, no Avatar. Today's
-    // rucks stand still and hop procedurally on press (Day1RuckContest.
-    // Hop). Deliberately not reusing BuildScript's BuildCharacterModel3D,
-    // which wires up movement/animation infrastructure this scene has no
-    // use for yet — see issue #6: "no hooks, no stubs" for later days.
+    // Real fix (2026-08-11, Shaun playtest: "arms not raised" / static-
+    // looking characters). This used to destroy every Animator on the
+    // model, reasoning that Day 1 has no Mixamo clips to retarget so no
+    // avatar/animator was needed — that premise was wrong on inspection:
+    // there is no Mixamo anywhere in this repo (confirmed by grep), the
+    // "no Mixamo" line in Day1RuckContest.cs's header was chasing a tool
+    // this project never used. The real, already-built animation
+    // infrastructure is Generic (bone-name matching, not Humanoid/muscle
+    // retargeting) — Assets/_Generated/CrocRiggedAIAnimator.controller and
+    // RooRiggedAIAnimator.controller already exist and already work (this
+    // is exactly what the six-player game's BuildScript.cs ships with).
+    // A direct render test (AvatarRetargetTest.cs, kept for the record)
+    // confirmed: this Generic path produces a natural, correct-looking
+    // walk-cycle pose on both Croc and Roo; a Humanoid-avatar-based
+    // attempt at the same clip did not (a real, separate defect, not
+    // relevant here since nothing in this game needs Humanoid retargeting
+    // — there is no external clip to retarget). So: keep the Animator,
+    // assign the real controller, hold it on Idle for a natural resting
+    // pose instead of the frozen import-time bind pose. Day1RuckContest
+    // still drives the reach/tap gesture procedurally (no clip exists for
+    // that specific motion) — it disables the Animator for the duration
+    // of each hop so the two don't fight over the same bones, then
+    // re-enables it after.
     static GameObject BuildStaticCharacter(string name, string modelFolder, Vector3 pos, Quaternion rot)
     {
         string riggedPath = System.IO.Directory.GetFiles(modelFolder, "*Rigged.glb").FirstOrDefault();
@@ -120,7 +138,15 @@ public static class Day1BuildScript
         instance.transform.localPosition = Vector3.zero;
         instance.transform.localRotation = Quaternion.identity;
         foreach (var col in instance.GetComponentsInChildren<Collider>()) Object.DestroyImmediate(col);
-        foreach (var anim in instance.GetComponentsInChildren<Animator>()) Object.DestroyImmediate(anim);
+        foreach (var smr in instance.GetComponentsInChildren<SkinnedMeshRenderer>()) smr.updateWhenOffscreen = true;
+
+        var animator = instance.GetComponent<Animator>() ?? instance.GetComponentInChildren<Animator>();
+        if (!animator) animator = instance.AddComponent<Animator>();
+        animator.avatar = null; // Generic — no Humanoid avatar, no retargeting, matches the working six-player game.
+        string controllerPath = $"Assets/_Generated/{name}RiggedAIAnimator.controller";
+        var controller = AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>(controllerPath);
+        if (controller) animator.runtimeAnimatorController = controller;
+        else Debug.LogWarning($"Day1BuildScript: no controller at {controllerPath} for {name}, leaving Animator uncontrolled.");
 
         return root;
     }

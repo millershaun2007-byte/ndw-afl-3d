@@ -8,9 +8,17 @@ namespace AFL.Day1
     // Per issue #6: a new scene, two players, one button. Does not touch
     // AflField.unity or anything in the six-player game. No movement (the
     // rucks stand still and contest a throw-up), no score, no HUD beyond
-    // one message. A rough leap is explicitly fine today — no Mixamo clips,
-    // no Animator, no Avatar. Purely procedural hop on press, straight
-    // transform manipulation.
+    // one message.
+    //
+    // Correction (2026-08-11): this used to say "no Mixamo clips, no
+    // Animator, no Avatar" — there was never any Mixamo in this project to
+    // exclude; that line was chasing a tool nobody used. Characters now
+    // carry a real Animator (Day1BuildScript) driven by the same Generic
+    // controllers the six-player game already ships with, held on Idle for
+    // a natural resting pose. The reach/tap itself still has no matching
+    // clip to play, so it stays procedural — HopRoutine disables the
+    // Animator for its duration so the two don't write the same bones in
+    // the same frame, then hands control back.
     public class Day1RuckContest : MonoBehaviour
     {
         public Transform crocVisual;
@@ -100,7 +108,16 @@ namespace AFL.Day1
             float ideal = throwDuration * 0.5f;
             float humanErr = _humanPressed ? Mathf.Abs(_humanPressT - ideal) : 999f;
             float botErr = Mathf.Abs(_botPressT - ideal);
-            bool crocWins = _humanPressed && humanErr <= botErr;
+            // Real fix (2026-08-11, Shaun playtest: "human does not have a
+            // chance"). perfectWindow was declared but never actually used —
+            // the human had to out-precise a bot whose own error is capped
+            // at +/-0.35s, with zero visual cue for exactly when "ideal" is.
+            // That's a fair fight for the bot and an unwinnable one for a
+            // human going on the ball's height alone. A press anywhere
+            // inside the generous perfectWindow now just wins outright;
+            // only a press that misses that window falls back to the raw
+            // comparison (a real but rare comeback case).
+            bool crocWins = _humanPressed && (humanErr <= perfectWindow || humanErr <= botErr);
 
             _message = _humanPressed
                 ? (crocWins ? "Crocs win the tap!" : "Roos win the tap!")
@@ -129,7 +146,15 @@ namespace AFL.Day1
         {
             yield return new WaitForSeconds(hopDuration / 2f + 0.15f);
             Vector3 start = ball.position;
-            Vector3 dir = new Vector3(crocWins ? -0.6f : 0.6f, -0.3f, crocWins ? 1f : -1f).normalized;
+            // Real fix (2026-08-11, Shaun playtest: "ball is being tapped
+            // the wrong way"). Croc starts at x=-0.55 and hops TOWARD centre
+            // (+x) to reach the ball; Roo starts at x=+0.55 and hops toward
+            // centre (-x). This used to send the ball in the opposite x
+            // direction from whichever character just reached for it — the
+            // ball flew back over the winner's own hop instead of continuing
+            // the direction their tap was already moving in. Now it follows
+            // through in the same direction as the winner's reach.
+            Vector3 dir = new Vector3(crocWins ? 0.6f : -0.6f, -0.3f, crocWins ? 1f : -1f).normalized;
             Vector3 end = start + dir * 3.2f + Vector3.down * 0.6f;
             float dur = 0.6f;
             float el = 0f;
@@ -198,6 +223,17 @@ namespace AFL.Day1
             Quaternion leftStart = leftArm ? leftArm.localRotation : Quaternion.identity;
             Quaternion rightStart = rightArm ? rightArm.localRotation : Quaternion.identity;
 
+            // Real fix (2026-08-11) — the character now carries a real
+            // Animator (Idle state, see Day1BuildScript) so it doesn't sit
+            // frozen in the raw import bind pose between contests. Mecanim
+            // writes bone transforms in its own update pass regardless of
+            // what this coroutine does, so left running during the hop it
+            // would silently overwrite these LeftArm/RightArm rotations the
+            // moment they're set. Switch it off for the hop's duration,
+            // back on once the pose is handed back to Idle.
+            var animator = t.GetComponentInChildren<Animator>();
+            if (animator) animator.enabled = false;
+
             float dur = hopDuration;
             float el = 0f;
             while (el < dur)
@@ -213,6 +249,7 @@ namespace AFL.Day1
             t.localPosition = start;
             if (leftArm) leftArm.localRotation = leftStart;
             if (rightArm) rightArm.localRotation = rightStart;
+            if (animator) animator.enabled = true;
         }
 
         // One message, large, high contrast — same legibility bar the rest
