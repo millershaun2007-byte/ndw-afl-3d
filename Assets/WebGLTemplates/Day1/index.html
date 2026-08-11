@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes">
+    <title>Unity Web Player | {{{ PRODUCT_NAME }}}</title>
+    <style>
+      html, body { margin: 0; padding: 0; border: 0; width: 100%; height: 100%; overflow: hidden;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+      #app { display: flex; flex-direction: column; width: 100%; height: 100%; background: #1a2f1a; }
+      #canvas-wrap { flex: 1 1 auto; min-height: 0; position: relative; }
+      #unity-canvas { width: 100%; height: 100%; display: block; background: {{{ BACKGROUND_FILENAME ? 'url(\'Build/' + BACKGROUND_FILENAME.replace(/'/g, '%27') + '\') center / cover' : BACKGROUND_COLOR }}}; }
+      /* One button only — issue #6: "One button. That is the control
+         scheme for all five days. Its meaning changes per stage; the
+         number never does." Do not add a second button here. */
+      #control-bar { flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
+        padding: 14px clamp(8px, 3vw, 18px); background: #16241a;
+        border-top: 2px solid rgba(255,255,255,0.08); }
+      #tap-btn { width: clamp(96px, 30vw, 160px); height: clamp(64px, 18vw, 90px); border-radius: 20px;
+        border: 2px solid rgba(255,255,255,0.35); color: #fff; font-size: clamp(0.85rem, 3vw, 1.3rem);
+        font-weight: 800; display: flex; align-items: center; justify-content: center; touch-action: none;
+        user-select: none; cursor: pointer; -webkit-tap-highlight-color: transparent;
+        background: #2fae4d; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="canvas-wrap">
+        <canvas id="unity-canvas" width={{{ WIDTH }}} height={{{ HEIGHT }}} tabindex="-1"></canvas>
+      </div>
+      <div id="control-bar">
+        <div id="tap-btn" class="action-btn">TAP</div>
+      </div>
+    </div>
+    <script src="Build/{{{ LOADER_FILENAME }}}"></script>
+    <script>
+      var canvas = document.querySelector("#unity-canvas");
+      function resizeCanvasToContainer() {
+        var w = Math.max(1, Math.round(canvas.clientWidth));
+        var h = Math.max(1, Math.round(canvas.clientHeight));
+        if (canvas.width !== w) canvas.width = w;
+        if (canvas.height !== h) canvas.height = h;
+      }
+      window.addEventListener('resize', resizeCanvasToContainer);
+      resizeCanvasToContainer();
+
+      var unityInstanceRef = null;
+      createUnityInstance(canvas, {
+        arguments: [],
+        dataUrl: "Build/{{{ DATA_FILENAME }}}",
+        frameworkUrl: "Build/{{{ FRAMEWORK_FILENAME }}}",
+#if USE_WASM
+        codeUrl: "Build/{{{ CODE_FILENAME }}}",
+#endif
+#if SYMBOLS_FILENAME
+        symbolsUrl: "Build/{{{ SYMBOLS_FILENAME }}}",
+#endif
+#if DECOMPRESSION_FALLBACK
+        decompressionFallback: true,
+#endif
+        streamingAssetsUrl: "StreamingAssets",
+        companyName: {{{ JSON.stringify(COMPANY_NAME) }}},
+        productName: {{{ JSON.stringify(PRODUCT_NAME) }}},
+        productVersion: {{{ JSON.stringify(PRODUCT_VERSION) }}},
+      }).then(function (unityInstance) {
+        unityInstanceRef = unityInstance;
+        resizeCanvasToContainer();
+      }).catch(function (message) {
+        alert(message);
+      });
+
+      // TouchBridge here is Day1TouchBridge (Day1RuckContest.cs) —
+      // deliberately a different GameObject/script than the six-player
+      // game's AFLTouchBridge, even though the name matches by
+      // convention. This scene never has both loaded at once.
+      function sendToUnity(method, value) {
+        if (unityInstanceRef) unityInstanceRef.SendMessage('TouchBridge', method, value);
+      }
+      var tapBtn = document.getElementById('tap-btn');
+      tapBtn.addEventListener('pointerdown', function (e) { e.preventDefault(); sendToUnity('TapPressed', ''); });
+    </script>
+  </body>
+</html>
