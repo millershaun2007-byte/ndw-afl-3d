@@ -290,6 +290,12 @@ public static class BuildScript
             : null;
         string species = System.IO.Path.GetFileName(modelFolder);
         animator.runtimeAnimatorController = BuildAnimatorController(species, walkClip);
+        // Only the last of the 3 same-species instances was keeping this
+        // assignment — a real, still-not-fully-understood Editor quirk
+        // with property changes on scripted-batch prefab instances not
+        // being recorded until something forces it. EditorUtility.SetDirty
+        // is the standard fix for exactly that class of problem.
+        EditorUtility.SetDirty(animator);
 
         var player = parent.GetComponent<AFLPlayer>();
         if (player) player.animator = animator;
@@ -332,10 +338,38 @@ public static class BuildScript
     // already feeds a Speed parameter every frame; this is the smallest
     // controller that actually uses it. One controller asset per species,
     // reused build to build.
+    //
+    // Cached per species (2026-08-11) — real bug, found by directly
+    // inspecting the built scene's Animator components in Edit Mode
+    // (Play Mode was too unreliable under this session's system load to
+    // chase it that way): 3 players per team all pass the same species,
+    // so this used to call CreateAnimatorControllerAtPath at the SAME
+    // path 3 times per team. The asset only really exists once the 3rd
+    // call finishes — the C# references the 1st and 2nd calls returned
+    // go stale the moment the path gets recreated under them, so 4 of
+    // the 6 players ended up with animator.runtimeAnimatorController ==
+    // null despite BuildAnimatorController "succeeding" every time,
+    // which is exactly what produced the "Animator is not playing an
+    // AnimatorController" spam. Building it once per species and handing
+    // back the same reference is both the fix and the more correct
+    // design — there was never a reason for 3 identical controllers.
+    static readonly System.Collections.Generic.HashSet<string> _animatorBuilt = new();
     static RuntimeAnimatorController BuildAnimatorController(string species, AnimationClip walkClip)
     {
         System.IO.Directory.CreateDirectory("Assets/_Generated");
         string path = "Assets/_Generated/" + species + "Animator.controller";
+
+        // Reload fresh from the asset database for every assignment instead
+        // of handing back a cached in-memory C# reference — the cached-
+        // reference version still left 4 of 6 players with a null
+        // runtimeAnimatorController despite all pointing at the literal
+        // same object, an Editor-internals quirk not worth chasing further
+        // tonight. A fresh AssetDatabase.LoadAssetAtPath per call is more
+        // defensive regardless of the exact cause.
+        if (_animatorBuilt.Contains(species))
+            return AssetDatabase.LoadAssetAtPath<UnityEditor.Animations.AnimatorController>(path);
+        _animatorBuilt.Add(species);
+
         var controller = UnityEditor.Animations.AnimatorController.CreateAnimatorControllerAtPath(path);
         // Real bug, caught by the playtest harness spamming ~4M log lines
         // in under a minute: AFLPlayer.DriveAnimator() also calls
