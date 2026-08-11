@@ -127,12 +127,21 @@ public static class Day1BuildScript
         // rover's run currently lands — approximate on purpose, expected
         // to need tuning once the mark itself exists and kick distance
         // gets dialled in for real.
+        //
+        // Real fix (2026-08-12, Shaun: "the forwards are going to have to
+        // come up further or the croc runs up further", "or the
+        // kangaroo" — same gap on both sides). z=15 was too far from
+        // where the rover actually STOPS running (~z=4, before the kick
+        // carries the ball the rest of the way) — the whole tableau read
+        // as disconnected even though the kick itself bridges the gap.
+        // Brought in to z=10 rather than touching the run/kick pacing,
+        // which was already confirmed good.
         EnsureAnimatorController("Dragon", "Assets/Models/DragonRiggedAI");
         EnsureAnimatorController("Lion", "Assets/Models/LionRiggedAI");
-        var crocForwardGo = BuildStaticCharacter("CrocForward", "Assets/Models/DragonRiggedAI", new Vector3(-0.9f, 0, 15f), Quaternion.identity);
-        var rooDefenderGo = BuildStaticCharacter("RooDefender", "Assets/Models/LionRiggedAI", new Vector3(0.9f, 0, 15f), Quaternion.Euler(0, 180, 0));
-        var rooForwardGo = BuildStaticCharacter("RooForward", "Assets/Models/LionRiggedAI", new Vector3(0.9f, 0, -15f), Quaternion.Euler(0, 180, 0));
-        var crocDefenderGo = BuildStaticCharacter("CrocDefender", "Assets/Models/DragonRiggedAI", new Vector3(-0.9f, 0, -15f), Quaternion.identity);
+        var crocForwardGo = BuildStaticCharacter("CrocForward", "Assets/Models/DragonRiggedAI", new Vector3(-0.9f, 0, 10f), Quaternion.identity);
+        var rooDefenderGo = BuildStaticCharacter("RooDefender", "Assets/Models/LionRiggedAI", new Vector3(0.9f, 0, 10f), Quaternion.Euler(0, 180, 0));
+        var rooForwardGo = BuildStaticCharacter("RooForward", "Assets/Models/LionRiggedAI", new Vector3(0.9f, 0, -10f), Quaternion.Euler(0, 180, 0));
+        var crocDefenderGo = BuildStaticCharacter("CrocDefender", "Assets/Models/DragonRiggedAI", new Vector3(-0.9f, 0, -10f), Quaternion.identity);
 
         // Goal posts (2026-08-12, Shaun: "chuck up those... goal posts").
         // Visual only — no collision, no scoring trigger, that's still
