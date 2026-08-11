@@ -3,6 +3,7 @@ using UnityEditor;
 using UnityEditor.Animations;
 using UnityEditor.SceneManagement;
 using System.Linq;
+using System.Collections.Generic;
 using AFL;
 
 // Rebuild of BuildScript for the AFLGameKit.cs architecture (2026-08-10 full
@@ -287,6 +288,20 @@ public static class BuildScript
         var animator = instance.GetComponent<Animator>() ?? instance.GetComponentInChildren<Animator>();
         if (!animator) animator = instance.AddComponent<Animator>();
 
+        // Real fix (2026-08-11, character-library#1 / issue #5): this was
+        // never set at all — animator.avatar was null on every player,
+        // confirmed by direct inspection. The walk/run clips still played
+        // fine regardless, because Generic animation matches by bone name
+        // and these clips were extracted from this exact skeleton, but
+        // with no Humanoid avatar there was never any way to retarget an
+        // external clip (Mixamo or otherwise) onto these characters —
+        // which is the entire point of building them humanoid in the
+        // first place. See BuildHumanoidAvatar for the mapping fix this
+        // depends on (the Spine chain runs backwards from what the bone
+        // names suggest, confirmed via a direct hierarchy dump, not
+        // Unity's default auto-mapper).
+        animator.avatar = BuildHumanoidAvatar(instance);
+
         string walkPath = FindGlbInFolder(modelFolder, "Walking");
         AnimationClip walkClip = walkPath != null
             ? AssetDatabase.LoadAllAssetsAtPath(walkPath).OfType<AnimationClip>().FirstOrDefault()
@@ -369,6 +384,91 @@ public static class BuildScript
     // AnimatorController" spam. Building it once per species and handing
     // back the same reference is both the fix and the more correct
     // design — there was never a reason for 3 identical controllers.
+    // Real fix (2026-08-11, ndw-character-library#1 / issue #5) — animator.
+    // avatar was never assigned at all before this, on any character.
+    // Generic animation (the walk/run clips already in use) doesn't need
+    // this, since it matches by bone name and those clips came from this
+    // exact skeleton — but with no Humanoid avatar there was never any
+    // way to retarget an EXTERNAL clip (Mixamo or otherwise) onto these
+    // characters, which is the entire point of building them humanoid in
+    // the first place. Deliberately generic — this isn't Croc/Roo-
+    // specific, any of the 21 library characters that pass the
+    // ten-minute acceptance test in ndw-character-library#1 should build
+    // a valid avatar through this same method.
+    //
+    // The bone mapping below is NOT the ascending order the names
+    // suggest. Confirmed via a direct hierarchy dump (not assumed, not
+    // Unity's default auto-mapper): the real chain is
+    // Hips -> Spine02 -> Spine01 -> Spine -> shoulders/neck — i.e.
+    // "Spine" is the bone closest to the shoulders, not the hips. Get
+    // this backwards and AvatarBuilder throws "Transform 'Spine' is not
+    // an ancestor of 'Spine01'" and produces an invalid avatar, which is
+    // exactly what happened the first time this was tried.
+    static readonly Dictionary<string, HumanBodyBones> HumanoidBoneMap = new()
+    {
+        { "Hips", HumanBodyBones.Hips },
+        { "Spine02", HumanBodyBones.Spine },
+        { "Spine01", HumanBodyBones.Chest },
+        { "Spine", HumanBodyBones.UpperChest },
+        { "neck", HumanBodyBones.Neck },
+        { "Head", HumanBodyBones.Head },
+        { "LeftShoulder", HumanBodyBones.LeftShoulder },
+        { "LeftArm", HumanBodyBones.LeftUpperArm },
+        { "LeftForeArm", HumanBodyBones.LeftLowerArm },
+        { "LeftHand", HumanBodyBones.LeftHand },
+        { "RightShoulder", HumanBodyBones.RightShoulder },
+        { "RightArm", HumanBodyBones.RightUpperArm },
+        { "RightForeArm", HumanBodyBones.RightLowerArm },
+        { "RightHand", HumanBodyBones.RightHand },
+        { "LeftUpLeg", HumanBodyBones.LeftUpperLeg },
+        { "LeftLeg", HumanBodyBones.LeftLowerLeg },
+        { "LeftFoot", HumanBodyBones.LeftFoot },
+        { "LeftToeBase", HumanBodyBones.LeftToes },
+        { "RightUpLeg", HumanBodyBones.RightUpperLeg },
+        { "RightLeg", HumanBodyBones.RightLowerLeg },
+        { "RightFoot", HumanBodyBones.RightFoot },
+        { "RightToeBase", HumanBodyBones.RightToes },
+    };
+
+    // Structural validity only — NOT proof the character looks right when
+    // animated. Octopus builds a "valid" avatar through this exact method
+    // (correct bone names/hierarchy) but has 6+ tentacles where only 2
+    // can ever move as legs; confirmed broken by direct render, not by
+    // this check. Do not treat a non-null return here as "this character
+    // is fit for the game" — see CLAUDE.md's character section.
+    static Avatar BuildHumanoidAvatar(GameObject instance)
+    {
+        var boneByName = instance.GetComponentsInChildren<Transform>().ToDictionary(t => t.name, t => t);
+
+        var boneList = new List<HumanBone>();
+        foreach (var kv in HumanoidBoneMap)
+        {
+            if (!boneByName.ContainsKey(kv.Key)) continue;
+            boneList.Add(new HumanBone { boneName = kv.Key, humanName = kv.Value.ToString(), limit = new HumanLimit { useDefaultValues = true } });
+        }
+
+        var hd = new HumanDescription
+        {
+            human = boneList.ToArray(),
+            skeleton = instance.GetComponentsInChildren<Transform>().Select(t => new SkeletonBone {
+                name = t.name, position = t.localPosition, rotation = t.localRotation, scale = t.localScale
+            }).ToArray(),
+            upperArmTwist = 0.5f, lowerArmTwist = 0.5f, upperLegTwist = 0.5f, lowerLegTwist = 0.5f,
+            armStretch = 0.05f, legStretch = 0.05f, feetSpacing = 0f, hasTranslationDoF = false
+        };
+
+        Avatar avatar = null;
+        try { avatar = AvatarBuilder.BuildHumanAvatar(instance, hd); }
+        catch (System.Exception e) { Debug.LogWarning($"BuildHumanoidAvatar failed for {instance.name}: {e.Message}"); }
+
+        if (avatar == null || !avatar.isValid || !avatar.isHuman)
+        {
+            Debug.LogWarning($"BuildHumanoidAvatar: {instance.name} did not produce a valid Humanoid avatar (valid={(avatar ? avatar.isValid : false)} isHuman={(avatar ? avatar.isHuman : false)}) — falling back to no avatar, Generic animation still works via bone-name matching.");
+            return null;
+        }
+        return avatar;
+    }
+
     static readonly System.Collections.Generic.HashSet<string> _animatorBuilt = new();
     static RuntimeAnimatorController BuildAnimatorController(string species, AnimationClip walkClip, AnimationClip runClip, float runThresh)
     {
