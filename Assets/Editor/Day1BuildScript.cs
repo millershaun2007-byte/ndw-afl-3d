@@ -45,8 +45,14 @@ public static class Day1BuildScript
         ground.transform.localScale = new Vector3(1.2f, 1f, 1.2f);
         ground.GetComponent<Renderer>().sharedMaterial = SolidColorMaterial(new Color(0.25f, 0.55f, 0.2f));
 
-        var crocGo = BuildStaticCharacter("Croc", "Assets/Models/CrocRiggedAI", new Vector3(-1.1f, 0, 0), Quaternion.Euler(0, 90, 0));
-        var rooGo = BuildStaticCharacter("Roo", "Assets/Models/RooRiggedAI", new Vector3(1.1f, 0, 0), Quaternion.Euler(0, -90, 0));
+        // Real fix (2026-08-11, Shaun's direct playtest: "they also need
+        // to be able to get closer to the ball and be able to reach the
+        // ball at its peak") — standing this close together only works
+        // because they're both static this scene (no movement, no
+        // collision concern); a real contest has them shoulder to
+        // shoulder under the ball, not standing well clear of it.
+        var crocGo = BuildStaticCharacter("Croc", "Assets/Models/CrocRiggedAI", new Vector3(-0.55f, 0, 0), Quaternion.Euler(0, 90, 0));
+        var rooGo = BuildStaticCharacter("Roo", "Assets/Models/RooRiggedAI", new Vector3(0.55f, 0, 0), Quaternion.Euler(0, -90, 0));
 
         var ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         ball.name = "Ball";

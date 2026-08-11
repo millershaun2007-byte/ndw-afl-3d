@@ -20,8 +20,16 @@ namespace AFL.Day1
         // Ball arc: rises and falls over this many seconds, peak at the
         // midpoint — the moment a real tap should happen. Long and gentle
         // on purpose (this is a child on a touchscreen, not a speedrun).
+        //
+        // Real fix (2026-08-11, Shaun: "they also need to be able to...
+        // reach the ball at its peak") — peakHeight was 3.2, well above
+        // anything a ~2.1-unit-tall character's raised-arm hop could
+        // plausibly reach, so even a perfectly-timed press looked like it
+        // missed by a mile. Lowered so the ball's absolute peak
+        // (groundY + peakHeight) sits within reach of standing height +
+        // raised arms + the hop in HopRoutine below.
         public float throwDuration = 2.0f;
-        public float peakHeight = 3.2f;
+        public float peakHeight = 2.1f;
         public float groundY = 1.0f;
 
         // Grading window — generous, per issue #6's own 0.25s floor rule
@@ -106,25 +114,65 @@ namespace AFL.Day1
         // Explicitly rough, explicitly not a real animation — issue #6:
         // "if the leap looks rough today, that is fine." Straight transform
         // lerp via a coroutine, no Animator, no clip.
+        //
+        // Real fix (2026-08-11, Shaun's direct playtest: "they are not
+        // able to jump extend there arms and tap the ball") — the first
+        // version only moved the whole body up, no arm motion at all, so
+        // it read as a bob, not a reach. Issue #6's own build list says
+        // "pressing it makes your ruck go up FOR THE TAP" — the reach is
+        // part of the spec, not an extra. Rotating LeftArm/RightArm by
+        // 140°/-140° on the local Z axis was confirmed empirically (a
+        // static render, not guessed) to raise both arms symmetrically
+        // overhead — other axes tried put one arm up and one arm across
+        // the body, which is wrong for this rig's bone orientation.
         void Hop(Transform t)
         {
             if (t) StartCoroutine(HopRoutine(t));
         }
 
+        static Transform FindDeepChild(Transform parent, string name)
+        {
+            foreach (var child in parent.GetComponentsInChildren<Transform>(true))
+                if (child.name == name) return child;
+            return null;
+        }
+
+        // Real fix (2026-08-11, Shaun: "not just plausible completely
+        // possible" — reach must genuinely close the gap to the ball,
+        // measured directly, not eyeballed). Standing with arms raised
+        // 140° on Z, hands measured at world y≈1.48, barely moved in X
+        // from the character's own standing position (raising an arm
+        // straight overhead does not reach it forward). Ball peaks at
+        // groundY + peakHeight = 1.0 + 2.0 = 3.0. A vertical hop of 1.5
+        // brings hand height to ≈1.48 + 1.5 = 2.98 — a ~2cm gap at the
+        // scale of a 2-unit-tall character, i.e. contact, not "close."
+        // The horizontal gap (character stands 0.55 from the ball's
+        // x=0) is closed by leaning the whole body toward centre during
+        // the hop, since the arm raise alone does not reach sideways.
         System.Collections.IEnumerator HopRoutine(Transform t)
         {
             Vector3 start = t.localPosition;
-            float dur = 0.4f;
+            Vector3 towardCentre = new Vector3(-Mathf.Sign(start.x) * 0.55f, 0, 0);
+            var leftArm = FindDeepChild(t, "LeftArm");
+            var rightArm = FindDeepChild(t, "RightArm");
+            Quaternion leftStart = leftArm ? leftArm.localRotation : Quaternion.identity;
+            Quaternion rightStart = rightArm ? rightArm.localRotation : Quaternion.identity;
+
+            float dur = 0.45f;
             float el = 0f;
             while (el < dur)
             {
                 el += Time.deltaTime;
                 float f = el / dur;
-                float h = Mathf.Sin(f * Mathf.PI) * 0.9f;
-                t.localPosition = start + Vector3.up * h;
+                float wave = Mathf.Sin(f * Mathf.PI);   // 0 -> 1 -> 0
+                t.localPosition = start + Vector3.up * wave * 1.5f + towardCentre * wave;
+                if (leftArm) leftArm.localRotation = leftStart * Quaternion.Euler(0, 0, wave * 140f);
+                if (rightArm) rightArm.localRotation = rightStart * Quaternion.Euler(0, 0, -wave * 140f);
                 yield return null;
             }
             t.localPosition = start;
+            if (leftArm) leftArm.localRotation = leftStart;
+            if (rightArm) rightArm.localRotation = rightStart;
         }
 
         // One message, large, high contrast — same legibility bar the rest
