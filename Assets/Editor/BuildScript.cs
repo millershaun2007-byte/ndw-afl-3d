@@ -288,8 +288,22 @@ public static class BuildScript
         AnimationClip walkClip = walkPath != null
             ? AssetDatabase.LoadAllAssetsAtPath(walkPath).OfType<AnimationClip>().FirstOrDefault()
             : null;
+        // Real running clip (2026-08-11, characters "far too static" follow-up)
+        // — Meshy's auto-rig API returned this alongside Walking in the same
+        // /rigging call back when the models were first rigged; it was
+        // archived in ndw-character-library but never actually wired into
+        // the game, so a chasing/sprinting player has been stuck replaying
+        // the WALK clip this whole time regardless of actual speed. No new
+        // Meshy generation needed — this was already paid for and sitting
+        // unused.
+        string runPath = FindGlbInFolder(modelFolder, "Running");
+        AnimationClip runClip = runPath != null
+            ? AssetDatabase.LoadAllAssetsAtPath(runPath).OfType<AnimationClip>().FirstOrDefault()
+            : null;
         string species = System.IO.Path.GetFileName(modelFolder);
-        animator.runtimeAnimatorController = BuildAnimatorController(species, walkClip);
+        var player = parent.GetComponent<AFLPlayer>();
+        float runThresh = player ? player.runSpeed : 7.0f;
+        animator.runtimeAnimatorController = BuildAnimatorController(species, walkClip, runClip, runThresh);
         // Only the last of the 3 same-species instances was keeping this
         // assignment — a real, still-not-fully-understood Editor quirk
         // with property changes on scripted-batch prefab instances not
@@ -297,7 +311,6 @@ public static class BuildScript
         // is the standard fix for exactly that class of problem.
         EditorUtility.SetDirty(animator);
 
-        var player = parent.GetComponent<AFLPlayer>();
         if (player) player.animator = animator;
 
         // Team tint: same deferred status as before — GLB ships its own
@@ -354,7 +367,7 @@ public static class BuildScript
     // back the same reference is both the fix and the more correct
     // design — there was never a reason for 3 identical controllers.
     static readonly System.Collections.Generic.HashSet<string> _animatorBuilt = new();
-    static RuntimeAnimatorController BuildAnimatorController(string species, AnimationClip walkClip)
+    static RuntimeAnimatorController BuildAnimatorController(string species, AnimationClip walkClip, AnimationClip runClip, float runThresh)
     {
         System.IO.Directory.CreateDirectory("Assets/_Generated");
         string path = "Assets/_Generated/" + species + "Animator.controller";
@@ -399,10 +412,36 @@ public static class BuildScript
             toWalk.duration = 0.15f;
             toWalk.AddCondition(AnimatorConditionMode.Greater, 0.3f, "Speed");
 
-            var toIdle = walk.AddTransition(idle);
-            toIdle.hasExitTime = false;
-            toIdle.duration = 0.15f;
-            toIdle.AddCondition(AnimatorConditionMode.Less, 0.3f, "Speed");
+            var idleFromWalk = walk.AddTransition(idle);
+            idleFromWalk.hasExitTime = false;
+            idleFromWalk.duration = 0.15f;
+            idleFromWalk.AddCondition(AnimatorConditionMode.Less, 0.3f, "Speed");
+
+            // Real running clip (2026-08-11, "characters far too static"
+            // follow-up) — was recorded by Meshy's rigging API alongside
+            // Walking for both species, archived, and never actually wired
+            // in. Thresholds are fractions of runThresh, which the caller
+            // reads straight off AFLPlayer's own runSpeed field rather than
+            // a second hardcoded number, so this can't drift out of sync
+            // with the movement code the way this project's own CLAUDE.md
+            // warns about ("one fact in two places"). A small gap between
+            // the up- and down-thresholds (0.65x vs 0.5x of runThresh)
+            // avoids flicker right at the boundary.
+            if (runClip != null)
+            {
+                var run = sm.AddState("Run");
+                run.motion = runClip;
+
+                var toRun = walk.AddTransition(run);
+                toRun.hasExitTime = false;
+                toRun.duration = 0.15f;
+                toRun.AddCondition(AnimatorConditionMode.Greater, runThresh * 0.65f, "Speed");
+
+                var walkFromRun = run.AddTransition(walk);
+                walkFromRun.hasExitTime = false;
+                walkFromRun.duration = 0.15f;
+                walkFromRun.AddCondition(AnimatorConditionMode.Less, runThresh * 0.5f, "Speed");
+            }
         }
         return controller;
     }

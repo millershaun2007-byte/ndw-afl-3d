@@ -200,10 +200,25 @@ namespace AFL
         void DriveAnimator()
         {
             if (!animator) return;
-            animator.SetFloat("Speed", _horizVel.magnitude, 0.1f, Time.deltaTime);
+            float speed = _horizVel.magnitude;
+            animator.SetFloat("Speed", speed, 0.1f, Time.deltaTime);
             animator.SetBool("Airborne", IsAirborne);
             animator.SetBool("HasBall", HasBall);
             animator.SetFloat("KickCharge", _kickCharge);
+
+            // Real fix (2026-08-11, "characters far too static" follow-up):
+            // Walk/Run clips previously always played at their fixed baked
+            // rate regardless of actual ground speed — a player barely
+            // above the Idle->Walk threshold would still cycle a full-pace
+            // walk animation, i.e. feet visibly sliding rather than
+            // stepping. Scaling playback against whichever locomotion
+            // state is actually active keeps the foot-cycle roughly
+            // matched to real movement speed. Reference speed comes from
+            // this same player's own walkSpeed/runSpeed fields — the exact
+            // constants driving movement — not a separately-tuned number.
+            var st = animator.GetCurrentAnimatorStateInfo(0);
+            float reference = st.IsName("Run") ? runSpeed : walkSpeed;
+            animator.speed = speed > 0.3f ? Mathf.Clamp(speed / reference, 0.6f, 1.8f) : 1f;
         }
 
         // Everything below is cosmetic — it only ever moves the Visual
