@@ -23,6 +23,13 @@ namespace AFL.Day1
     {
         public Transform crocVisual;
         public Transform rooVisual;
+        // Day 2 (2026-08-11) — rovers are now standing in the scene, but
+        // Shaun: "maybe could just leave it a straight tap for now." Not
+        // wired into TapBallAway's trajectory yet — that's the next step,
+        // deliberately not done in the same pass as just adding the
+        // characters.
+        public Transform crocRover;
+        public Transform rooRover;
         public Transform ball;
 
         public float throwDuration = 2.6f;
@@ -30,12 +37,18 @@ namespace AFL.Day1
         public float groundY = 1.0f;
         public float hopDuration = 0.45f;
         public float perfectWindow = 0.5f;
+        // Real human reaction time to a reactive tap, compensated for in
+        // grading — see the comment on ResolveAndContest below.
+        public float reactionCompensation = 0.17f;
 
         float _t;
         bool _humanPressed;
-        float _humanPressT = -1f;
+        float _bestHumanErr;
+        float _targetT;
         float _botPressT;
         float _hopFireAt;
+        float _inputDeadline;
+        bool _ballFrozen;
         bool _hopFired;
         bool _resolved;
         float _resolvedAt;
@@ -48,13 +61,33 @@ namespace AFL.Day1
         {
             _t = 0f;
             _humanPressed = false;
-            _humanPressT = -1f;
+            _bestHumanErr = float.MaxValue;
+            _ballFrozen = false;
             _hopFired = false;
             _resolved = false;
             _message = "Centre bounce...";
             float ideal = throwDuration * 0.5f;
             _botPressT = ideal + Random.Range(-0.35f, 0.35f);
-            _hopFireAt = ideal - hopDuration / 2f;
+            // hopFireAt: when the ball freezes at its true visual peak —
+            // fixed already (2026-08-11), see git history.
+            _hopFireAt = ideal;
+            // targetT: the instant a press actually counts as "perfect,"
+            // compensated for real human reaction time (see the comment
+            // on ResolveAndContest) — not the raw ball peak.
+            _targetT = ideal + reactionCompensation;
+            // Real fix (2026-08-11, Shaun: "croc has no hope"). The
+            // previous version resolved the instant the ball hit its
+            // peak — but a human REACTS to seeing the ball at the top,
+            // they don't anticipate it, so a normal tap lands slightly
+            // AFTER the peak. That's not "too slow," that's how human
+            // reflexes work, and the old code silently discarded any
+            // press arriving after resolution (see the early-return on
+            // _resolved in Update). inputDeadline gives real reaction-time
+            // slack past the peak before the contest is forced to resolve
+            // without a press — matched to perfectWindow so a press
+            // anywhere in that grace period still lands inside the
+            // generous auto-win band, not just barely counted.
+            _inputDeadline = ideal + perfectWindow;
         }
 
         void Update()
@@ -67,30 +100,43 @@ namespace AFL.Day1
 
             _t += Time.deltaTime;
 
-            // Ball follows the free arc only up until contact — after that
-            // the tap-away coroutine below owns its position.
-            if (!_hopFired)
+            // Ball follows the free arc only up until it freezes at the
+            // true peak — after that the tap-away coroutine below owns
+            // its position. Freezing is now decoupled from resolving (see
+            // inputDeadline above): the ball stops rising right at the
+            // peak regardless of whether a press has landed yet.
+            if (!_ballFrozen)
             {
                 float frac = Mathf.Clamp01(_t / throwDuration);
                 float height = Mathf.Sin(frac * Mathf.PI) * peakHeight;
                 if (ball) ball.position = new Vector3(0f, groundY + height, 0f);
+                if (_t >= _hopFireAt) _ballFrozen = true;
             }
 
-            if (!_humanPressed && Day1Input.TapDown)
+            // Real fix (2026-08-12, Shaun: "i just keep hitting tap kid
+            // would do that"). This used to grade whichever tap was LAST
+            // before resolution — fine for one early miss followed by one
+            // considered retry, but a kid mashing continuously has their
+            // final, most desperate mash (often landing right at the
+            // deadline, far from the peak) count instead of their best
+            // one. Now every tap is compared against the target instant
+            // and only the closest one so far is kept — mashing helps
+            // instead of hurting, matching how a kid actually plays.
+            if (Day1Input.TapDown)
             {
                 _humanPressed = true;
-                _humanPressT = _t;
+                float err = Mathf.Abs(_t - _targetT);
+                if (err < _bestHumanErr) _bestHumanErr = err;
             }
 
-            if (!_hopFired && _t >= _hopFireAt)
+            // Always resolve at the deadline, using whichever tap was best
+            // — no more resolving on the first post-peak press, since that
+            // would cut a masher off before their best attempt lands.
+            if (!_hopFired && _t >= _inputDeadline)
             {
                 _hopFired = true;
                 ResolveAndContest();
             }
-
-            // A late press after the contest already resolved gets nothing
-            // extra — the beat has passed, matching "no press = no jump"
-            // rather than a confusing second animation on top of the result.
         }
 
         // Real fix (2026-08-11, Shaun: "just need the reach up and tap to
@@ -103,21 +149,26 @@ namespace AFL.Day1
         // things: which character's jump reaches full height (the
         // winner) vs a visibly shorter one (the loser), and which
         // direction the ball gets tapped away in afterward.
+        // Real fix (2026-08-12, Shaun: "the ai's gone hard to beat in ruck
+        // again"). The pendulum swung twice now — generous auto-win made
+        // Roo unbeatable, straight comparison then made Roo dominant — and
+        // both were tuning the same tolerance number instead of fixing the
+        // actual asymmetry. A human's tap is REACTIVE: they perceive the
+        // ball at its peak, then physically respond — real human reaction
+        // time (commonly ~150-200ms) is baked into every honest press,
+        // not carelessness. The bot's error is centered on zero with no
+        // such bias. Comparing a systematically-late human distribution
+        // against a zero-centered bot distribution unfairly favours the
+        // bot even when the human is playing well. Compensating for that
+        // known bias directly (rather than re-widening a blanket
+        // tolerance again) is the actual fix: a press ~0.17s after the
+        // true peak now grades as if it were exactly on time.
         void ResolveAndContest()
         {
             float ideal = throwDuration * 0.5f;
-            float humanErr = _humanPressed ? Mathf.Abs(_humanPressT - ideal) : 999f;
+            float humanErr = _humanPressed ? _bestHumanErr : 999f;
             float botErr = Mathf.Abs(_botPressT - ideal);
-            // Real fix (2026-08-11, Shaun playtest: "human does not have a
-            // chance"). perfectWindow was declared but never actually used —
-            // the human had to out-precise a bot whose own error is capped
-            // at +/-0.35s, with zero visual cue for exactly when "ideal" is.
-            // That's a fair fight for the bot and an unwinnable one for a
-            // human going on the ball's height alone. A press anywhere
-            // inside the generous perfectWindow now just wins outright;
-            // only a press that misses that window falls back to the raw
-            // comparison (a real but rare comeback case).
-            bool crocWins = _humanPressed && (humanErr <= perfectWindow || humanErr <= botErr);
+            bool crocWins = _humanPressed && humanErr <= botErr;
 
             _message = _humanPressed
                 ? (crocWins ? "Crocs win the tap!" : "Roos win the tap!")
@@ -131,10 +182,13 @@ namespace AFL.Day1
             _resolvedAt = Time.time;
         }
 
-        // Ball leaves the centre toward the winning side's attacking end
-        // and away from where it was contested — a real "tapped away",
-        // not just a touch. Home (Croc) attacks +Z, Away (Roo) attacks -Z
-        // in this project's existing convention.
+        // Real fix (2026-08-11, Shaun: "any chance the ruck could tap the
+        // ball to one of the rovers" — the day 2 spec's actual mechanic:
+        // "winner of the ruck tap directs the ball to their rover"). This
+        // used to fly off in a fixed direction/distance formula with
+        // nothing at the far end. Now it targets the winning side's real
+        // rover position, so the tap has an actual destination rather
+        // than just looking like a knock-away in isolation.
         //
         // Real fix (2026-08-11, same "needs to be clearer who wins" pass)
         // — this used to start the instant the hop fired, so the ball
@@ -146,16 +200,10 @@ namespace AFL.Day1
         {
             yield return new WaitForSeconds(hopDuration / 2f + 0.15f);
             Vector3 start = ball.position;
-            // Real fix (2026-08-11, Shaun playtest: "ball is being tapped
-            // the wrong way"). Croc starts at x=-0.55 and hops TOWARD centre
-            // (+x) to reach the ball; Roo starts at x=+0.55 and hops toward
-            // centre (-x). This used to send the ball in the opposite x
-            // direction from whichever character just reached for it — the
-            // ball flew back over the winner's own hop instead of continuing
-            // the direction their tap was already moving in. Now it follows
-            // through in the same direction as the winner's reach.
-            Vector3 dir = new Vector3(crocWins ? 0.6f : -0.6f, -0.3f, crocWins ? 1f : -1f).normalized;
-            Vector3 end = start + dir * 3.2f + Vector3.down * 0.6f;
+            Transform rover = crocWins ? crocRover : rooRover;
+            // Receive height around chest level, not ground — reads as a
+            // catch rather than the ball rolling to their feet.
+            Vector3 end = rover ? rover.position + Vector3.up * 1.3f : start + Vector3.down * 0.6f;
             float dur = 0.6f;
             float el = 0f;
             while (el < dur)
@@ -168,6 +216,13 @@ namespace AFL.Day1
                 ball.position = Vector3.Lerp(start, end, f) + Vector3.up * arc;
                 yield return null;
             }
+
+            // Day 2's placeholder ending (canonical plan): "rover
+            // receives it, scene resets" — no catch clip/animation yet,
+            // that's explicitly a later day's asset work. A clear message
+            // is enough to make the handoff read as one continuous phase
+            // rather than the ball just stopping.
+            _message = crocWins ? "Crocs' rover gets it!" : "Roos' rover gets it!";
         }
 
         // Explicitly rough, explicitly not a real animation — issue #6:
@@ -199,6 +254,16 @@ namespace AFL.Day1
         // 1.0 + 2.1 = 3.1. A full 1.5-unit hop brings hand height to
         // ≈2.98 — genuine contact.
         //
+        // Real fix (2026-08-11, Shaun: "higher arm extension would be
+        // excellent" then "need them showing it clearly being tapped").
+        // A direct render+measure sweep (ArmAngleCheck.cs, 100-165 degrees)
+        // showed hand HEIGHT is flat across that whole range — the reach
+        // shortfall against the ball isn't an angle problem, it's the
+        // hop's own vertical scale (fixed below via heightScale). Angle
+        // itself moved from 140 to 155 for the visual read Shaun asked
+        // for — confirmed by the same sweep to cost nothing, since height
+        // doesn't drop off in that range either.
+        //
         // Real fix (2026-08-11, Shaun: "sorry that needs to be clearer
         // who wins", then "if croc barely moved thats not good") — two
         // adjustments in a row that needed balancing against each other.
@@ -212,11 +277,21 @@ namespace AFL.Day1
         System.Collections.IEnumerator HopRoutine(Transform t, bool reachesBall)
         {
             Vector3 start = t.localPosition;
-            float heightScale = reachesBall ? 1.5f : 0.5f;
+            // Real fix (2026-08-11, Shaun: "need them showing it clearly
+            // being tapped"). Swept hand height across 100-165 degrees via
+            // a direct render+measure check (ArmAngleCheck.cs) rather than
+            // guessing further — it plateaus at ~2.95-2.98 the whole range,
+            // meaning the arm was already near the top of its physical
+            // reach at 140 degrees and more angle wasn't the lever. The
+            // actual shortfall against the ball's frozen height (3.1) is
+            // the hop's own vertical scale, not the arm — bumped 1.5 to
+            // 1.65 to close that ~0.13-unit gap so the hand and ball
+            // actually meet instead of falling just short.
+            float heightScale = reachesBall ? 1.65f : 0.5f;
             Vector3 towardCentre = reachesBall
                 ? new Vector3(-Mathf.Sign(start.x) * 0.55f, 0, 0)
                 : Vector3.zero;
-            float armAngle = reachesBall ? 140f : 60f;
+            float armAngle = reachesBall ? 155f : 60f;
 
             var leftArm = FindDeepChild(t, "LeftArm");
             var rightArm = FindDeepChild(t, "RightArm");

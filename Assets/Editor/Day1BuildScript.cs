@@ -4,12 +4,12 @@ using UnityEditor.SceneManagement;
 using System.Linq;
 using AFL.Day1;
 
-// Day 1 — issue #6. A new, separate scene. Two players, one button,
-// nothing else. Does not touch AflField.unity or BuildScript.cs — the
-// six-player game is being retired, not merged with this, so this file
-// deliberately does not share code with it beyond what's trivial to
-// duplicate (loading a rigged GLB). No Animator, no Avatar, no clips —
-// today's contest uses a purely procedural hop (see Day1RuckContest).
+// Day 1/2 — issue #6 and the canonical rebuild plan (issue #1 pinned
+// comment). One persistent scene, not per-day scenes — "each day adds a
+// capability to that same world," so day 2 (the rovers) extends this same
+// file and Day1RuckContest rather than branching into parallel Day2
+// files. Does not touch AflField.unity or BuildScript.cs — the six-player
+// game is being retired, not merged with this.
 public static class Day1BuildScript
 {
     public static void PerformWebGLBuild()
@@ -40,10 +40,29 @@ public static class Day1BuildScript
         AssetDatabase.Refresh();
         var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
-        var ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
+        // Real fix (2026-08-12, Shaun: "the ground is also a rectangle not
+        // an oval which could be causing these problems... would it be too
+        // much to make the ground an oval"). A flat Plane is inherently
+        // rectangular — no scale trick fixes that. A flattened Cylinder
+        // has a genuine circular/elliptical edge instead, so scaling it
+        // unevenly on X/Z gives a real oval outline, not a texture trick.
+        // Default Cylinder is radius 0.5 (diameter 1) and height 2
+        // (y -1..+1) at scale 1, so localScale.x/z here are actual world
+        // diameters, not the old Plane's "x10" multiplier — kept roughly
+        // the same real-world footprint as the previous 36x52 rectangle
+        // (radius 18 x 26 => diameter 36 x 52). Flattened to a thin disc
+        // (scale.y 0.05) and dropped so its TOP surface still sits at
+        // world y=0, same as the old Plane, so nothing else on the
+        // ground (characters, ball) needs repositioning.
+        var ground = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
         ground.name = "Ground";
-        ground.transform.localScale = new Vector3(1.2f, 1f, 1.2f);
+        ground.transform.position = new Vector3(0, -0.05f, 0);
+        ground.transform.localScale = new Vector3(36f, 0.05f, 52f);
         ground.GetComponent<Renderer>().sharedMaterial = SolidColorMaterial(new Color(0.25f, 0.55f, 0.2f));
+        // CreatePrimitive(Cylinder) adds a CapsuleCollider by default,
+        // which is the wrong shape for a flat disc and misleading to
+        // leave around — nothing collides with the ground yet anyway.
+        Object.DestroyImmediate(ground.GetComponent<Collider>());
 
         // Real fix (2026-08-11, Shaun's direct playtest: "they also need
         // to be able to get closer to the ball and be able to reach the
@@ -51,8 +70,54 @@ public static class Day1BuildScript
         // because they're both static this scene (no movement, no
         // collision concern); a real contest has them shoulder to
         // shoulder under the ball, not standing well clear of it.
+        // Facing, settled 2026-08-12 after several wrong guesses this
+        // session (worth keeping the reasoning, not just the final
+        // numbers, since it took genuine back-and-forth to get right):
+        //
+        // - The ball sits at x=0, directly BETWEEN Croc (x=-0.55) and Roo
+        //   (x=0.55) — on the X axis, not Z. Any Z-facing choice for the
+        //   ruck pair puts the ball to their SIDE, not front or back, and
+        //   which side reads as "back" depends on rig quirks — this is
+        //   what caused "crocodile players have there back to the ball."
+        //   The only orientation that guarantees neither ruck player is
+        //   ever facing away from the ball is facing each other directly
+        //   across it — the original pre-2026-08-12 rotation, restored
+        //   here for the ruck pair specifically.
+        // - Shaun's oval diagram confirmed goals sit at the far/near ends
+        //   (Z, this camera's depth direction) not the sides (X). That's
+        //   real for the ROVERS, who aren't contesting anything right now
+        //   and should read as oriented toward their own attacking end —
+        //   so they keep the Z-axis, opposite-ends facing from the oval
+        //   fix, unaffected by the ruck pair's ball-facing requirement.
         var crocGo = BuildStaticCharacter("Croc", "Assets/Models/CrocRiggedAI", new Vector3(-0.55f, 0, 0), Quaternion.Euler(0, 90, 0));
         var rooGo = BuildStaticCharacter("Roo", "Assets/Models/RooRiggedAI", new Vector3(0.55f, 0, 0), Quaternion.Euler(0, -90, 0));
+
+        // Day 2 (2026-08-11, Shaun: "the next step would be the person in
+        // the ruck to tap the ball to a player" / "one more player from
+        // each team inserted"). Same models as their side's ruck — no new
+        // character asset needed, matches the spec's "not a new mechanic"
+        // framing.
+        //
+        // Facing/position, settled 2026-08-12 (see the long comment above
+        // Croc/Roo for the full reasoning): rovers aren't contesting the
+        // ball, so they face their own team's attacking end (Z axis, per
+        // Shaun's oval diagram) rather than the ball itself, and sit
+        // "behind" their ruck teammate on that same axis (Shaun: "the
+        // rovers can stand behind if they want") — behind Croc (attacking
+        // +Z) is -Z; behind Roo (attacking -Z) is +Z.
+        var crocRoverGo = BuildStaticCharacter("CrocRover", "Assets/Models/CrocRiggedAI", new Vector3(-1.7f, 0, -1.8f), Quaternion.identity);
+        var rooRoverGo = BuildStaticCharacter("RooRover", "Assets/Models/RooRiggedAI", new Vector3(1.7f, 0, 1.8f), Quaternion.Euler(0, 180, 0));
+
+        // Goal posts (2026-08-12, Shaun: "chuck up those... goal posts").
+        // Visual only — no collision, no scoring trigger, that's still
+        // genuinely day 5's work (the actual shot-at-goal mechanic). But a
+        // static prop standing at each end doesn't presuppose or hook into
+        // that mechanic any more than the ground or the oval shape do, so
+        // there's no reason it has to wait. Real AFL layout: 2 tall inner
+        // goal posts + 2 shorter outer behind posts per end, placed just
+        // inside the oval's Z boundary (radius 26).
+        BuildGoalPosts(new Vector3(0, 0, 24f));
+        BuildGoalPosts(new Vector3(0, 0, -24f));
 
         var ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         ball.name = "Ball";
@@ -66,8 +131,14 @@ public static class Day1BuildScript
         cam.tag = "MainCamera";
         cam.backgroundColor = new Color(0.55f, 0.75f, 0.95f);
         cam.clearFlags = CameraClearFlags.SolidColor;
-        camGo.transform.position = new Vector3(0, 1.8f, -5.5f);
-        camGo.transform.LookAt(new Vector3(0, 1.6f, 0));
+        // Real fix (2026-08-12, Shaun: "not quite as big as the old game").
+        // Enlarging the ground plane alone did nothing visible — the camera
+        // was fixed close to the ruck, so nearly all of the extra ground
+        // sat outside its frame regardless of how big the plane actually
+        // was. Pulled back and raised so a genuinely wider field is
+        // visible, closer to the old game's broader view.
+        camGo.transform.position = new Vector3(0, 3.4f, -9.5f);
+        camGo.transform.LookAt(new Vector3(0, 1.2f, 0));
 
         var lightGo = new GameObject("Directional Light");
         var light = lightGo.AddComponent<Light>();
@@ -79,6 +150,8 @@ public static class Day1BuildScript
         var contest = contestGo.AddComponent<Day1RuckContest>();
         contest.crocVisual = crocGo.transform;
         contest.rooVisual = rooGo.transform;
+        contest.crocRover = crocRoverGo.transform;
+        contest.rooRover = rooRoverGo.transform;
         contest.ball = ball.transform;
 
         var bridgeGo = new GameObject("TouchBridge");
@@ -90,6 +163,28 @@ public static class Day1BuildScript
             EditorSceneManager.SaveScene(scene, "Assets/Scenes/Day1Ruck.unity");
             EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene("Assets/Scenes/Day1Ruck.unity", true) };
         }
+    }
+
+    // Visual-only goal posts (2026-08-12, Shaun: "chuck up those... goal
+    // posts"). Real AFL layout: 2 tall inner goal posts (score 6) + 2
+    // shorter outer behind posts (score 1) per end. No collider, no
+    // scoring trigger — that's genuinely day 5's work.
+    static void BuildGoalPosts(Vector3 centre)
+    {
+        BuildPost(centre + new Vector3(-1.3f, 0, 0), 3.2f, 0.09f);
+        BuildPost(centre + new Vector3(-0.6f, 0, 0), 3.2f, 0.09f);
+        BuildPost(centre + new Vector3(0.6f, 0, 0), 3.2f, 0.09f);
+        BuildPost(centre + new Vector3(1.3f, 0, 0), 3.2f, 0.09f);
+    }
+
+    static void BuildPost(Vector3 basePos, float height, float radius)
+    {
+        var post = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        post.name = "GoalPost";
+        post.transform.position = basePos + Vector3.up * (height / 2f);
+        post.transform.localScale = new Vector3(radius * 2f, height / 2f, radius * 2f);
+        post.GetComponent<Renderer>().sharedMaterial = SolidColorMaterial(Color.white);
+        Object.DestroyImmediate(post.GetComponent<Collider>());
     }
 
     // Real fix (2026-08-11, Shaun playtest: "arms not raised" / static-
