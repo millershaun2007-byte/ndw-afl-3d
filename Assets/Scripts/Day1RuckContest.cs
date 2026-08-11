@@ -310,7 +310,13 @@ namespace AFL.Day1
         }
 
         public float kickPause = 0.3f;
-        public float kickHeight = 4f;
+        // Real fix (2026-08-12, Shaun: "the height of the kick in is way
+        // to low"). 4 units gave a flat, low arc with no real hang time —
+        // not remotely tall enough to read as a genuine long kick a
+        // "spectacular mark" could plausibly happen under. Characters are
+        // ~2 units tall; a kick meant to be marked needs to arc well
+        // above that.
+        public float kickHeight = 7f;
         public float kickDistance = 10f;
         public float kickDuration = 1.1f;
 

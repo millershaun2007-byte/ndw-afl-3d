@@ -138,10 +138,18 @@ public static class Day1BuildScript
         // which was already confirmed good.
         EnsureAnimatorController("Dragon", "Assets/Models/DragonRiggedAI");
         EnsureAnimatorController("Lion", "Assets/Models/LionRiggedAI");
-        var crocForwardGo = BuildStaticCharacter("CrocForward", "Assets/Models/DragonRiggedAI", new Vector3(-0.9f, 0, 10f), Quaternion.identity);
-        var rooDefenderGo = BuildStaticCharacter("RooDefender", "Assets/Models/LionRiggedAI", new Vector3(0.9f, 0, 10f), Quaternion.Euler(0, 180, 0));
-        var rooForwardGo = BuildStaticCharacter("RooForward", "Assets/Models/LionRiggedAI", new Vector3(0.9f, 0, -10f), Quaternion.Euler(0, 180, 0));
-        var crocDefenderGo = BuildStaticCharacter("CrocDefender", "Assets/Models/DragonRiggedAI", new Vector3(-0.9f, 0, -10f), Quaternion.identity);
+        // Real fix (2026-08-12, Shaun: "the characters inserted are much
+        // smaller"). Measured directly (Renderer bounds), not guessed:
+        // Croc=2.098 high, Roo=2.317, Dragon=1.937 (92% of Croc), Lion=
+        // 1.710 (74-82% of Croc/Roo) — a real, different native scale
+        // baked into this Meshy batch vs Croc/Roo's. Corrected to match
+        // Croc's height as the reference.
+        const float dragonScale = 1.083f; // 2.098 / 1.937
+        const float lionScale = 1.227f;   // 2.098 / 1.710
+        var crocForwardGo = BuildStaticCharacter("CrocForward", "Assets/Models/DragonRiggedAI", new Vector3(-0.9f, 0, 10f), Quaternion.identity, dragonScale);
+        var rooDefenderGo = BuildStaticCharacter("RooDefender", "Assets/Models/LionRiggedAI", new Vector3(0.9f, 0, 10f), Quaternion.Euler(0, 180, 0), lionScale);
+        var rooForwardGo = BuildStaticCharacter("RooForward", "Assets/Models/LionRiggedAI", new Vector3(0.9f, 0, -10f), Quaternion.Euler(0, 180, 0), lionScale);
+        var crocDefenderGo = BuildStaticCharacter("CrocDefender", "Assets/Models/DragonRiggedAI", new Vector3(-0.9f, 0, -10f), Quaternion.identity, dragonScale);
 
         // Goal posts (2026-08-12, Shaun: "chuck up those... goal posts").
         // Visual only — no collision, no scoring trigger, that's still
@@ -298,7 +306,7 @@ public static class Day1BuildScript
     // that specific motion) — it disables the Animator for the duration
     // of each hop so the two don't fight over the same bones, then
     // re-enables it after.
-    static GameObject BuildStaticCharacter(string name, string modelFolder, Vector3 pos, Quaternion rot)
+    static GameObject BuildStaticCharacter(string name, string modelFolder, Vector3 pos, Quaternion rot, float scale = 1f)
     {
         string riggedPath = System.IO.Directory.GetFiles(modelFolder, "*Rigged.glb").FirstOrDefault();
         var root = new GameObject(name);
@@ -320,6 +328,7 @@ public static class Day1BuildScript
         instance.name = "Visual";
         instance.transform.localPosition = Vector3.zero;
         instance.transform.localRotation = Quaternion.identity;
+        instance.transform.localScale = Vector3.one * scale;
         foreach (var col in instance.GetComponentsInChildren<Collider>()) Object.DestroyImmediate(col);
         foreach (var smr in instance.GetComponentsInChildren<SkinnedMeshRenderer>()) smr.updateWhenOffscreen = true;
 
