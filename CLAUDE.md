@@ -2,32 +2,34 @@
 
 Unity WebGL game. The built player ships into the NeuroDinoworld app at www/unity-games/afl3d/ and is embedded there as an iframe.
 
-## Before the next pass, read the FIX BRIEF
+## Before the next pass, read issue #1 and issue #2 — not the old FIX BRIEF
 
-Issue #1 has a comment headed "FIX BRIEF - read this before writing any code". That is the current working brief: what the deployed build actually does when a person plays it, which failures are blockers, the numeric landmines, the slice order to build in, and how to verify. Run `gh issue view 1 --comments` and read it before starting. The comment above it, "Verified by playing the live build", lists the symptoms as observed on screen.
+**2026-08-11, superseding everything below this line that references the old FIX BRIEF or says not to rebuild from scratch.** Three rebuilds of the gameplay layer (a659d85, then the Meshy-rig pass, then the v530 beat-system rewrite) all shipped clean builds and all failed the same real playtest: unresponsive control, players in the wrong place for the beat they're in, a contest system nobody — human or bot — could read fairly. That is no longer a "keep patching" situation. Shaun's call, made explicitly: **start from scratch, one capability at a time.**
 
-Blocking question, answer it first: do the character models have skeletons and animation clips? Every player in the live build stands in a permanent T-pose with arms detached from shoulders, tails floating away from the body and no feet. That is an asset or import problem, not a gameplay-code problem, and no gameplay work should start until it is answered in issue #1.
+The current plan is issue #1's pinned comment "The from-scratch rebuild plan — canonical, written down here" (posted 2026-08-11). Read that comment, not the issue body above it — the issue body is the *previous* spec (the 5-goal-chain beat system) and is now historical context, not the active plan. The new plan is five days, each adding one capability to a single persistent scene:
 
-Also currently broken in the live build: MOVE does nothing at all, the MARK button fires a kick while KICK does something else, and the match deadlocks after the first goal so it can never reach 5. All of that happens with a completely clean console.
+1. Two rucks at the centre — the contest alone, nothing else.
+2. Add the rovers — ruck tap hands off to a rover.
+3. Run and kick — the rover moves and disposes of the ball.
+4. The mark — full spec in issue #2, read it before writing any of this day's code.
+5. Shot at goal — connects the chain end to end for the first time.
 
-Live build: https://millershaun2007-byte.github.io/neurodinoworld/www/unity-games/afl3d/index.html
+Every day must be playable start to finish on its own (the "placeholder-ending rule" — end honestly on a reset/message rather than stall into not-yet-built work). Do not build day 2 before day 1 is confirmed playable by an actual human. "It builds" and "it loads" are not that confirmation — see Definition of Done below, unchanged from before.
 
-## Read this first
+**Blocking question for day 1, not yet answered**: Shaun referenced a specific example of correctly rigged characters that never reached this repo. Confirm what that is before writing day 1 — do not assume the existing Meshy-rigged Croc/Roo (`Assets/Models/CrocRiggedAI`, `RooRiggedAI`) are what he means without checking, given the rig question has already been reopened twice in this project's history for exactly that kind of assumption.
 
-docs/FOOTY-REBUILD.md is the standing plan for this game, and issue #1 is the full spec behind it. The game is being cut back from a full match sim to one loop: centre throw-up, ruck tap to the rover, clearance kick to the forward, contest for the mark, then a set shot at goal. First team to 5 goals wins. Three buttons only: MOVE, MARK, KICK.
-
-Do not add tackles, handball, a clock, quarters or a behind tally back in without checking issue #1 first. They were removed deliberately.
+Also read `neurodinoworld` issues #1 (verification tracking for the v530 shipment), #2 (positions don't match the beat), and #3 (control feels unresponsive) — real bug reports from that evaluation, useful context for what specifically went wrong even though the fix is a rebuild, not a patch.
 
 ## The recurring failure in this game
 
-Every version of this game so far, in both the 2D and the Unity rebuilds, has broken in the same way: one fact about the world written down in two places that then drift apart. Player gravity against project gravity. Kick power against field size. Reach against where the model's hands actually are. Before tuning anything, check whether the number you are about to change has a twin somewhere else that also has to move.
+Every version of this game so far, in both the 2D and the Unity rebuilds, has broken in the same way: one fact about the world written down in two places that then drift apart. Player gravity against project gravity. Kick power against field size. Reach against where the model's hands actually are. Before tuning anything, check whether the number you are about to change has a twin somewhere else that also has to move. Issue #2 (the mark spec) restates this for jump timing specifically: the press window the player sees and the value the game grades against must be the literal same number, not two systems that are supposed to agree.
 
-The target player is a child on a touchscreen, with real input latency between the HTML control bar and Unity. Anything that needs sub-100ms timing does not ship.
+The target player is a child on a touchscreen, with real input latency between the HTML control bar and Unity. Anything that needs sub-100ms timing does not ship — issue #2 makes this concrete: nothing in this game may ever require timing tighter than 0.25s.
 
 ## Definition of done
 
-This game is not done when it builds, not when it deploys, and not when the console is clean. None of those checks can detect the things that actually make it unplayable, which is why pass after pass has been declared verified and then reversed by a real-device report: the joystick, the D-pad, the four-armed ruck animation, and the 2026-08-11 play session.
+This game is not done when it builds, not when it deploys, and not when the console is clean. None of those checks can detect the things that actually make it unplayable — a clean console has now accompanied four separate unplayable builds in this project's history (see issue #1's evaluation of v530 for the most recent).
 
 It is done when a person plays it for five minutes and, without being coached, reaches the ball on foot, takes at least one mark, gets at least one shot at goal, never loses the ball off the field with no way to restart, and can see the ball and their own player the whole time.
 
-Until a human has actually played it, report the status as not verified, not working. Issue #1 has the full symptom list from the 2026-08-11 session.
+Until a human has actually played it, report the status as not verified, not working. Four different claims exist and only the last one counts: it builds; it loads; a screenshot pass has seen it on screen; a human has played it. Say explicitly which applies, every time.
