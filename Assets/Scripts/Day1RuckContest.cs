@@ -288,15 +288,71 @@ namespace AFL.Day1
             float runDir = crocWins ? 1f : -1f;
             yield return RunStraight(rover, runDir);
 
+            // Day 3, second slice (2026-08-12, Shaun: "either player takes
+            // these few steps then does a kick", "quick pause or just do
+            // the kick in that motion" — going with a quick pause, same
+            // distinct-beats principle as the catch pause before the run,
+            // "kangaroo could just drop the ball on its foot and kick it
+            // same as the croc" — one shared mechanic for both, not a
+            // per-species animation).
             _message = crocWins ? "Crocs run it out!" : "Roos run it out!";
+            yield return KickAway(rover, runDir);
+
+            _message = crocWins ? "Crocs have a shot!" : "Roos have a shot!";
             // Reset countdown starts from here, not from when the contest
             // first resolved — Update()'s existing reset logic now waits
-            // the right amount after the FULL sequence (tap, catch, run)
-            // finishes, not from the moment the ruck contest alone
+            // the right amount after the FULL sequence (tap, catch, run,
+            // kick) finishes, not from the moment the ruck contest alone
             // resolved. _sequenceComplete is what actually unblocks the
             // reset (see Update) — this timestamp alone doesn't.
             _resolvedAt = Time.time;
             _sequenceComplete = true;
+        }
+
+        public float kickPause = 0.3f;
+        public float kickHeight = 4f;
+        public float kickDistance = 10f;
+        public float kickDuration = 1.1f;
+
+        // Day 3's placeholder ending (canonical plan): "kick lands, scene
+        // resets regardless of who gets to it." No mark/goal grading yet
+        // — that's day 4/5. Drop the ball to the foot, brief beat, then
+        // kick it away in an arc continuing the same direction as the run.
+        System.Collections.IEnumerator KickAway(Transform t, float zDir)
+        {
+            if (!t || !ball) yield break;
+            var rightHand = FindDeepChild(t, "RightHand");
+            var rightFoot = FindDeepChild(t, "RightFoot");
+            Vector3 handPos = rightHand ? rightHand.position : ball.position;
+            Vector3 footPos = rightFoot ? rightFoot.position + Vector3.up * 0.15f : t.position + Vector3.up * 0.3f;
+
+            // Drop — ball falls from the hand to the foot, a real beat
+            // before the kick rather than an instant swap.
+            float dropDur = 0.35f;
+            float el = 0f;
+            while (el < dropDur)
+            {
+                el += Time.deltaTime;
+                float f = Mathf.Clamp01(el / dropDur);
+                ball.position = Vector3.Lerp(handPos, footPos, f * f); // ease-in, like a real drop under gravity
+                yield return null;
+            }
+
+            yield return new WaitForSeconds(kickPause);
+
+            // Kick — a real arc continuing the same direction the run was
+            // already heading, not a new direction to reason about.
+            Vector3 kickStart = ball.position;
+            Vector3 kickEnd = kickStart + new Vector3(0, 0, zDir * kickDistance);
+            el = 0f;
+            while (el < kickDuration)
+            {
+                el += Time.deltaTime;
+                float f = Mathf.Clamp01(el / kickDuration);
+                float arc = Mathf.Sin(f * Mathf.PI) * kickHeight;
+                ball.position = Vector3.Lerp(kickStart, kickEnd, f) + Vector3.up * arc;
+                yield return null;
+            }
         }
 
         public float catchPause = 0.5f;
