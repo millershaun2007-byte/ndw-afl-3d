@@ -58,7 +58,13 @@ public static class Day1BuildScript
         var ground = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
         ground.name = "Ground";
         ground.transform.position = new Vector3(0, -0.05f, 0);
-        ground.transform.localScale = new Vector3(36f, 0.05f, 52f);
+        // Real fix (2026-08-12, Shaun: "why dont we make the field less
+        // wide but just long... as we are only going in straight lines to
+        // compensate"). The control rule (canonical plan) is straight-
+        // line movement only, forever — width was never going to be used
+        // for anything, no player ever moves sideways. Halved from 36 to
+        // 18; length unchanged for now.
+        ground.transform.localScale = new Vector3(18f, 0.05f, 52f);
         ground.GetComponent<Renderer>().sharedMaterial = SolidColorMaterial(new Color(0.25f, 0.55f, 0.2f));
         // CreatePrimitive(Cylinder) adds a CapsuleCollider by default,
         // which is the wrong shape for a flat disc and misleading to
