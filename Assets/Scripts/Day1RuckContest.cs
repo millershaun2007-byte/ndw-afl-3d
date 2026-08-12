@@ -463,15 +463,28 @@ namespace AFL.Day1
             bool markPressed = false;
             float markBestErr = float.MaxValue;
             bool markResolved = false;
+            // Real fix (2026-08-12, Shaun: "the kick is now way of the
+            // forward and defender for the mark scene"). Not a physics
+            // change — the wide kick-cut camera just made a mismatch
+            // visible that the old close camera never showed: the ball
+            // used to keep flying (and only visually freeze) at
+            // markDeadline, ~95% of the way to kickEnd, while the forward
+            // stands at kickDistance*0.5 (the arc's own peak spot, where
+            // RunToZ sends them — see TapBallAway). Same principle Day 1's
+            // own ruck contest already uses for its ball: freeze at the
+            // ball's true visual peak, not later, so it stops exactly
+            // where the forward is standing instead of sailing past them.
+            bool ballFrozen = false;
             el = 0f;
             while (el < kickDuration)
             {
                 el += Time.deltaTime;
                 float f = Mathf.Clamp01(el / kickDuration);
-                if (!markResolved)
+                if (!ballFrozen)
                 {
                     float arc = Mathf.Sin(f * Mathf.PI) * kickHeight;
                     ball.position = Vector3.Lerp(kickStart, kickEnd, f) + Vector3.up * arc;
+                    if (el >= peakT) ballFrozen = true;
                 }
 
                 // Same best-tap-counts pattern as day 1 (Shaun: "i just
