@@ -404,6 +404,15 @@ namespace AFL.Day1
             // header comment for why this replaces the earlier
             // jumpFireAt/MarkJumpRoutine approach entirely rather than
             // layering on top of it.
+            // Real fix (2026-08-12) — cut to the wide shot HERE, not
+            // inside KickAway after the drop/pause. Forward's static
+            // start moved from z=10 to z=5 for the speccy's run-up
+            // ("starts behind"), which is also much closer to the
+            // DEFAULT close camera — left on the close cam for the first
+            // ~0.65s of the run (the old cut point), the forward loomed
+            // huge/clipped at the bottom of frame. Cutting wide right as
+            // the run begins avoids that window entirely.
+            CutCameraForKick(runDir);
             _markHoldReleased = false;
             StartCoroutine(SpeccyLeap(forward, defender, peakZ, arriveByPeak));
             StartCoroutine(RunToZ(defender, peakZ, arriveByPeak));
@@ -489,7 +498,6 @@ namespace AFL.Day1
             }
 
             yield return new WaitForSeconds(kickPause);
-            CutCameraForKick(zDir);
 
             // Kick — a real arc continuing the same direction the run was
             // already heading, not a new direction to reason about. The
@@ -568,7 +576,13 @@ namespace AFL.Day1
             // together, not just one or the other.
             float pivotZ = zDir * (goalZ - 5f);
             _mainCam.transform.position = new Vector3(kickCamSide, kickCamHeight, pivotZ);
-            _mainCam.transform.LookAt(new Vector3(0, 1.5f, pivotZ));
+            // Real fix (2026-08-12, same pass as the speccy). LookAt
+            // height raised from 1.5 to 3 — with the leap now reaching
+            // speccyLeapHeightScale (4) above standing height, framing on
+            // the OLD ground-level lookAt pushed the peak of the jump up
+            // near/above the top of frame. Centering higher keeps the
+            // whole leap comfortably in view.
+            _mainCam.transform.LookAt(new Vector3(0, 3f, pivotZ));
         }
 
         void CutCameraToDefault()
