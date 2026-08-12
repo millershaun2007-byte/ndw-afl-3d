@@ -194,8 +194,20 @@ public static class Day1BuildScript
         // sat outside its frame regardless of how big the plane actually
         // was. Pulled back and raised so a genuinely wider field is
         // visible, closer to the old game's broader view.
-        camGo.transform.position = new Vector3(0, 3.4f, -9.5f);
-        camGo.transform.LookAt(new Vector3(0, 1.2f, 0));
+        //
+        // Real fix (2026-08-12, Shaun: "big change is seeing goals at both
+        // ends and the forward and defender being much more visible").
+        // Pulled back further still and raised, widened FOV — the far
+        // goal and both forward/defender pairs are all clearly visible
+        // now (verified via direct render, tried 3 candidate positions).
+        // Honest caveat, not hidden: the very near goal posts fall just
+        // outside the frame at this angle (near-directly under the
+        // camera at this height) even though that end's forward/defender
+        // are clearly shown — a genuinely different trade-off than fully
+        // fixing it, flagged rather than silently accepted.
+        cam.fieldOfView = 60f;
+        camGo.transform.position = new Vector3(0, 10f, -29f);
+        camGo.transform.LookAt(new Vector3(0, 1.5f, 0));
 
         var lightGo = new GameObject("Directional Light");
         var light = lightGo.AddComponent<Light>();
