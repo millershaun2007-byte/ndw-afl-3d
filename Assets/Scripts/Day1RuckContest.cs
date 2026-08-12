@@ -64,6 +64,17 @@ namespace AFL.Day1
         float _resolvedAt;
         string _message = "Centre bounce...";
         GUIStyle _style;
+        // Real fix (2026-08-12) — found via a live Playwright check, not
+        // guessed: the mark's 1s ball-hold loop and the round-reset timer
+        // (1.2s after the full sequence) land almost exactly coincident,
+        // so a stray hold-loop from the PREVIOUS round could still be
+        // overwriting the ball's position after BeginThrow already reset
+        // it for the new one — confirmed via screenshot, ball sitting up
+        // near the old goal during a fresh "Centre bounce..." round.
+        // Incremented every BeginThrow; any coroutine spanning a reset
+        // checks this and bails rather than relying on timing coincidences
+        // to always land the right way.
+        int _roundId;
 
         // Real fix (2026-08-12) — was 2 pairs of named fields (crocRover/
         // rooRover only). Day 4 adds 4 more movers (forward/defender x2);
@@ -89,6 +100,7 @@ namespace AFL.Day1
 
         void BeginThrow()
         {
+            _roundId++;
             _t = 0f;
             _humanPressed = false;
             _bestHumanErr = float.MaxValue;
@@ -460,6 +472,7 @@ namespace AFL.Day1
 
         System.Collections.IEnumerator MarkCatchRoutine(Transform forward, bool marked)
         {
+            int roundAtStart = _roundId;
             Hop(forward, marked);
             if (!marked) yield break;
             // Ball snaps to the forward's actual raised hand once their
@@ -473,6 +486,11 @@ namespace AFL.Day1
             float holdEl = 0f;
             while (holdEl < 1f)
             {
+                // Bail the moment a new round has started (see the
+                // _roundId comment above) — otherwise this can keep
+                // overwriting the ball's position after BeginThrow already
+                // reset it for the next contest.
+                if (_roundId != roundAtStart) yield break;
                 holdEl += Time.deltaTime;
                 if (hand && ball) ball.position = hand.position;
                 yield return null;
