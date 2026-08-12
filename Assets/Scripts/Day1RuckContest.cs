@@ -559,13 +559,31 @@ namespace AFL.Day1
                 {
                     markResolved = true;
                     bool marked = markPressed && markBestErr <= markPerfectWindow;
+                    _message = marked ? "MARK!" : "Spilled!";
                     if (marked) CutCameraToMarkCloseup(forward);
                     _markHoldSucceeded = marked;
                     _markHoldReleased = true;
-                    ResolveMark(forward, marked);
                 }
                 yield return null;
             }
+
+            // Real fix (2026-08-12, Shaun: "now let move on to the next
+            // phase after the mark they go back and have a shot at
+            // goal"). This used to fire MarkCatchRoutine as a detached
+            // StartCoroutine and return immediately — fine when a spill
+            // just meant "round's basically over," wrong now that a real
+            // mark means several more seconds of real gameplay (walk
+            // back, run in, kick at goal) still has to happen before the
+            // round is actually done. KickAway now YIELDS through the
+            // whole chain, so TapBallAway's own _sequenceComplete/reset
+            // timer (which fires shortly after this returns) doesn't cut
+            // the shot off mid-way — same class of bug as the earlier
+            // ball-position race, just at the sequencing level instead
+            // of the position-writing level.
+            bool markedResult = markPressed && markBestErr <= markPerfectWindow && markResolved;
+            yield return MarkCatchRoutine(forward, markedResult);
+            if (markedResult) yield return TakeShotAtGoal(forward, zDir);
+            CutCameraToDefault();
         }
 
         void CutCameraForKick(float zDir)
@@ -619,24 +637,22 @@ namespace AFL.Day1
         //
         // Real fix (2026-08-12, Shaun: "just want the forward clearly
         // jumping into the ball and marking at highest point") — the jump
-        // itself no longer starts here. It's fired earlier in KickAway's
-        // loop (jumpFireAt) via MarkJumpRoutine, timed so its peak lines
-        // up with the ball's. This only decides the ball's fate.
-        void ResolveMark(Transform forward, bool marked)
-        {
-            _message = marked ? "MARK!" : "Spilled!";
-            if (!forward) return;
-            StartCoroutine(MarkCatchRoutine(forward, marked));
-        }
+        // itself no longer starts here, it's SpeccyLeap (fired from
+        // TapBallAway). This only decides the ball's fate.
+        //
+        // Real fix (2026-08-12, Shaun: "after the mark they go back and
+        // have a shot at goal") — no longer decides camera-default or
+        // message (KickAway does both now, since it needs to know the
+        // outcome before deciding whether a shot follows) and no longer
+        // fires itself detached — KickAway yields on this directly so the
+        // whole chain (catch hold, then a shot if marked) finishes before
+        // the round is allowed to reset.
+        public float markHoldBeforeShot = 0.6f;
 
         System.Collections.IEnumerator MarkCatchRoutine(Transform forward, bool marked)
         {
+            if (!marked) yield break;
             int roundAtStart = _roundId;
-            if (!marked)
-            {
-                CutCameraToDefault();
-                yield break;
-            }
             // Ball snaps straight to the forward's actual raised hand —
             // no extra wait needed now, the jump already fired early
             // enough to be at/near its own peak by this point. Then keeps
@@ -646,7 +662,7 @@ namespace AFL.Day1
             // not a guess.
             var hand = FindDeepChild(forward, "RightHand");
             float holdEl = 0f;
-            while (holdEl < 1f)
+            while (holdEl < markHoldBeforeShot)
             {
                 // Bail the moment a new round has started (see the
                 // _roundId comment above) — otherwise this can keep
@@ -657,7 +673,161 @@ namespace AFL.Day1
                 if (hand && ball) ball.position = hand.position;
                 yield return null;
             }
-            CutCameraToDefault();
+        }
+
+        public float shotStepBackDistance = 6f;
+        public float shotStepBackDuration = 0.7f;
+        public float shotSetupPause = 0.25f;
+        public float shotRunInDuration = 0.6f;
+        public float shotDropDuration = 0.3f;
+        public float shotPause = 0.25f;
+        public float shotKickHeight = 3f;
+        public float shotKickDuration = 0.9f;
+        public float shotPerfectWindow = 0.25f;
+        public float shotReactionCompensation = 0.17f;
+        // How far off-centre (world X) a mistimed kick drifts once it's
+        // known to have missed — enough to clearly pass outside the
+        // posts (which span -1.3 to 1.3, see Day1BuildScript's
+        // BuildGoalPosts) rather than an ambiguous near-miss.
+        public float shotMissSpread = 2.4f;
+        public float shotResolveTweenDuration = 0.3f;
+        public float shotResultHold = 1f;
+
+        // Real fix (2026-08-12, Shaun: "now let move on to the next
+        // phase after the mark they go back and have a shot at goal").
+        // Day 5 of the canonical plan. Same one-button, cue-is-the-
+        // ball's-arc, best-tap-counts, reaction-compensated mechanic as
+        // every other timing moment in this file (ruck, mark) — a new
+        // OUTCOME (goal vs off-target), not a new control. "They go
+        // back": kicker steps straight back (away from goal) for a
+        // run-up, then straight back in to their marking spot, matching
+        // the straight-line-only movement rule everywhere else.
+        //
+        // "Decide the outcome, then perform it" (this file's own
+        // recurring principle — see the Day 1 ball and the mark's ball):
+        // the ball follows the kick arc AT the goal centre right up
+        // until the timing resolves, then freezes; a SEPARATE short tween
+        // afterward either continues it straight through the middle (a
+        // goal) or drifts it wide (a miss) — it doesn't curve mid-flight
+        // based on a decision that technically hasn't happened yet.
+        // Real fix (2026-08-12, Shaun: "after the mark is taken a pause
+        // will help" / "will be a pause between shots"). On top of
+        // markHoldBeforeShot (the ball-in-hand hold right after the
+        // catch), a distinct beat here before the step-back even starts
+        // — so "MARK!" has room to land before the scene moves on to the
+        // shot, and shotResultHold (below) does the same job between one
+        // shot's result and the next round's centre bounce.
+        public float shotStartPause = 0.5f;
+
+        System.Collections.IEnumerator TakeShotAtGoal(Transform kicker, float zDir)
+        {
+            if (!kicker || !ball) yield break;
+            int roundAtStart = _roundId;
+            _message = "Lines up for goal...";
+            yield return new WaitForSeconds(shotStartPause);
+            if (_roundId != roundAtStart) yield break;
+
+            float markSpotZ = kicker.position.z;
+            yield return RunToZ(kicker, markSpotZ - zDir * shotStepBackDistance, shotStepBackDuration);
+            if (_roundId != roundAtStart) yield break;
+            yield return new WaitForSeconds(shotSetupPause);
+            if (_roundId != roundAtStart) yield break;
+            CutCameraForKick(zDir);
+            yield return RunToZ(kicker, markSpotZ, shotRunInDuration);
+            if (_roundId != roundAtStart) yield break;
+
+            var rightHand = FindDeepChild(kicker, "RightHand");
+            var rightFoot = FindDeepChild(kicker, "RightFoot");
+            Vector3 handPos = rightHand ? rightHand.position : ball.position;
+            Vector3 footPos = rightFoot ? rightFoot.position + Vector3.up * 0.15f : kicker.position + Vector3.up * 0.3f;
+
+            float el = 0f;
+            while (el < shotDropDuration)
+            {
+                if (_roundId != roundAtStart) yield break;
+                el += Time.deltaTime;
+                float f = Mathf.Clamp01(el / shotDropDuration);
+                ball.position = Vector3.Lerp(handPos, footPos, f * f);
+                yield return null;
+            }
+            yield return new WaitForSeconds(shotPause);
+            if (_roundId != roundAtStart) yield break;
+
+            Vector3 kickStart = ball.position;
+            Vector3 goalCentre = new Vector3(0, kickStart.y, zDir * goalZ);
+            float peakT = shotKickDuration * 0.5f;
+            float shotTargetT = peakT + shotReactionCompensation;
+            float shotDeadline = Mathf.Min(peakT + shotPerfectWindow, shotKickDuration);
+            bool shotPressed = false;
+            float shotBestErr = float.MaxValue;
+            // Signed, not just absolute — needed to know which SIDE a
+            // miss should drift to (early tap misses one way, late the
+            // other). Fixed after an initial draft compared against the
+            // loop's final el instead of the actual best tap's own
+            // timing, which would have missed the same direction every
+            // single time regardless of whether the tap was early or
+            // late.
+            float shotBestSignedErr = 0f;
+            bool shotResolved = false;
+            bool isGoal = false;
+            el = 0f;
+            while (el < shotKickDuration)
+            {
+                if (_roundId != roundAtStart) yield break;
+                el += Time.deltaTime;
+                float f = Mathf.Clamp01(el / shotKickDuration);
+                if (!shotResolved)
+                {
+                    float arc = Mathf.Sin(f * Mathf.PI) * shotKickHeight;
+                    ball.position = Vector3.Lerp(kickStart, goalCentre, f) + Vector3.up * arc;
+                }
+
+                if (Day1Input.TapDown)
+                {
+                    shotPressed = true;
+                    float signedErr = el - shotTargetT;
+                    if (Mathf.Abs(signedErr) < shotBestErr)
+                    {
+                        shotBestErr = Mathf.Abs(signedErr);
+                        shotBestSignedErr = signedErr;
+                    }
+                }
+
+                if (!shotResolved && el >= shotDeadline)
+                {
+                    shotResolved = true;
+                    isGoal = shotPressed && shotBestErr <= shotPerfectWindow;
+                    _message = isGoal ? "GOAL!" : "Off target!";
+                }
+                yield return null;
+            }
+
+            if (!isGoal)
+            {
+                // Late tap (positive signed error) drifts one way, early
+                // (or no tap at all) the other.
+                float side = shotPressed ? Mathf.Sign(shotBestSignedErr) : (Random.value < 0.5f ? -1f : 1f);
+                if (side == 0f) side = 1f;
+                goalCentre.x = side * shotMissSpread;
+            }
+            Vector3 frozenPos = ball.position;
+            el = 0f;
+            while (el < shotResolveTweenDuration)
+            {
+                if (_roundId != roundAtStart) yield break;
+                el += Time.deltaTime;
+                ball.position = Vector3.Lerp(frozenPos, goalCentre, Mathf.Clamp01(el / shotResolveTweenDuration));
+                yield return null;
+            }
+            ball.position = goalCentre;
+
+            float holdEl = 0f;
+            while (holdEl < shotResultHold)
+            {
+                if (_roundId != roundAtStart) yield break;
+                holdEl += Time.deltaTime;
+                yield return null;
+            }
         }
 
         public float speccyLeapRiseDuration = 0.5f;
