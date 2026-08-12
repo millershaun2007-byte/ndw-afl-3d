@@ -150,8 +150,16 @@ public static class Day1BuildScript
         // 1.710 (74-82% of Croc/Roo) — a real, different native scale
         // baked into this Meshy batch vs Croc/Roo's. Corrected to match
         // Croc's height as the reference.
-        const float dragonScale = 1.083f; // 2.098 / 1.937
-        const float lionScale = 1.227f;   // 2.098 / 1.710
+        //
+        // Real fix (2026-08-12, Shaun: "just need to get the characters
+        // to look a little bigger, in the forward line and defence") —
+        // matching Croc's real height wasn't enough on its own: the
+        // forward/defender zone stands further from the fixed camera
+        // (z=10) than the ruck (z=0), so perspective alone makes them
+        // read smaller even at equal real-world height. Boosted further
+        // to compensate for that distance, not just parity.
+        const float dragonScale = 1.083f * 1.3f;
+        const float lionScale = 1.227f * 1.3f;
         var crocForwardGo = BuildStaticCharacter("CrocForward", "Assets/Models/DragonRiggedAI", new Vector3(-0.9f, 0, 10f), Quaternion.identity, dragonScale);
         var rooDefenderGo = BuildStaticCharacter("RooDefender", "Assets/Models/LionRiggedAI", new Vector3(0.9f, 0, 10f), Quaternion.Euler(0, 180, 0), lionScale);
         var rooForwardGo = BuildStaticCharacter("RooForward", "Assets/Models/LionRiggedAI", new Vector3(0.9f, 0, -10f), Quaternion.Euler(0, 180, 0), lionScale);
