@@ -41,35 +41,27 @@ public static class Day1BuildScript
         AssetDatabase.Refresh();
         var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
-        // Real fix (2026-08-12, Shaun: "the ground is also a rectangle not
-        // an oval which could be causing these problems... would it be too
-        // much to make the ground an oval"). A flat Plane is inherently
-        // rectangular — no scale trick fixes that. A flattened Cylinder
-        // has a genuine circular/elliptical edge instead, so scaling it
-        // unevenly on X/Z gives a real oval outline, not a texture trick.
-        // Default Cylinder is radius 0.5 (diameter 1) and height 2
-        // (y -1..+1) at scale 1, so localScale.x/z here are actual world
-        // diameters, not the old Plane's "x10" multiplier — kept roughly
-        // the same real-world footprint as the previous 36x52 rectangle
-        // (radius 18 x 26 => diameter 36 x 52). Flattened to a thin disc
-        // (scale.y 0.05) and dropped so its TOP surface still sits at
-        // world y=0, same as the old Plane, so nothing else on the
-        // ground (characters, ball) needs repositioning.
-        var ground = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        // Reverted (2026-08-12, Shaun: "in the crap versions of the game
+        // one thing that was actually ok was the field... could we some
+        // how have this version of play using the older versions
+        // field"). The oval/narrowing experiments above (kept in git
+        // history, not repeated here) were a real detour — the OLD
+        // field (BuildScript.cs's AflField, the six-player game this
+        // rebuild started from) was already simpler than any of that: a
+        // plain rectangular Plane, 35x45 units, solid green, with just a
+        // lighter-green centre circle marking. Reproduced exactly rather
+        // than reinvented.
+        var ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
         ground.name = "Ground";
-        ground.transform.position = new Vector3(0, -0.05f, 0);
-        // Real fix (2026-08-12, Shaun: "why dont we make the field less
-        // wide but just long... as we are only going in straight lines to
-        // compensate"). The control rule (canonical plan) is straight-
-        // line movement only, forever — width was never going to be used
-        // for anything, no player ever moves sideways. Halved from 36 to
-        // 18; length unchanged for now.
-        ground.transform.localScale = new Vector3(18f, 0.05f, 52f);
+        ground.transform.localScale = new Vector3(3.5f, 1f, 4.5f); // same ~35x45 footprint as the old field
         ground.GetComponent<Renderer>().sharedMaterial = SolidColorMaterial(new Color(0.25f, 0.55f, 0.2f));
-        // CreatePrimitive(Cylinder) adds a CapsuleCollider by default,
-        // which is the wrong shape for a flat disc and misleading to
-        // leave around — nothing collides with the ground yet anyway.
-        Object.DestroyImmediate(ground.GetComponent<Collider>());
+
+        var centerCircle = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        centerCircle.name = "CenterCircle";
+        Object.DestroyImmediate(centerCircle.GetComponent<Collider>());
+        centerCircle.transform.position = new Vector3(0, 0.01f, 0);
+        centerCircle.transform.localScale = new Vector3(6f, 0.005f, 6f);
+        centerCircle.GetComponent<Renderer>().sharedMaterial = SolidColorMaterial(new Color(0.32f, 0.62f, 0.27f));
 
         // Real fix (2026-08-11, Shaun's direct playtest: "they also need
         // to be able to get closer to the ball and be able to reach the
@@ -173,8 +165,12 @@ public static class Day1BuildScript
         // there's no reason it has to wait. Real AFL layout: 2 tall inner
         // goal posts + 2 shorter outer behind posts per end, placed just
         // inside the oval's Z boundary (radius 26).
-        BuildGoalPosts(new Vector3(0, 0, 24f));
-        BuildGoalPosts(new Vector3(0, 0, -24f));
+        // z=20, not 24 — matches the old field exactly (BuildScript.cs's
+        // BuildGoal calls), which keeps the posts a real 2.5 units inside
+        // the field's 22.5 half-length instead of poking out past the
+        // grass edge.
+        BuildGoalPosts(new Vector3(0, 0, 20f));
+        BuildGoalPosts(new Vector3(0, 0, -20f));
 
         var ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         ball.name = "Ball";
