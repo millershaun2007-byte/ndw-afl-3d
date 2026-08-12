@@ -727,12 +727,22 @@ namespace AFL.Day1
             yield return new WaitForSeconds(shotStartPause);
             if (_roundId != roundAtStart) yield break;
 
+            // Real fix (2026-08-12, Shaun: "it not really evident that the
+            // player is able to go back and take there kick"). This used
+            // to cut to the wide shot right before the run-IN only — the
+            // step-BACK itself played out entirely on the static mark
+            // closeup (CutCameraToMarkCloseup, which doesn't track the
+            // character), so as the kicker walked backward out of that
+            // tight, fixed frame the player was watching an emptying
+            // shot, not a "walking back for the kick" read. Cutting wide
+            // here instead, before the step-back starts, makes the whole
+            // back-then-in run visible in one continuous, stable shot.
+            CutCameraForKick(zDir);
             float markSpotZ = kicker.position.z;
             yield return RunToZ(kicker, markSpotZ - zDir * shotStepBackDistance, shotStepBackDuration);
             if (_roundId != roundAtStart) yield break;
             yield return new WaitForSeconds(shotSetupPause);
             if (_roundId != roundAtStart) yield break;
-            CutCameraForKick(zDir);
             yield return RunToZ(kicker, markSpotZ, shotRunInDuration);
             if (_roundId != roundAtStart) yield break;
 
