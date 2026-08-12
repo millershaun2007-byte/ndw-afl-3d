@@ -60,6 +60,13 @@ namespace AFL.Day1
         public float goalZ = 20f;
         public float kickCamSide = 16f;
         public float kickCamHeight = 8f;
+        // Real fix (2026-08-12, Shaun: "maybe pause them in mid air when
+        // they have taken the mark" / "just brief pause"). Held once the
+        // mark-jump's rise reaches its peak, only when it's a genuine
+        // mark — a spill falls straight back down instead.
+        public float markCelebrationHold = 0.3f;
+        bool _markHoldReleased;
+        bool _markHoldSucceeded;
 
         public float throwDuration = 2.6f;
         public float peakHeight = 2.1f;
@@ -527,7 +534,8 @@ namespace AFL.Day1
                 if (!jumpFired && el >= jumpFireAt)
                 {
                     jumpFired = true;
-                    Hop(forward, true);
+                    _markHoldReleased = false;
+                    StartCoroutine(MarkJumpRoutine(forward));
                 }
 
                 // Same best-tap-counts pattern as day 1 (Shaun: "i just
@@ -544,6 +552,9 @@ namespace AFL.Day1
                 {
                     markResolved = true;
                     bool marked = markPressed && markBestErr <= markPerfectWindow;
+                    if (marked) CutCameraToMarkCloseup(forward);
+                    _markHoldSucceeded = marked;
+                    _markHoldReleased = true;
                     ResolveMark(forward, marked);
                 }
                 yield return null;
@@ -568,19 +579,30 @@ namespace AFL.Day1
             _mainCam.transform.rotation = _camDefaultRot;
         }
 
+        // Real fix (2026-08-12, Shaun: "really being able to see the
+        // person grabbing the mark"). The wide kick-cut framing (above)
+        // is built to show the goal and the ball's whole flight, which
+        // makes the forward small in frame — good for the flight, not
+        // for the catch itself. Zoomed tight on the forward's actual
+        // position instead, side-on (same reasoning as the wide cut:
+        // avoids needing to know which way they're facing).
+        void CutCameraToMarkCloseup(Transform forward)
+        {
+            if (!_mainCam || !forward) return;
+            _mainCam.transform.position = forward.position + new Vector3(6f, 3.5f, 0f);
+            _mainCam.transform.LookAt(forward.position + Vector3.up * 2f);
+        }
+
         // Real fix (2026-08-12, Shaun: "with a mark the forward catches
-        // the ball"). Reuses HopRoutine as-is (the exact same reach
-        // animation the ruck contest already uses) rather than a new
-        // jump routine — a marked ball ends up genuinely held in the
+        // the ball") — a marked ball ends up genuinely held in the
         // forward's hand, tracked live the same way the run/catch
         // elsewhere in this file already does, not just a text message.
         //
         // Real fix (2026-08-12, Shaun: "just want the forward clearly
         // jumping into the ball and marking at highest point") — the jump
         // itself no longer starts here. It's fired earlier in KickAway's
-        // loop (jumpFireAt), timed so its peak lines up with the ball's,
-        // so it's already mid-air (landing right around now) by the time
-        // this runs. This only decides the ball's fate.
+        // loop (jumpFireAt) via MarkJumpRoutine, timed so its peak lines
+        // up with the ball's. This only decides the ball's fate.
         void ResolveMark(Transform forward, bool marked)
         {
             _message = marked ? "MARK!" : "Spilled!";
@@ -617,6 +639,91 @@ namespace AFL.Day1
                 yield return null;
             }
             CutCameraToDefault();
+        }
+
+        // Real fix (2026-08-12, Shaun: "maybe pause them in mid air when
+        // they have taken the mark" / "just brief pause"). A dedicated
+        // routine rather than reusing HopRoutine as-is — this needs to
+        // rise, then HOLD at the peak until the outcome (marked/spilled)
+        // is actually known, which HopRoutine's fixed-duration up/down
+        // arc has no way to express. Rise and fall each trace the same
+        // curve shape HopRoutine's own Sin(f*Mathf.PI) does (just split
+        // into two independent halves instead of one continuous arc), so
+        // the motion itself still matches the ruck's proven reach —
+        // pose math duplicated deliberately rather than refactoring the
+        // already-shipped, already-playtested HopRoutine to fit this.
+        // Always the full/confident reach (matches the "always jump the
+        // same way, only the ball's fate differs" call made when the
+        // jump was first retimed to peak with the ball).
+        System.Collections.IEnumerator MarkJumpRoutine(Transform t)
+        {
+            if (!t) yield break;
+            // Same _roundId guard as MarkCatchRoutine — the hold makes
+            // this run noticeably longer than the old fixed-duration hop,
+            // so it's worth bailing cleanly if a new round's BeginThrow
+            // resets this same transform out from under it, rather than
+            // relying on timing margins alone.
+            int roundAtStart = _roundId;
+            Vector3 start = t.localPosition;
+            const float heightScale = 1.65f; // matches HopRoutine's reachesBall=true value
+            Vector3 towardCentre = new Vector3(-Mathf.Sign(start.x) * 0.55f, 0, 0);
+            const float armAngle = 155f;
+
+            var leftArm = FindDeepChild(t, "LeftArm");
+            var rightArm = FindDeepChild(t, "RightArm");
+            Quaternion leftStart = leftArm ? leftArm.localRotation : Quaternion.identity;
+            Quaternion rightStart = rightArm ? rightArm.localRotation : Quaternion.identity;
+
+            var animator = t.GetComponentInChildren<Animator>();
+            if (animator) animator.enabled = false;
+
+            void Pose(float wave)
+            {
+                t.localPosition = start + Vector3.up * wave * heightScale + towardCentre * wave;
+                if (leftArm) leftArm.localRotation = leftStart * Quaternion.Euler(0, 0, wave * armAngle);
+                if (rightArm) rightArm.localRotation = rightStart * Quaternion.Euler(0, 0, -wave * armAngle);
+            }
+
+            float riseDur = hopDuration / 2f;
+            float el = 0f;
+            while (el < riseDur)
+            {
+                if (_roundId != roundAtStart) yield break;
+                el += Time.deltaTime;
+                Pose(Mathf.Sin(Mathf.Clamp01(el / riseDur) * Mathf.PI / 2f));
+                yield return null;
+            }
+            Pose(1f);
+
+            while (!_markHoldReleased)
+            {
+                if (_roundId != roundAtStart) yield break;
+                yield return null;
+            }
+            if (_markHoldSucceeded)
+            {
+                float heldEl = 0f;
+                while (heldEl < markCelebrationHold)
+                {
+                    if (_roundId != roundAtStart) yield break;
+                    heldEl += Time.deltaTime;
+                    yield return null;
+                }
+            }
+
+            float fallDur = hopDuration / 2f;
+            el = 0f;
+            while (el < fallDur)
+            {
+                if (_roundId != roundAtStart) yield break;
+                el += Time.deltaTime;
+                Pose(Mathf.Cos(Mathf.Clamp01(el / fallDur) * Mathf.PI / 2f));
+                yield return null;
+            }
+            t.localPosition = start;
+            if (leftArm) leftArm.localRotation = leftStart;
+            if (rightArm) rightArm.localRotation = rightStart;
+            if (animator) animator.enabled = true;
         }
 
         public float catchPause = 0.5f;

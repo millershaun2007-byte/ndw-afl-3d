@@ -175,7 +175,9 @@ public static class Day1BuildScript
         var ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         ball.name = "Ball";
         ball.transform.position = new Vector3(0, 1f, 0);
-        ball.transform.localScale = new Vector3(0.35f, 0.24f, 0.35f);
+        // Real fix (2026-08-12, Shaun: "maybe the ball being slightly
+        // bigger"). +40% on each axis, same oval proportions kept.
+        ball.transform.localScale = new Vector3(0.49f, 0.34f, 0.49f);
         ball.GetComponent<Renderer>().sharedMaterial = SolidColorMaterial(new Color(0.6f, 0.35f, 0.15f));
         Object.DestroyImmediate(ball.GetComponent<Collider>());
 
