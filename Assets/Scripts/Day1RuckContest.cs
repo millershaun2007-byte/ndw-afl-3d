@@ -403,14 +403,26 @@ namespace AFL.Day1
         }
 
         public float kickPause = 0.3f;
-        // Real fix (2026-08-12, Shaun: "the height of the kick in is way
-        // to low"). 4 units gave a flat, low arc with no real hang time —
-        // not remotely tall enough to read as a genuine long kick a
-        // "spectacular mark" could plausibly happen under. Characters are
-        // ~2 units tall; a kick meant to be marked needs to arc well
-        // above that.
-        public float kickHeight = 7f;
-        public float kickDistance = 10f;
+        // Real fix (2026-08-12, Shaun: "still kicks it well over the
+        // forwards head"). 7 units read as more dramatic hang time, but
+        // nobody measured it against what the SAME Hop() routine can
+        // actually reach — Hop's own header comment has that number
+        // measured directly: a full 1.65x hop brings the hand to world
+        // y≈2.98, tuned to meet Day 1's own ball (groundY 1.0 + peakHeight
+        // 2.1 = 3.1). The mark's ball freezes at footPos.y (≈0.3) +
+        // kickHeight, so at 7 that's ≈7.3 — more than double the hand's
+        // actual reach, invisible under the old close camera, obvious
+        // once the wide kick-cut camera showed the catch itself. Brought
+        // back down to meet the same proven reach (0.3 + 2.7 ≈ 3.0).
+        public float kickHeight = 2.7f;
+        // Real fix (2026-08-12, Shaun: "he runs up way to close"). The
+        // forward's target (peakZ, below) is derived from this — at the
+        // old value of 10 it only reached z≈12.8, barely past the centre
+        // pack and nowhere near the goal at z=20. Widened so the forward
+        // leads out to a real forward-line position just short of goal,
+        // leaving room for Day 5's shot at goal rather than standing
+        // half the ground away from it.
+        public float kickDistance = 16f;
         public float kickDuration = 1.1f;
         public float kickDropDuration = 0.35f;
 
