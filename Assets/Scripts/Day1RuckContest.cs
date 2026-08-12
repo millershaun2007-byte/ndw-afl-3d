@@ -319,24 +319,31 @@ namespace AFL.Day1
             // per-species animation).
             _message = crocWins ? "Crocs run it out!" : "Roos run it out!";
 
-            // Day 4, first slice (2026-08-12, Shaun: "we are not at the
-            // taking a speccy stage" — that's real, separate work he's
-            // already flagged as taking a while — "so that['s] what kind
-            // of happens when the ball is kicked into the forward line").
-            // Just the forward and the opposing defender (at whichever
-            // end this kick is heading) closing in on where it's going
-            // to land, timed to arrive as it does. No catch/contest
-            // grading yet — that's the actual speccy-timing work, still
-            // to come.
+            // Real fix (2026-08-12, Shaun: "youve kind of gone a bit
+            // rouge with this one" — the automatic run-to-landing-spot
+            // above wasn't what was actually wanted. "The forward jumps
+            // at the ball and trys to take a big jumping catch, timed by
+            // catching the ball at the peak of the jump — we have
+            // rehersed about this a fair bit." Same jump-timed-to-peak
+            // mechanic as the day 1 ruck contest (one button, cue is the
+            // ball's own height, generous window, reaction-compensated),
+            // just relocated to the kick's flight and applied to the
+            // forward vs the opposing defender. Meet the ball at its own
+            // PEAK position, not the full landing spot the kick would
+            // travel to uncaught — a mark happens in the air, not on the
+            // ground, and the kick's Sin arc peaks at exactly the
+            // midpoint of its flight, not at the far end.
+            // Shaun: "dont worry about the defender yet" — still runs
+            // into position (visual presence, matches "one contest zone
+            // per end" already built), just no role in grading the catch
+            // yet. That's real, separate scope for later.
             Transform forward = crocWins ? crocForward : rooForward;
             Transform defender = crocWins ? rooDefender : crocDefender;
-            float landingZ = rover.position.z + runDir * kickDistance;
-            float arriveDuration = kickDropDuration + kickPause + kickDuration;
-            StartCoroutine(RunToZ(forward, landingZ, arriveDuration));
-            StartCoroutine(RunToZ(defender, landingZ, arriveDuration));
-            yield return KickAway(rover, runDir);
-
-            _message = crocWins ? "Crocs have a shot!" : "Roos have a shot!";
+            float peakZ = rover.position.z + runDir * kickDistance * 0.5f;
+            float arriveByPeak = kickDropDuration + kickPause + kickDuration * 0.5f;
+            StartCoroutine(RunToZ(forward, peakZ, arriveByPeak));
+            StartCoroutine(RunToZ(defender, peakZ, arriveByPeak));
+            yield return KickAway(rover, runDir, forward);
             // Reset countdown starts from here, not from when the contest
             // first resolved — Update()'s existing reset logic now waits
             // the right amount after the FULL sequence (tap, catch, run,
@@ -359,11 +366,20 @@ namespace AFL.Day1
         public float kickDuration = 1.1f;
         public float kickDropDuration = 0.35f;
 
-        // Day 3's placeholder ending (canonical plan): "kick lands, scene
-        // resets regardless of who gets to it." No mark/goal grading yet
-        // — that's day 4/5. Drop the ball to the foot, brief beat, then
-        // kick it away in an arc continuing the same direction as the run.
-        System.Collections.IEnumerator KickAway(Transform t, float zDir)
+        public float markPerfectWindow = 0.5f;
+        public float markReactionCompensation = 0.17f;
+
+        // Drop the ball to the foot, brief beat, then kick it away in an
+        // arc continuing the same direction as the run. Now interleaved
+        // with the mark-timing window (2026-08-12, Shaun: "the forward
+        // jumps at the ball and trys to take a big jumping catch, timed
+        // by catching the ball at the peak of the jump — we have
+        // rehersed about this a fair bit"). Same one-button, cue-is-the-
+        // ball's-height mechanic as day 1's ruck contest, not the
+        // rejected sub-100ms analytic-physics system — just relocated to
+        // the kick's flight. "Dont worry about the defender yet" — this
+        // grades the forward's own timing only, no opponent comparison.
+        System.Collections.IEnumerator KickAway(Transform t, float zDir, Transform forward)
         {
             if (!t || !ball) yield break;
             var rightHand = FindDeepChild(t, "RightHand");
@@ -386,16 +402,79 @@ namespace AFL.Day1
             yield return new WaitForSeconds(kickPause);
 
             // Kick — a real arc continuing the same direction the run was
-            // already heading, not a new direction to reason about.
+            // already heading, not a new direction to reason about. The
+            // mark window is centred on the arc's own peak (kickDuration
+            // * 0.5, the same instant the Sin curve below actually peaks)
+            // — the cue IS the ball's height, same principle as day 1.
             Vector3 kickStart = ball.position;
             Vector3 kickEnd = kickStart + new Vector3(0, 0, zDir * kickDistance);
+            float peakT = kickDuration * 0.5f;
+            float markTargetT = peakT + markReactionCompensation;
+            float markDeadline = Mathf.Min(peakT + markPerfectWindow, kickDuration);
+            bool markPressed = false;
+            float markBestErr = float.MaxValue;
+            bool markResolved = false;
             el = 0f;
             while (el < kickDuration)
             {
                 el += Time.deltaTime;
                 float f = Mathf.Clamp01(el / kickDuration);
-                float arc = Mathf.Sin(f * Mathf.PI) * kickHeight;
-                ball.position = Vector3.Lerp(kickStart, kickEnd, f) + Vector3.up * arc;
+                if (!markResolved)
+                {
+                    float arc = Mathf.Sin(f * Mathf.PI) * kickHeight;
+                    ball.position = Vector3.Lerp(kickStart, kickEnd, f) + Vector3.up * arc;
+                }
+
+                // Same best-tap-counts pattern as day 1 (Shaun: "i just
+                // keep hitting tap kid would do that") — mashing helps,
+                // not just the first or last press.
+                if (Day1Input.TapDown)
+                {
+                    markPressed = true;
+                    float err = Mathf.Abs(el - markTargetT);
+                    if (err < markBestErr) markBestErr = err;
+                }
+
+                if (!markResolved && el >= markDeadline)
+                {
+                    markResolved = true;
+                    bool marked = markPressed && markBestErr <= markPerfectWindow;
+                    ResolveMark(forward, marked);
+                }
+                yield return null;
+            }
+        }
+
+        // Real fix (2026-08-12, Shaun: "with a mark the forward catches
+        // the ball"). Reuses HopRoutine as-is (the exact same reach
+        // animation the ruck contest already uses) rather than a new
+        // jump routine — a marked ball ends up genuinely held in the
+        // forward's hand, tracked live the same way the run/catch
+        // elsewhere in this file already does, not just a text message.
+        void ResolveMark(Transform forward, bool marked)
+        {
+            _message = marked ? "MARK!" : "Spilled!";
+            if (!forward) return;
+            StartCoroutine(MarkCatchRoutine(forward, marked));
+        }
+
+        System.Collections.IEnumerator MarkCatchRoutine(Transform forward, bool marked)
+        {
+            Hop(forward, marked);
+            if (!marked) yield break;
+            // Ball snaps to the forward's actual raised hand once their
+            // jump reaches its own peak (same hopDuration/2 timing
+            // HopRoutine itself peaks on), then keeps tracking it live —
+            // same principle as why the run's ball-on-a-fixed-offset
+            // looked wrong earlier tonight (2026-08-12, "balancing the
+            // ball on there tummy"): track the real bone, not a guess.
+            yield return new WaitForSeconds(hopDuration / 2f);
+            var hand = FindDeepChild(forward, "RightHand");
+            float holdEl = 0f;
+            while (holdEl < 1f)
+            {
+                holdEl += Time.deltaTime;
+                if (hand && ball) ball.position = hand.position;
                 yield return null;
             }
         }
