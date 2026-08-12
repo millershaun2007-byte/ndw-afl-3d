@@ -20,14 +20,14 @@ public static class Day1BuildScript
         var outputPath = System.Environment.GetEnvironmentVariable("NDW_BUILD_OUTPUT") ?? "Build/WebGL";
         System.IO.Directory.CreateDirectory(outputPath);
         // Real fix (2026-08-12, Shaun: "make sure this game is neatly and
-        // modernly set up like the rest of the app"). "Mount Duneed Cats
-        // Footy" was a private placeholder name (Shaun's own suburb + a
-        // made-up club) that leaked into consumer-facing surfaces — the
-        // browser tab title, the iframe's accessibility title attribute,
-        // and this Burst debug folder's own name. Standardized on "AFL
-        // Footy", the name already used everywhere else in the app
-        // (ACTIVITY_LABELS, ndw-data.js).
-        PlayerSettings.productName = "AFL Footy";
+        // modernly set up like the rest of the app"), then corrected the
+        // same day: "afl foot? just call it mount duneed footy ill get
+        // fined for that name" — "AFL" is the Australian Football
+        // League's own trademark, real fine risk, same category as this
+        // app's standing "never say Olympics" rule for Chaotic Sports.
+        // "Mount Duneed" (Shaun's own suburb) is the safe, already-
+        // established name for this game across the rest of the app.
+        PlayerSettings.productName = "Mount Duneed Footy";
         PlayerSettings.WebGL.template = "PROJECT:Day1";
         PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Disabled;
 
