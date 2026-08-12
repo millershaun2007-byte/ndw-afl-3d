@@ -201,6 +201,10 @@ public static class Day1BuildScript
         contest.rooVisual = rooGo.transform;
         contest.crocRover = crocRoverGo.transform;
         contest.rooRover = rooRoverGo.transform;
+        contest.crocForward = crocForwardGo.transform;
+        contest.rooDefender = rooDefenderGo.transform;
+        contest.rooForward = rooForwardGo.transform;
+        contest.crocDefender = crocDefenderGo.transform;
         contest.ball = ball.transform;
 
         var bridgeGo = new GameObject("TouchBridge");

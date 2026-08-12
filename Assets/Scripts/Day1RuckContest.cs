@@ -30,6 +30,15 @@ namespace AFL.Day1
         // characters.
         public Transform crocRover;
         public Transform rooRover;
+        // Day 4 (2026-08-12) — one forward + one defender per team,
+        // grouped by contest ZONE not by team: crocForward contests
+        // rooDefender near Croc's attacking goal, rooForward contests
+        // crocDefender near Roo's. Visual only until now; wiring their
+        // movement is this step.
+        public Transform crocForward;
+        public Transform rooDefender;
+        public Transform rooForward;
+        public Transform crocDefender;
         public Transform ball;
 
         public float throwDuration = 2.6f;
@@ -56,18 +65,25 @@ namespace AFL.Day1
         string _message = "Centre bounce...";
         GUIStyle _style;
 
-        Vector3 _crocRoverStart;
-        Quaternion _crocRoverStartRot;
-        Vector3 _rooRoverStart;
-        Quaternion _rooRoverStartRot;
+        // Real fix (2026-08-12) — was 2 pairs of named fields (crocRover/
+        // rooRover only). Day 4 adds 4 more movers (forward/defender x2);
+        // rather than keep adding named field pairs for each one, this
+        // generically tracks and resets every movable Transform's start
+        // position/rotation, captured once in Start.
+        readonly System.Collections.Generic.List<Transform> _movers = new();
+        readonly System.Collections.Generic.Dictionary<Transform, (Vector3 pos, Quaternion rot)> _moverStarts = new();
 
         void Start()
         {
-            // Captured once — RunStraight moves the rover's real position
-            // and rotation, so without resetting it each round the rover
-            // would keep drifting further downfield every single contest.
-            if (crocRover) { _crocRoverStart = crocRover.position; _crocRoverStartRot = crocRover.rotation; }
-            if (rooRover) { _rooRoverStart = rooRover.position; _rooRoverStartRot = rooRover.rotation; }
+            // Captured once — RunStraight/RunToZ move a player's real
+            // position and rotation, so without resetting each round they'd
+            // keep drifting further from their starting spot every contest.
+            foreach (var mover in new[] { crocRover, rooRover, crocForward, rooDefender, rooForward, crocDefender })
+            {
+                if (!mover) continue;
+                _movers.Add(mover);
+                _moverStarts[mover] = (mover.position, mover.rotation);
+            }
             BeginThrow();
         }
 
@@ -80,8 +96,14 @@ namespace AFL.Day1
             _hopFired = false;
             _resolved = false;
             _sequenceComplete = false;
-            if (crocRover) { crocRover.position = _crocRoverStart; crocRover.rotation = _crocRoverStartRot; }
-            if (rooRover) { rooRover.position = _rooRoverStart; rooRover.rotation = _rooRoverStartRot; }
+            foreach (var mover in _movers)
+            {
+                var (pos, rot) = _moverStarts[mover];
+                mover.position = pos;
+                mover.rotation = rot;
+                var moverAnim = mover.GetComponentInChildren<Animator>();
+                if (moverAnim) moverAnim.SetFloat("Speed", 0f);
+            }
             _message = "Centre bounce...";
             float ideal = throwDuration * 0.5f;
             _botPressT = ideal + Random.Range(-0.35f, 0.35f);
@@ -296,6 +318,22 @@ namespace AFL.Day1
             // same as the croc" — one shared mechanic for both, not a
             // per-species animation).
             _message = crocWins ? "Crocs run it out!" : "Roos run it out!";
+
+            // Day 4, first slice (2026-08-12, Shaun: "we are not at the
+            // taking a speccy stage" — that's real, separate work he's
+            // already flagged as taking a while — "so that['s] what kind
+            // of happens when the ball is kicked into the forward line").
+            // Just the forward and the opposing defender (at whichever
+            // end this kick is heading) closing in on where it's going
+            // to land, timed to arrive as it does. No catch/contest
+            // grading yet — that's the actual speccy-timing work, still
+            // to come.
+            Transform forward = crocWins ? crocForward : rooForward;
+            Transform defender = crocWins ? rooDefender : crocDefender;
+            float landingZ = rover.position.z + runDir * kickDistance;
+            float arriveDuration = kickDropDuration + kickPause + kickDuration;
+            StartCoroutine(RunToZ(forward, landingZ, arriveDuration));
+            StartCoroutine(RunToZ(defender, landingZ, arriveDuration));
             yield return KickAway(rover, runDir);
 
             _message = crocWins ? "Crocs have a shot!" : "Roos have a shot!";
@@ -319,6 +357,7 @@ namespace AFL.Day1
         public float kickHeight = 7f;
         public float kickDistance = 10f;
         public float kickDuration = 1.1f;
+        public float kickDropDuration = 0.35f;
 
         // Day 3's placeholder ending (canonical plan): "kick lands, scene
         // resets regardless of who gets to it." No mark/goal grading yet
@@ -334,7 +373,7 @@ namespace AFL.Day1
 
             // Drop — ball falls from the hand to the foot, a real beat
             // before the kick rather than an instant swap.
-            float dropDur = 0.35f;
+            float dropDur = kickDropDuration;
             float el = 0f;
             while (el < dropDur)
             {
@@ -371,6 +410,38 @@ namespace AFL.Day1
         // matching Walk-ish pace rather than a full Run blend.
         public float runDistance = 6f;
         public float runDuration = 1.5f;
+
+        // Day 4, first slice (2026-08-12, Shaun: "what kind of happens
+        // when the ball is kicked into the forward line"). Straight down
+        // the Z axis only, own X unchanged — same control rule as
+        // everywhere else in this game, no steering. Timed to a fixed
+        // duration (the kick's own drop+pause+flight time) rather than a
+        // fixed distance, since the forward and defender don't start the
+        // same distance from the landing point every time.
+        System.Collections.IEnumerator RunToZ(Transform t, float targetZ, float duration)
+        {
+            if (!t) yield break;
+            var animator = t.GetComponentInChildren<Animator>();
+            Vector3 start = t.position;
+            Vector3 end = new Vector3(start.x, start.y, targetZ);
+            t.rotation = Quaternion.Euler(0, targetZ > start.z ? 0 : 180, 0);
+            float el = 0f;
+            while (el < duration)
+            {
+                el += Time.deltaTime;
+                float f = Mathf.Clamp01(el / duration);
+                float smoothF = Mathf.SmoothStep(0f, 1f, f);
+                t.position = Vector3.Lerp(start, end, smoothF);
+                if (animator)
+                {
+                    float rampF = Mathf.Clamp01(Mathf.Min(f, 1f - f) / 0.15f);
+                    animator.SetFloat("Speed", 5.5f * rampF, 0.1f, Time.deltaTime);
+                }
+                yield return null;
+            }
+            t.position = end;
+            if (animator) animator.SetFloat("Speed", 0f, 0.1f, Time.deltaTime);
+        }
 
         // Straight-line only, per the canonical plan's control rule — no
         // steering, the ball/handoff always puts the player in the right
