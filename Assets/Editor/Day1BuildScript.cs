@@ -19,7 +19,15 @@ public static class Day1BuildScript
 
         var outputPath = System.Environment.GetEnvironmentVariable("NDW_BUILD_OUTPUT") ?? "Build/WebGL";
         System.IO.Directory.CreateDirectory(outputPath);
-        PlayerSettings.productName = "Mount Duneed Cats Footy";
+        // Real fix (2026-08-12, Shaun: "make sure this game is neatly and
+        // modernly set up like the rest of the app"). "Mount Duneed Cats
+        // Footy" was a private placeholder name (Shaun's own suburb + a
+        // made-up club) that leaked into consumer-facing surfaces — the
+        // browser tab title, the iframe's accessibility title attribute,
+        // and this Burst debug folder's own name. Standardized on "AFL
+        // Footy", the name already used everywhere else in the app
+        // (ACTIVITY_LABELS, ndw-data.js).
+        PlayerSettings.productName = "AFL Footy";
         PlayerSettings.WebGL.template = "PROJECT:Day1";
         PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Disabled;
 
