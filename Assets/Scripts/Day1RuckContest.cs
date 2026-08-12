@@ -41,6 +41,26 @@ namespace AFL.Day1
         public Transform crocDefender;
         public Transform ball;
 
+        // Real fix (2026-08-12, Shaun: "still cant see both teams goals").
+        // The fixed camera sits between the two goals (z +-20) facing one
+        // direction, so the far goal can never appear in it at any
+        // pullback distance without permanently sacrificing the close,
+        // already-playtested framing (see the reverted v571 pullback).
+        // The old canceled game's own camera never solved this with one
+        // static shot either -- AFLBroadcastCamera.CutToSide() switches to
+        // a side-on framing specifically for the kick/mark beat, "where
+        // seeing both the player and the ball's flight matters more than
+        // the usual angle" (its own header comment). Reused here: cut wide
+        // and side-on only for the kick's flight, then cut back once the
+        // mark resolves.
+        Camera _mainCam;
+        Vector3 _camDefaultPos;
+        Quaternion _camDefaultRot;
+        // Must match Day1BuildScript's BuildGoalPosts z position.
+        public float goalZ = 20f;
+        public float kickCamSide = 16f;
+        public float kickCamHeight = 8f;
+
         public float throwDuration = 2.6f;
         public float peakHeight = 2.1f;
         public float groundY = 1.0f;
@@ -95,6 +115,12 @@ namespace AFL.Day1
                 _movers.Add(mover);
                 _moverStarts[mover] = (mover.position, mover.rotation);
             }
+            _mainCam = Camera.main;
+            if (_mainCam)
+            {
+                _camDefaultPos = _mainCam.transform.position;
+                _camDefaultRot = _mainCam.transform.rotation;
+            }
             BeginThrow();
         }
 
@@ -115,6 +141,16 @@ namespace AFL.Day1
                 mover.rotation = rot;
                 var moverAnim = mover.GetComponentInChildren<Animator>();
                 if (moverAnim) moverAnim.SetFloat("Speed", 0f);
+            }
+            // Belt and braces, same reasoning as the mover reset above: a
+            // fresh round always starts on the default close camera,
+            // regardless of whether the previous round's kick-cut ever
+            // got a chance to cut itself back (e.g. the human resetting
+            // mid-hold).
+            if (_mainCam)
+            {
+                _mainCam.transform.position = _camDefaultPos;
+                _mainCam.transform.rotation = _camDefaultRot;
             }
             _message = "Centre bounce...";
             float ideal = throwDuration * 0.5f;
@@ -412,6 +448,7 @@ namespace AFL.Day1
             }
 
             yield return new WaitForSeconds(kickPause);
+            CutCameraForKick(zDir);
 
             // Kick — a real arc continuing the same direction the run was
             // already heading, not a new direction to reason about. The
@@ -457,6 +494,24 @@ namespace AFL.Day1
             }
         }
 
+        void CutCameraForKick(float zDir)
+        {
+            if (!_mainCam) return;
+            // Pivot sits between the forward's zone (~z=10) and the goal
+            // (goalZ) so both the ball's landing and the posts are framed
+            // together, not just one or the other.
+            float pivotZ = zDir * (goalZ - 5f);
+            _mainCam.transform.position = new Vector3(kickCamSide, kickCamHeight, pivotZ);
+            _mainCam.transform.LookAt(new Vector3(0, 1.5f, pivotZ));
+        }
+
+        void CutCameraToDefault()
+        {
+            if (!_mainCam) return;
+            _mainCam.transform.position = _camDefaultPos;
+            _mainCam.transform.rotation = _camDefaultRot;
+        }
+
         // Real fix (2026-08-12, Shaun: "with a mark the forward catches
         // the ball"). Reuses HopRoutine as-is (the exact same reach
         // animation the ruck contest already uses) rather than a new
@@ -474,7 +529,11 @@ namespace AFL.Day1
         {
             int roundAtStart = _roundId;
             Hop(forward, marked);
-            if (!marked) yield break;
+            if (!marked)
+            {
+                CutCameraToDefault();
+                yield break;
+            }
             // Ball snaps to the forward's actual raised hand once their
             // jump reaches its own peak (same hopDuration/2 timing
             // HopRoutine itself peaks on), then keeps tracking it live —
@@ -495,6 +554,7 @@ namespace AFL.Day1
                 if (hand && ball) ball.position = hand.position;
                 yield return null;
             }
+            CutCameraToDefault();
         }
 
         public float catchPause = 0.5f;
