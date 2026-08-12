@@ -693,18 +693,23 @@ namespace AFL.Day1
         public float shotMissSpread = 2.4f;
         public float shotResultHold = 1f;
 
-        // Real fix (2026-08-12, Shaun: "the shot can work exactly like
-        // penalty shootout in the main app" — corrected from the
-        // two-tap power meter this replaces, per Shaun's direct
-        // clarification: "dont turn it into soccer", i.e. borrow that
-        // game's TAP-TO-AIM mechanic, not its visual theme. The main
-        // app's own Penalty Kicks (www/react-games/cs-penalty) is "tap a
-        // spot in the goal to shoot" — no timing, no power, just where
-        // you point. Reimplemented here as a real 3D raycast from the
-        // tapped screen point onto the goal's own plane (see
-        // TakeShotAtGoal), landing on whatever the camera is actually
-        // showing rather than a guessed 2D mapping.
-        public float shotAimMaxWait = 4f;
+        // Real fix (2026-08-12). Tap-to-aim-on-the-3D-field (previous
+        // pass) got direct, blunt feedback once actually played: "no
+        // idea when to push buttons what to do... chaotic." Reverted —
+        // per Shaun's own follow-up ("red light thing" / "even a power
+        // button visible"), the fix is the OPPOSITE direction: back to
+        // the single existing TAP button (same one used for every other
+        // action in this game, no new input type at all), with an
+        // explicit, unmissable RED/GREEN visual cue instead of an
+        // implicit one. A power bar rises once, red for most of its
+        // range, GREEN only in the scoring window near the top, red
+        // again if it runs all the way out — tap once, whenever you
+        // choose, ideally while it's green.
+        public float shotPowerRiseDuration = 2.5f;
+        public float shotPowerGreenMin = 0.62f;
+        public float shotPowerGreenMax = 0.85f;
+        bool _shotBarVisible;
+        float _shotBarValue;
 
         // Real fix (2026-08-12, Shaun: "now let move on to the next
         // phase after the mark they go back and have a shot at goal").
@@ -771,53 +776,40 @@ namespace AFL.Day1
                 yield return null;
             }
 
-            // Real fix (2026-08-12, Shaun: "the shot can work exactly
-            // like penalty shootout in the main app" — replacing the
-            // power meter above, per his follow-up correction "dont turn
-            // it into soccer": the mechanic, not the visual theme.
-            // Genuinely simpler than what it replaces — one tap, at a
-            // real spot, no timing window, no meter. Never hangs: if the
-            // player never taps at all, that's a real attempt that never
-            // got going (miss, not a stall) — same discipline as every
-            // deadline-driven mechanic elsewhere in this file.
-            _message = "Tap the goal to aim your kick!";
-            Day1Input.AimTapDown = false;
-            float waitEl = 0f;
-            bool aimed = false;
-            Vector2 aimNorm = Vector2.zero;
-            while (waitEl < shotAimMaxWait)
+            // Real fix (2026-08-12) — see the field comments on
+            // shotPowerRiseDuration above for why this replaced tap-to-
+            // aim. Single existing TAP button, one tap, whenever the
+            // player chooses. Never hangs: running all the way out
+            // without a tap is a real, deliberate miss (max power,
+            // way off), not a stall.
+            _message = "Tap when it turns GREEN!";
+            _shotBarVisible = true;
+            _shotBarValue = 0f;
+            bool tapped = false;
+            float tapValue = 0f;
+            float riseEl = 0f;
+            while (riseEl < shotPowerRiseDuration)
             {
-                if (_roundId != roundAtStart) yield break;
-                waitEl += Time.deltaTime;
-                if (Day1Input.AimTapDown) { aimed = true; aimNorm = Day1Input.AimNormPos; break; }
+                if (_roundId != roundAtStart) { _shotBarVisible = false; yield break; }
+                riseEl += Time.deltaTime;
+                _shotBarValue = Mathf.Clamp01(riseEl / shotPowerRiseDuration);
+                if (Day1Input.TapDown) { tapped = true; tapValue = _shotBarValue; break; }
                 yield return null;
             }
+            if (!tapped) tapValue = 1f;
+            _shotBarVisible = false;
+
+            bool isGoal = tapped && tapValue >= shotPowerGreenMin && tapValue <= shotPowerGreenMax;
+            _message = isGoal ? "GOAL!" : "Off target!";
 
             Vector3 kickStart = ball.position;
             Vector3 goalCentre = new Vector3(0, kickStart.y, zDir * goalZ);
-            bool isGoal = false;
-            if (aimed && _mainCam)
+            if (!isGoal)
             {
-                // Real 3D raycast from the tapped screen point onto the
-                // goal's own plane — lands on whatever the camera is
-                // actually showing, not a guessed 2D-to-3D mapping.
-                var ray = _mainCam.ViewportPointToRay(new Vector3(aimNorm.x, aimNorm.y, 0f));
-                var goalPlane = new Plane(Vector3.forward, new Vector3(0, 0, zDir * goalZ));
-                if (goalPlane.Raycast(ray, out float dist))
-                {
-                    Vector3 hit = ray.GetPoint(dist);
-                    // Posts sit at x = +-0.6 and +-1.3 (Day1BuildScript's
-                    // BuildGoalPosts) — the scoring gap is the middle 1.2
-                    // units between the inner pair.
-                    isGoal = Mathf.Abs(hit.x) <= 0.6f;
-                    goalCentre.x = Mathf.Clamp(hit.x, -shotMissSpread, shotMissSpread);
-                }
+                float distFromGreen = tapValue < shotPowerGreenMin ? shotPowerGreenMin - tapValue : tapValue - shotPowerGreenMax;
+                float side = tapValue < shotPowerGreenMin ? -1f : 1f;
+                goalCentre.x = side * shotMissSpread * Mathf.Clamp01(0.4f + distFromGreen * 2f);
             }
-            else if (!aimed)
-            {
-                goalCentre.x = (Random.value < 0.5f ? -1f : 1f) * shotMissSpread;
-            }
-            _message = isGoal ? "GOAL!" : "Off target!";
 
             // Real then, not fake — the outcome (and therefore the exact
             // target) is already decided before the ball leaves the
@@ -1227,6 +1219,40 @@ namespace AFL.Day1
             GUI.DrawTexture(new Rect(0, y, Screen.width, panelH), Texture2D.whiteTexture);
             GUI.color = Color.white;
             GUI.Label(new Rect(0, y, Screen.width, panelH), _message, _style);
+
+            // Real fix (2026-08-12, Shaun: "no red light system and it
+            // chaotic no idea when to push buttons what to do" / "even a
+            // power button visible"). Explicit, unmissable cue: a bar
+            // that rises once, red everywhere except a GREEN band drawn
+            // right on the track marking the actual scoring window — the
+            // player can see it coming, not just react blind. Same "the
+            // cue is visual, not a hidden number" principle as every
+            // other timing mechanic in this file.
+            if (_shotBarVisible)
+            {
+                int barW = Mathf.RoundToInt(Screen.width * 0.6f);
+                int barH = Mathf.RoundToInt(Screen.height * 0.07f);
+                int barX = (Screen.width - barW) / 2;
+                int barY = Mathf.RoundToInt(Screen.height * 0.62f);
+
+                GUI.color = new Color(0f, 0f, 0f, 0.55f);
+                GUI.DrawTexture(new Rect(barX - 6, barY - 6, barW + 12, barH + 12), Texture2D.whiteTexture);
+
+                GUI.color = new Color(0.75f, 0.2f, 0.2f, 0.9f);
+                GUI.DrawTexture(new Rect(barX, barY, barW, barH), Texture2D.whiteTexture);
+
+                GUI.color = new Color(0.25f, 0.8f, 0.3f, 0.95f);
+                float greenX = barX + shotPowerGreenMin * barW;
+                float greenW = (shotPowerGreenMax - shotPowerGreenMin) * barW;
+                GUI.DrawTexture(new Rect(greenX, barY, greenW, barH), Texture2D.whiteTexture);
+
+                bool inGreen = _shotBarValue >= shotPowerGreenMin && _shotBarValue <= shotPowerGreenMax;
+                GUI.color = inGreen ? Color.white : new Color(1f, 0.9f, 0.3f, 1f);
+                float markerX = barX + Mathf.Clamp01(_shotBarValue) * barW;
+                GUI.DrawTexture(new Rect(markerX - 4, barY - 10, 8, barH + 20), Texture2D.whiteTexture);
+
+                GUI.color = Color.white;
+            }
         }
     }
 
@@ -1236,34 +1262,12 @@ namespace AFL.Day1
     {
         public static bool TouchTapDown;
         public static bool TapDown => Input.GetKeyDown(KeyCode.Space) || TouchTapDown;
-
-        // Real, acknowledged exception to "one button only" (2026-08-12,
-        // Shaun: "the shot can work exactly like penalty shootout in the
-        // main app" — tap a spot to aim, not a timed tap). Only ever set
-        // by the shot-at-goal's canvas listener (index.html); everywhere
-        // else in the game this is simply never sent, so it can't affect
-        // any other mechanic.
-        public static bool AimTapDown;
-        public static Vector2 AimNormPos;
-
-        internal static void ClearOneShot() { TouchTapDown = false; AimTapDown = false; }
+        internal static void ClearOneShot() { TouchTapDown = false; }
     }
 
     public class Day1TouchBridge : MonoBehaviour
     {
         void LateUpdate() { Day1Input.ClearOneShot(); }
         public void TapPressed(string _) { Day1Input.TouchTapDown = true; }
-
-        public void AimTap(string csv)
-        {
-            var parts = csv.Split(',');
-            if (parts.Length != 2) return;
-            var style = System.Globalization.NumberStyles.Float;
-            var inv = System.Globalization.CultureInfo.InvariantCulture;
-            if (!float.TryParse(parts[0], style, inv, out float x)) return;
-            if (!float.TryParse(parts[1], style, inv, out float y)) return;
-            Day1Input.AimNormPos = new Vector2(x, y);
-            Day1Input.AimTapDown = true;
-        }
     }
 }

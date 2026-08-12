@@ -79,22 +79,6 @@
       }
       var tapBtn = document.getElementById('tap-btn');
       tapBtn.addEventListener('pointerdown', function (e) { e.preventDefault(); sendToUnity('TapPressed', ''); });
-
-      // Real, acknowledged exception to "one button only" (2026-08-12,
-      // Shaun: "the shot can work exactly like penalty shootout in the
-      // main app" — that game's own mechanic is "tap a spot in the goal
-      // to shoot," not a timed/power tap). Only meaningful during the
-      // shot-at-goal's aim phase — Unity ignores it the rest of the
-      // time. Sends canvas-relative NORMALIZED coordinates (0..1, origin
-      // bottom-left to match Unity's own screen-space convention) rather
-      // than raw pixels, so it's independent of the canvas's actual
-      // rendered/backing resolution.
-      canvas.addEventListener('pointerdown', function (e) {
-        var rect = canvas.getBoundingClientRect();
-        var nx = (e.clientX - rect.left) / rect.width;
-        var ny = 1 - (e.clientY - rect.top) / rect.height;
-        sendToUnity('AimTap', nx.toFixed(4) + ',' + ny.toFixed(4));
-      });
     </script>
   </body>
 </html>
