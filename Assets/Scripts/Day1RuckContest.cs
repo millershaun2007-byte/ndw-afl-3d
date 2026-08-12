@@ -67,6 +67,8 @@ namespace AFL.Day1
         public float markCelebrationHold = 0.3f;
         bool _markHoldReleased;
         bool _markHoldSucceeded;
+        bool _shotPowerBarVisible;
+        float _shotPowerValue;
 
         public float throwDuration = 2.6f;
         public float peakHeight = 2.1f;
@@ -680,36 +682,42 @@ namespace AFL.Day1
         public float shotSetupPause = 0.25f;
         public float shotRunInDuration = 0.6f;
         public float shotDropDuration = 0.3f;
-        public float shotPause = 0.25f;
         public float shotKickHeight = 3f;
         public float shotKickDuration = 0.9f;
-        public float shotPerfectWindow = 0.25f;
-        public float shotReactionCompensation = 0.17f;
-        // How far off-centre (world X) a mistimed kick drifts once it's
-        // known to have missed — enough to clearly pass outside the
-        // posts (which span -1.3 to 1.3, see Day1BuildScript's
-        // BuildGoalPosts) rather than an ambiguous near-miss.
+        // How far off-centre (world X) a mistimed kick drifts — enough to
+        // clearly pass outside the posts (which span -1.3 to 1.3, see
+        // Day1BuildScript's BuildGoalPosts) rather than an ambiguous
+        // near-miss.
         public float shotMissSpread = 2.4f;
-        public float shotResolveTweenDuration = 0.3f;
         public float shotResultHold = 1f;
+
+        // Real fix (2026-08-12, Shaun: "maybe a power thing like the
+        // penalty shoot out has"). Two taps for this one shot, not the
+        // usual single timed tap — first starts the meter rising, second
+        // locks it and kicks. Still just taps, no holding, closest fit to
+        // how every other action in this game already works, but a real,
+        // deliberate exception to "same controls every day" made
+        // knowingly for this one moment rather than by accident.
+        public float shotPowerFirstTapMaxWait = 2f;
+        public float shotPowerCycleDuration = 1.1f;
+        public float shotPowerMaxWait = 3f;
+        public float shotSweetSpotMin = 0.78f;
+        public float shotSweetSpotMax = 1f;
 
         // Real fix (2026-08-12, Shaun: "now let move on to the next
         // phase after the mark they go back and have a shot at goal").
-        // Day 5 of the canonical plan. Same one-button, cue-is-the-
-        // ball's-arc, best-tap-counts, reaction-compensated mechanic as
-        // every other timing moment in this file (ruck, mark) — a new
-        // OUTCOME (goal vs off-target), not a new control. "They go
-        // back": kicker steps straight back (away from goal) for a
-        // run-up, then straight back in to their marking spot, matching
-        // the straight-line-only movement rule everywhere else.
+        // Day 5 of the canonical plan. "They go back": kicker steps
+        // straight back (away from goal) for a run-up, then straight
+        // back in to their marking spot, matching the straight-line-only
+        // movement rule everywhere else.
         //
         // "Decide the outcome, then perform it" (this file's own
-        // recurring principle — see the Day 1 ball and the mark's ball):
-        // the ball follows the kick arc AT the goal centre right up
-        // until the timing resolves, then freezes; a SEPARATE short tween
-        // afterward either continues it straight through the middle (a
-        // goal) or drifts it wide (a miss) — it doesn't curve mid-flight
-        // based on a decision that technically hasn't happened yet.
+        // recurring principle — see the Day 1 ball and the mark's ball)
+        // still holds, just simpler here than the mark's freeze-then-
+        // tween version: since the power is LOCKED (and the outcome
+        // therefore known) before the ball is even kicked, the arc can
+        // just fly straight at its real final target from the start —
+        // no need to fake a mid-flight change of mind.
         // Real fix (2026-08-12, Shaun: "after the mark is taken a pause
         // will help" / "will be a pause between shots"). On top of
         // markHoldBeforeShot (the ball-in-hand hold right after the
@@ -760,73 +768,73 @@ namespace AFL.Day1
                 ball.position = Vector3.Lerp(handPos, footPos, f * f);
                 yield return null;
             }
-            yield return new WaitForSeconds(shotPause);
-            if (_roundId != roundAtStart) yield break;
+
+            // Power meter — first tap starts it, second locks it. If the
+            // player never taps at all (either window), that's treated
+            // as a real attempt that just never got going: a guaranteed
+            // miss, not a stall — same "never hang waiting on input"
+            // discipline as every deadline-driven mechanic elsewhere in
+            // this file.
+            _message = "Tap to start your kick...";
+            _shotPowerBarVisible = true;
+            _shotPowerValue = 0f;
+            float waitEl = 0f;
+            bool started = false;
+            while (waitEl < shotPowerFirstTapMaxWait)
+            {
+                if (_roundId != roundAtStart) { _shotPowerBarVisible = false; yield break; }
+                waitEl += Time.deltaTime;
+                if (Day1Input.TapDown) { started = true; break; }
+                yield return null;
+            }
+
+            float locked = 0f;
+            if (started)
+            {
+                _message = "Tap again to lock your power!";
+                float chargeEl = 0f;
+                bool didLock = false;
+                float half = shotPowerCycleDuration * 0.5f;
+                while (chargeEl < shotPowerMaxWait)
+                {
+                    if (_roundId != roundAtStart) { _shotPowerBarVisible = false; yield break; }
+                    chargeEl += Time.deltaTime;
+                    // Triangle wave 0 -> 1 -> 0, same read as a real
+                    // penalty-shootout power bar.
+                    _shotPowerValue = Mathf.PingPong(chargeEl, half) / half;
+                    if (Day1Input.TapDown) { locked = _shotPowerValue; didLock = true; break; }
+                    yield return null;
+                }
+                if (!didLock) locked = _shotPowerValue; // ran out of time — locks wherever it stopped
+            }
+            _shotPowerBarVisible = false;
+
+            bool isGoal = started && locked >= shotSweetSpotMin && locked <= shotSweetSpotMax;
+            _message = isGoal ? "GOAL!" : "Off target!";
 
             Vector3 kickStart = ball.position;
             Vector3 goalCentre = new Vector3(0, kickStart.y, zDir * goalZ);
-            float peakT = shotKickDuration * 0.5f;
-            float shotTargetT = peakT + shotReactionCompensation;
-            float shotDeadline = Mathf.Min(peakT + shotPerfectWindow, shotKickDuration);
-            bool shotPressed = false;
-            float shotBestErr = float.MaxValue;
-            // Signed, not just absolute — needed to know which SIDE a
-            // miss should drift to (early tap misses one way, late the
-            // other). Fixed after an initial draft compared against the
-            // loop's final el instead of the actual best tap's own
-            // timing, which would have missed the same direction every
-            // single time regardless of whether the tap was early or
-            // late.
-            float shotBestSignedErr = 0f;
-            bool shotResolved = false;
-            bool isGoal = false;
+            if (!isGoal)
+            {
+                float distFromSweet = !started ? 1f
+                    : (locked < shotSweetSpotMin ? shotSweetSpotMin - locked : locked - shotSweetSpotMax);
+                float side = started ? (locked < (shotSweetSpotMin + shotSweetSpotMax) * 0.5f ? -1f : 1f)
+                    : (Random.value < 0.5f ? -1f : 1f);
+                goalCentre.x = side * shotMissSpread * Mathf.Clamp01(0.4f + distFromSweet * 2f);
+            }
+
+            // Real then, not fake — the outcome (and therefore the exact
+            // target) is already decided before the ball leaves the
+            // foot, so the arc just flies straight at it. No freeze-then-
+            // tween needed here the way the mark's ball needed one.
             el = 0f;
             while (el < shotKickDuration)
             {
                 if (_roundId != roundAtStart) yield break;
                 el += Time.deltaTime;
                 float f = Mathf.Clamp01(el / shotKickDuration);
-                if (!shotResolved)
-                {
-                    float arc = Mathf.Sin(f * Mathf.PI) * shotKickHeight;
-                    ball.position = Vector3.Lerp(kickStart, goalCentre, f) + Vector3.up * arc;
-                }
-
-                if (Day1Input.TapDown)
-                {
-                    shotPressed = true;
-                    float signedErr = el - shotTargetT;
-                    if (Mathf.Abs(signedErr) < shotBestErr)
-                    {
-                        shotBestErr = Mathf.Abs(signedErr);
-                        shotBestSignedErr = signedErr;
-                    }
-                }
-
-                if (!shotResolved && el >= shotDeadline)
-                {
-                    shotResolved = true;
-                    isGoal = shotPressed && shotBestErr <= shotPerfectWindow;
-                    _message = isGoal ? "GOAL!" : "Off target!";
-                }
-                yield return null;
-            }
-
-            if (!isGoal)
-            {
-                // Late tap (positive signed error) drifts one way, early
-                // (or no tap at all) the other.
-                float side = shotPressed ? Mathf.Sign(shotBestSignedErr) : (Random.value < 0.5f ? -1f : 1f);
-                if (side == 0f) side = 1f;
-                goalCentre.x = side * shotMissSpread;
-            }
-            Vector3 frozenPos = ball.position;
-            el = 0f;
-            while (el < shotResolveTweenDuration)
-            {
-                if (_roundId != roundAtStart) yield break;
-                el += Time.deltaTime;
-                ball.position = Vector3.Lerp(frozenPos, goalCentre, Mathf.Clamp01(el / shotResolveTweenDuration));
+                float arc = Mathf.Sin(f * Mathf.PI) * shotKickHeight;
+                ball.position = Vector3.Lerp(kickStart, goalCentre, f) + Vector3.up * arc;
                 yield return null;
             }
             ball.position = goalCentre;
@@ -1223,6 +1231,38 @@ namespace AFL.Day1
             GUI.DrawTexture(new Rect(0, y, Screen.width, panelH), Texture2D.whiteTexture);
             GUI.color = Color.white;
             GUI.Label(new Rect(0, y, Screen.width, panelH), _message, _style);
+
+            // Real fix (2026-08-12, Shaun: "maybe a power thing like the
+            // penalty shoot out has"). Only visible during the shot's
+            // power-lock window (TakeShotAtGoal) — the sweet-spot band is
+            // drawn directly on the bar so the cue stays visual, same
+            // principle as every timing mechanic elsewhere in this file
+            // (the ball's own height, not a hidden number).
+            if (_shotPowerBarVisible)
+            {
+                int barW = Mathf.RoundToInt(Screen.width * 0.6f);
+                int barH = Mathf.RoundToInt(Screen.height * 0.06f);
+                int barX = (Screen.width - barW) / 2;
+                int barY = Mathf.RoundToInt(Screen.height * 0.62f);
+
+                GUI.color = new Color(0f, 0f, 0f, 0.55f);
+                GUI.DrawTexture(new Rect(barX - 6, barY - 6, barW + 12, barH + 12), Texture2D.whiteTexture);
+
+                GUI.color = new Color(1f, 1f, 1f, 0.25f);
+                GUI.DrawTexture(new Rect(barX, barY, barW, barH), Texture2D.whiteTexture);
+
+                GUI.color = new Color(0.3f, 0.85f, 0.35f, 0.55f);
+                float sweetX = barX + shotSweetSpotMin * barW;
+                float sweetW = (shotSweetSpotMax - shotSweetSpotMin) * barW;
+                GUI.DrawTexture(new Rect(sweetX, barY, sweetW, barH), Texture2D.whiteTexture);
+
+                bool inSweet = _shotPowerValue >= shotSweetSpotMin && _shotPowerValue <= shotSweetSpotMax;
+                GUI.color = inSweet ? Color.white : new Color(1f, 0.85f, 0.2f, 1f);
+                float markerX = barX + Mathf.Clamp01(_shotPowerValue) * barW;
+                GUI.DrawTexture(new Rect(markerX - 3, barY - 8, 6, barH + 16), Texture2D.whiteTexture);
+
+                GUI.color = Color.white;
+            }
         }
     }
 
