@@ -396,7 +396,16 @@ namespace AFL.Day1
             Transform defender = crocWins ? rooDefender : crocDefender;
             float peakZ = rover.position.z + runDir * kickDistance * 0.5f;
             float arriveByPeak = kickDropDuration + kickPause + kickDuration * 0.5f;
-            StartCoroutine(RunToZ(forward, peakZ, arriveByPeak));
+            // Real fix (2026-08-12, Shaun: "the speccy... forward now
+            // starts behind runs up jumps really high on the opponents
+            // shoulders and marks it at the peak"). Defender still just
+            // runs into position (unchanged). The forward's own run is
+            // now SpeccyLeap instead of a plain RunToZ — see its own
+            // header comment for why this replaces the earlier
+            // jumpFireAt/MarkJumpRoutine approach entirely rather than
+            // layering on top of it.
+            _markHoldReleased = false;
+            StartCoroutine(SpeccyLeap(forward, defender, peakZ, arriveByPeak));
             StartCoroutine(RunToZ(defender, peakZ, arriveByPeak));
             yield return KickAway(rover, runDir, forward);
             // Reset countdown starts from here, not from when the contest
@@ -421,7 +430,14 @@ namespace AFL.Day1
         // actual reach, invisible under the old close camera, obvious
         // once the wide kick-cut camera showed the catch itself. Brought
         // back down to meet the same proven reach (0.3 + 2.7 ≈ 3.0).
-        public float kickHeight = 2.7f;
+        //
+        // Real fix (2026-08-12, Shaun: "the speccy... jump can be really
+        // over the top"). SpeccyLeap's own reach is now much bigger than
+        // the plain Hop's (speccyLeapHeightScale=4 vs 1.65) — same
+        // formula as above, re-derived for the new height: hand ≈
+        // 1.48 (arm-raised standing height) + speccyLeapHeightScale(4)
+        // ≈ 5.48. kickHeight raised to match: 0.3 + 5.2 ≈ 5.5.
+        public float kickHeight = 5.2f;
         // Real fix (2026-08-12, Shaun: "he runs up way to close"). The
         // forward's target (peakZ, below) is derived from this — at the
         // old value of 10 it only reached z≈12.8, barely past the centre
@@ -433,14 +449,11 @@ namespace AFL.Day1
         public float kickDuration = 1.1f;
         public float kickDropDuration = 0.35f;
 
-        // Real fix (2026-08-12, same pass as the jump-timing fix below).
-        // At 0.5 this pushed markDeadline (peakT + this) out to 1.05 —
-        // long after the jump (now timed to peak at peakT) had already
-        // landed at ~peakT + hopDuration/2 = 0.775, so the "MARK!"/ball-
-        // snap reveal used to fire well after the leap was over. 0.25
-        // brings the deadline to ~0.8, right as the jump lands, and still
-        // gives a genuine ~0.33s acceptance window (well above the
-        // project's own "nothing tighter than 0.25s" floor) once
+        // Real fix (2026-08-12). At 0.5 this pushed markDeadline
+        // (peakT + this) out to 1.05, uncomfortably close to kickDuration
+        // itself. 0.25 brings it to ~0.8 — still a genuine ~0.33s
+        // acceptance window (well above the project's own "nothing
+        // tighter than 0.25s" floor) once
         // markReactionCompensation is folded in.
         public float markPerfectWindow = 0.25f;
         public float markReactionCompensation = 0.17f;
@@ -503,22 +516,15 @@ namespace AFL.Day1
             // ball's true visual peak, not later, so it stops exactly
             // where the forward is standing instead of sailing past them.
             bool ballFrozen = false;
-            // Real fix (2026-08-12, Shaun: "just want the forward clearly
-            // jumping into the ball and marking at highest point"). The
-            // jump used to only start at markDeadline — ~0.5s AFTER the
-            // ball had already frozen at its peak (see the ballFrozen fix
-            // above), so the forward stood still while the ball hung in
-            // the air, then hopped up at something already stationary.
-            // HopRoutine's own arc peaks at exactly hopDuration/2 (Sin
-            // curve, see HopRoutine), so firing it this much before peakT
-            // makes its peak land on the SAME instant the ball's does —
-            // reads as one continuous "leaps up, meets it at the top."
-            // Always the full/confident jump here (unlike Day 1's dual
-            // hop, there's no second jumper to contrast against) — only
-            // the ball's fate (caught vs dropped) is decided later, at
-            // markDeadline; the jump itself doesn't need to wait on that.
-            bool jumpFired = false;
-            float jumpFireAt = peakT - hopDuration / 2f;
+            // Real fix (2026-08-12, Shaun: "the speccy... jumps really
+            // high on the opponents shoulders"). The forward's leap is
+            // now SpeccyLeap, started back in TapBallAway alongside the
+            // run itself (not fired from in here) — a real leap with a
+            // run-up needs more lead time than fits inside the kick's own
+            // flight window. This loop still owns when the outcome
+            // (marked/spilled) is decided and signals SpeccyLeap via
+            // _markHoldReleased/_markHoldSucceeded, same mechanism as
+            // before.
             el = 0f;
             while (el < kickDuration)
             {
@@ -529,13 +535,6 @@ namespace AFL.Day1
                     float arc = Mathf.Sin(f * Mathf.PI) * kickHeight;
                     ball.position = Vector3.Lerp(kickStart, kickEnd, f) + Vector3.up * arc;
                     if (el >= peakT) ballFrozen = true;
-                }
-
-                if (!jumpFired && el >= jumpFireAt)
-                {
-                    jumpFired = true;
-                    _markHoldReleased = false;
-                    StartCoroutine(MarkJumpRoutine(forward));
                 }
 
                 // Same best-tap-counts pattern as day 1 (Shaun: "i just
@@ -586,11 +585,17 @@ namespace AFL.Day1
         // for the catch itself. Zoomed tight on the forward's actual
         // position instead, side-on (same reasoning as the wide cut:
         // avoids needing to know which way they're facing).
+        // Offsets are relative to forward.position, which by the time
+        // this fires (markDeadline, after SpeccyLeap's rise) already
+        // sits near the TOP of its own leap — so these don't need to
+        // grow with speccyLeapHeightScale, they already track it.
+        // Widened slightly (was 6/3.5) to give the much bigger leap
+        // (over-the-top per Shaun's ask) room to read in frame.
         void CutCameraToMarkCloseup(Transform forward)
         {
             if (!_mainCam || !forward) return;
-            _mainCam.transform.position = forward.position + new Vector3(6f, 3.5f, 0f);
-            _mainCam.transform.LookAt(forward.position + Vector3.up * 2f);
+            _mainCam.transform.position = forward.position + new Vector3(7f, 3f, 0f);
+            _mainCam.transform.LookAt(forward.position + Vector3.up * 1.2f);
         }
 
         // Real fix (2026-08-12, Shaun: "with a mark the forward catches
@@ -641,59 +646,102 @@ namespace AFL.Day1
             CutCameraToDefault();
         }
 
-        // Real fix (2026-08-12, Shaun: "maybe pause them in mid air when
-        // they have taken the mark" / "just brief pause"). A dedicated
-        // routine rather than reusing HopRoutine as-is — this needs to
-        // rise, then HOLD at the peak until the outcome (marked/spilled)
-        // is actually known, which HopRoutine's fixed-duration up/down
-        // arc has no way to express. Rise and fall each trace the same
-        // curve shape HopRoutine's own Sin(f*Mathf.PI) does (just split
-        // into two independent halves instead of one continuous arc), so
-        // the motion itself still matches the ruck's proven reach —
-        // pose math duplicated deliberately rather than refactoring the
-        // already-shipped, already-playtested HopRoutine to fit this.
-        // Always the full/confident reach (matches the "always jump the
-        // same way, only the ball's fate differs" call made when the
-        // jump was first retimed to peak with the ball).
-        System.Collections.IEnumerator MarkJumpRoutine(Transform t)
+        public float speccyLeapRiseDuration = 0.5f;
+        public float speccyLeapHeightScale = 4f;
+
+        // Real fix (2026-08-12, Shaun: "the speccy so the forward now
+        // starts behind runs up jumps really high on the opponents
+        // shoulders and marks it at the peak... you can do some pausing
+        // so that really stands out and the jump can be really over the
+        // top"). Replaces the earlier plain-RunToZ-then-small-hop combo
+        // entirely — a proper speccy is one continuous run-into-leap,
+        // not two independent motions that happen to finish at the same
+        // time. Owns the forward's ENTIRE motion for this beat (ground
+        // run AND leap) rather than running alongside a separate RunToZ
+        // call, deliberately: RunToZ and the old MarkJumpRoutine wrote
+        // position/localPosition to the same transform independently
+        // (RunToZ mid-run when the jump used to fire), which is exactly
+        // the kind of two-systems-that-are-supposed-to-agree bug this
+        // project keeps getting bitten by. One routine, one writer.
+        //
+        // Budget: the real-time gap from when this fires to the ball's
+        // own peak is fixed by the rest of the kick sequence
+        // (kickDropDuration + kickPause + half of kickDuration — the
+        // exact value TapBallAway already computes as arriveByPeak) and
+        // has to stay that way for "marks it at the peak" to still hold.
+        // Spent as: most of it as a real ground run (the "starts behind,
+        // runs up" read), the final speccyLeapRiseDuration as the leap
+        // itself, so the jump's peak — not just the arrival — lands on
+        // the ball's peak.
+        //
+        // "On the opponents shoulders": during the leap (not the run),
+        // X blends from the forward's own lane toward the defender's
+        // actual X position, holds there through the peak/pause, then
+        // blends back on the way down — reads as leaping past/over the
+        // defender rather than a straight-up hop in place.
+        System.Collections.IEnumerator SpeccyLeap(Transform forward, Transform defender, float targetZ, float totalDuration)
         {
-            if (!t) yield break;
-            // Same _roundId guard as MarkCatchRoutine — the hold makes
-            // this run noticeably longer than the old fixed-duration hop,
-            // so it's worth bailing cleanly if a new round's BeginThrow
-            // resets this same transform out from under it, rather than
-            // relying on timing margins alone.
+            if (!forward) yield break;
             int roundAtStart = _roundId;
-            Vector3 start = t.localPosition;
-            const float heightScale = 1.65f; // matches HopRoutine's reachesBall=true value
-            Vector3 towardCentre = new Vector3(-Mathf.Sign(start.x) * 0.55f, 0, 0);
-            const float armAngle = 155f;
 
-            var leftArm = FindDeepChild(t, "LeftArm");
-            var rightArm = FindDeepChild(t, "RightArm");
-            Quaternion leftStart = leftArm ? leftArm.localRotation : Quaternion.identity;
-            Quaternion rightStart = rightArm ? rightArm.localRotation : Quaternion.identity;
+            Vector3 startPos = forward.position;
+            float ownLaneX = startPos.x;
+            forward.rotation = Quaternion.Euler(0, targetZ > startPos.z ? 0 : 180, 0);
 
-            var animator = t.GetComponentInChildren<Animator>();
-            if (animator) animator.enabled = false;
-
-            void Pose(float wave)
-            {
-                t.localPosition = start + Vector3.up * wave * heightScale + towardCentre * wave;
-                if (leftArm) leftArm.localRotation = leftStart * Quaternion.Euler(0, 0, wave * armAngle);
-                if (rightArm) rightArm.localRotation = rightStart * Quaternion.Euler(0, 0, -wave * armAngle);
-            }
-
-            float riseDur = hopDuration / 2f;
+            // Phase 1: ground run, covering most of the distance —
+            // reuses RunToZ's own SmoothStep + Speed-ramp pattern so the
+            // running motion itself still matches everywhere else in
+            // this file.
+            float runDuration = Mathf.Max(0.05f, totalDuration - speccyLeapRiseDuration);
+            const float runPortionOfZ = 0.8f;
+            Vector3 runEnd = new Vector3(ownLaneX, startPos.y, Mathf.Lerp(startPos.z, targetZ, runPortionOfZ));
+            var animator = forward.GetComponentInChildren<Animator>();
             float el = 0f;
-            while (el < riseDur)
+            while (el < runDuration)
             {
                 if (_roundId != roundAtStart) yield break;
                 el += Time.deltaTime;
-                Pose(Mathf.Sin(Mathf.Clamp01(el / riseDur) * Mathf.PI / 2f));
+                float f = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(el / runDuration));
+                forward.position = Vector3.Lerp(startPos, runEnd, f);
+                if (animator)
+                {
+                    float rampF = Mathf.Clamp01(Mathf.Min(f, 1f - f) / 0.15f);
+                    animator.SetFloat("Speed", 5.5f * rampF, 0.1f, Time.deltaTime);
+                }
                 yield return null;
             }
-            Pose(1f);
+            forward.position = runEnd;
+            if (animator) animator.SetFloat("Speed", 0f, 0.1f, Time.deltaTime);
+
+            // Phase 2: the leap — really over the top (speccyLeapHeightScale
+            // is more than double the ruck's own hop reach on purpose).
+            if (animator) animator.enabled = false;
+            var leftArm = FindDeepChild(forward, "LeftArm");
+            var rightArm = FindDeepChild(forward, "RightArm");
+            Quaternion leftStart = leftArm ? leftArm.localRotation : Quaternion.identity;
+            Quaternion rightStart = rightArm ? rightArm.localRotation : Quaternion.identity;
+            float defenderX = defender ? defender.position.x : ownLaneX;
+            Vector3 leapEnd = new Vector3(ownLaneX, startPos.y, targetZ);
+
+            void Pose(float wave, bool zTracks)
+            {
+                Vector3 p = zTracks ? Vector3.Lerp(runEnd, leapEnd, wave) : leapEnd;
+                p.x = Mathf.Lerp(ownLaneX, defenderX, wave);
+                p.y += wave * speccyLeapHeightScale;
+                forward.position = p;
+                if (leftArm) leftArm.localRotation = leftStart * Quaternion.Euler(0, 0, wave * 155f);
+                if (rightArm) rightArm.localRotation = rightStart * Quaternion.Euler(0, 0, -wave * 155f);
+            }
+
+            el = 0f;
+            while (el < speccyLeapRiseDuration)
+            {
+                if (_roundId != roundAtStart) yield break;
+                el += Time.deltaTime;
+                Pose(Mathf.Sin(Mathf.Clamp01(el / speccyLeapRiseDuration) * Mathf.PI / 2f), zTracks: true);
+                yield return null;
+            }
+            Pose(1f, zTracks: true);
 
             while (!_markHoldReleased)
             {
@@ -711,16 +759,16 @@ namespace AFL.Day1
                 }
             }
 
-            float fallDur = hopDuration / 2f;
+            float fallDur = speccyLeapRiseDuration;
             el = 0f;
             while (el < fallDur)
             {
                 if (_roundId != roundAtStart) yield break;
                 el += Time.deltaTime;
-                Pose(Mathf.Cos(Mathf.Clamp01(el / fallDur) * Mathf.PI / 2f));
+                Pose(Mathf.Cos(Mathf.Clamp01(el / fallDur) * Mathf.PI / 2f), zTracks: false);
                 yield return null;
             }
-            t.localPosition = start;
+            forward.position = leapEnd;
             if (leftArm) leftArm.localRotation = leftStart;
             if (rightArm) rightArm.localRotation = rightStart;
             if (animator) animator.enabled = true;

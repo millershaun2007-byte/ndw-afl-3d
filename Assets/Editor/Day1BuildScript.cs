@@ -152,9 +152,14 @@ public static class Day1BuildScript
         // to compensate for that distance, not just parity.
         const float dragonScale = 1.083f * 1.3f;
         const float lionScale = 1.227f * 1.3f;
-        var crocForwardGo = BuildStaticCharacter("CrocForward", "Assets/Models/DragonRiggedAI", new Vector3(-0.9f, 0, 10f), Quaternion.identity, dragonScale);
+        // Real fix (2026-08-12, Shaun: "the speccy so the forward now
+        // starts behind runs up"). Forward moved from z=10 to z=5 —
+        // behind the defender, who stays at 10 near the actual contest
+        // zone — so SpeccyLeap (Day1RuckContest.cs) has real ground to
+        // cover before the leap instead of starting almost on top of it.
+        var crocForwardGo = BuildStaticCharacter("CrocForward", "Assets/Models/DragonRiggedAI", new Vector3(-0.9f, 0, 5f), Quaternion.identity, dragonScale);
         var rooDefenderGo = BuildStaticCharacter("RooDefender", "Assets/Models/LionRiggedAI", new Vector3(0.9f, 0, 10f), Quaternion.Euler(0, 180, 0), lionScale);
-        var rooForwardGo = BuildStaticCharacter("RooForward", "Assets/Models/LionRiggedAI", new Vector3(0.9f, 0, -10f), Quaternion.Euler(0, 180, 0), lionScale);
+        var rooForwardGo = BuildStaticCharacter("RooForward", "Assets/Models/LionRiggedAI", new Vector3(0.9f, 0, -5f), Quaternion.Euler(0, 180, 0), lionScale);
         var crocDefenderGo = BuildStaticCharacter("CrocDefender", "Assets/Models/DragonRiggedAI", new Vector3(-0.9f, 0, -10f), Quaternion.identity, dragonScale);
 
         // Goal posts (2026-08-12, Shaun: "chuck up those... goal posts").
