@@ -426,7 +426,16 @@ namespace AFL.Day1
         public float kickDuration = 1.1f;
         public float kickDropDuration = 0.35f;
 
-        public float markPerfectWindow = 0.5f;
+        // Real fix (2026-08-12, same pass as the jump-timing fix below).
+        // At 0.5 this pushed markDeadline (peakT + this) out to 1.05 —
+        // long after the jump (now timed to peak at peakT) had already
+        // landed at ~peakT + hopDuration/2 = 0.775, so the "MARK!"/ball-
+        // snap reveal used to fire well after the leap was over. 0.25
+        // brings the deadline to ~0.8, right as the jump lands, and still
+        // gives a genuine ~0.33s acceptance window (well above the
+        // project's own "nothing tighter than 0.25s" floor) once
+        // markReactionCompensation is folded in.
+        public float markPerfectWindow = 0.25f;
         public float markReactionCompensation = 0.17f;
 
         // Drop the ball to the foot, brief beat, then kick it away in an
@@ -487,6 +496,22 @@ namespace AFL.Day1
             // ball's true visual peak, not later, so it stops exactly
             // where the forward is standing instead of sailing past them.
             bool ballFrozen = false;
+            // Real fix (2026-08-12, Shaun: "just want the forward clearly
+            // jumping into the ball and marking at highest point"). The
+            // jump used to only start at markDeadline — ~0.5s AFTER the
+            // ball had already frozen at its peak (see the ballFrozen fix
+            // above), so the forward stood still while the ball hung in
+            // the air, then hopped up at something already stationary.
+            // HopRoutine's own arc peaks at exactly hopDuration/2 (Sin
+            // curve, see HopRoutine), so firing it this much before peakT
+            // makes its peak land on the SAME instant the ball's does —
+            // reads as one continuous "leaps up, meets it at the top."
+            // Always the full/confident jump here (unlike Day 1's dual
+            // hop, there's no second jumper to contrast against) — only
+            // the ball's fate (caught vs dropped) is decided later, at
+            // markDeadline; the jump itself doesn't need to wait on that.
+            bool jumpFired = false;
+            float jumpFireAt = peakT - hopDuration / 2f;
             el = 0f;
             while (el < kickDuration)
             {
@@ -497,6 +522,12 @@ namespace AFL.Day1
                     float arc = Mathf.Sin(f * Mathf.PI) * kickHeight;
                     ball.position = Vector3.Lerp(kickStart, kickEnd, f) + Vector3.up * arc;
                     if (el >= peakT) ballFrozen = true;
+                }
+
+                if (!jumpFired && el >= jumpFireAt)
+                {
+                    jumpFired = true;
+                    Hop(forward, true);
                 }
 
                 // Same best-tap-counts pattern as day 1 (Shaun: "i just
@@ -543,6 +574,13 @@ namespace AFL.Day1
         // jump routine — a marked ball ends up genuinely held in the
         // forward's hand, tracked live the same way the run/catch
         // elsewhere in this file already does, not just a text message.
+        //
+        // Real fix (2026-08-12, Shaun: "just want the forward clearly
+        // jumping into the ball and marking at highest point") — the jump
+        // itself no longer starts here. It's fired earlier in KickAway's
+        // loop (jumpFireAt), timed so its peak lines up with the ball's,
+        // so it's already mid-air (landing right around now) by the time
+        // this runs. This only decides the ball's fate.
         void ResolveMark(Transform forward, bool marked)
         {
             _message = marked ? "MARK!" : "Spilled!";
@@ -553,19 +591,18 @@ namespace AFL.Day1
         System.Collections.IEnumerator MarkCatchRoutine(Transform forward, bool marked)
         {
             int roundAtStart = _roundId;
-            Hop(forward, marked);
             if (!marked)
             {
                 CutCameraToDefault();
                 yield break;
             }
-            // Ball snaps to the forward's actual raised hand once their
-            // jump reaches its own peak (same hopDuration/2 timing
-            // HopRoutine itself peaks on), then keeps tracking it live —
-            // same principle as why the run's ball-on-a-fixed-offset
-            // looked wrong earlier tonight (2026-08-12, "balancing the
-            // ball on there tummy"): track the real bone, not a guess.
-            yield return new WaitForSeconds(hopDuration / 2f);
+            // Ball snaps straight to the forward's actual raised hand —
+            // no extra wait needed now, the jump already fired early
+            // enough to be at/near its own peak by this point. Then keeps
+            // tracking it live, same principle as why the run's ball-on-
+            // a-fixed-offset looked wrong earlier tonight (2026-08-12,
+            // "balancing the ball on there tummy"): track the real bone,
+            // not a guess.
             var hand = FindDeepChild(forward, "RightHand");
             float holdEl = 0f;
             while (holdEl < 1f)
