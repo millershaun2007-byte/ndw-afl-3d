@@ -677,10 +677,14 @@ namespace AFL.Day1
             }
         }
 
+        // Real fix (2026-08-12, Shaun: "just needs to be slowed down a
+        // bit the shot at goal its a bit rushed"). Step-back/pause/run-in
+        // durations all lengthened a bit — the whole "go back and take a
+        // shot" beat needs to read as deliberate, not hurried.
         public float shotStepBackDistance = 6f;
-        public float shotStepBackDuration = 0.7f;
-        public float shotSetupPause = 0.25f;
-        public float shotRunInDuration = 0.6f;
+        public float shotStepBackDuration = 1f;
+        public float shotSetupPause = 0.4f;
+        public float shotRunInDuration = 0.9f;
         public float shotDropDuration = 0.3f;
         public float shotKickHeight = 3f;
         public float shotKickDuration = 0.9f;
@@ -699,8 +703,13 @@ namespace AFL.Day1
         // deliberate exception to "same controls every day" made
         // knowingly for this one moment rather than by accident.
         public float shotPowerFirstTapMaxWait = 2f;
-        public float shotPowerCycleDuration = 1.1f;
-        public float shotPowerMaxWait = 3f;
+        // Real fix (2026-08-12, Shaun: "its a bit rushed") — was 1.1s for
+        // a full 0->1->0 cycle, so reacting to the sweet spot meant
+        // judging it within about half a second. Slowed to a much more
+        // readable pace; shotPowerMaxWait extended alongside it so the
+        // player still gets roughly two full passes before timing out.
+        public float shotPowerCycleDuration = 2.2f;
+        public float shotPowerMaxWait = 5f;
         public float shotSweetSpotMin = 0.78f;
         public float shotSweetSpotMax = 1f;
 
