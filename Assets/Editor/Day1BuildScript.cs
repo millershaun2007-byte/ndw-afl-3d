@@ -29,7 +29,23 @@ public static class Day1BuildScript
         // established name for this game across the rest of the app.
         PlayerSettings.productName = "Mount Duneed Footy";
         PlayerSettings.WebGL.template = "PROJECT:Day1";
-        PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Disabled;
+        // Real fix (2026-08-13, Shaun: this game is "half the size of my
+        // app", wants downloads easier). Compression was Disabled here
+        // because a PREVIOUS attempt at compressing this exact game's
+        // output broke in production — but that was a different mechanism
+        // (a manually pre-compressed .gz file + a declared Content-Encoding
+        // header in www/_headers, which Cloudflare Pages' own edge
+        // compression stripped/overrode, confirmed 2026-08-09 — see the
+        // comment in that file). Decompression Fallback is not that: Unity
+        // bundles a JS decompressor directly into loader.js, so the browser
+        // downloads the compressed bytes as a plain file and unzips them
+        // itself after the fact — nothing depends on the server sending any
+        // particular Content-Encoding header, so the exact failure mode
+        // that killed the earlier attempt doesn't apply here. Verify this
+        // actually works live before trusting it, same as everything else
+        // in this project — don't assume from the mechanism alone.
+        PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Brotli;
+        PlayerSettings.WebGL.decompressionFallback = true;
 
         var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
         {
@@ -96,6 +112,15 @@ public static class Day1BuildScript
         //   and should read as oriented toward their own attacking end —
         //   so they keep the Z-axis, opposite-ends facing from the oval
         //   fix, unaffected by the ruck pair's ball-facing requirement.
+        // Real fix (2026-08-13) — Croc/Roo's controllers were previously
+        // built by an older, different process (not this function) that
+        // happened to land at the same expected path; that older process
+        // never had a Run state. Croc/Roo now go through the exact same
+        // EnsureAnimatorController as Dragon/Lion below, so all four (and
+        // any future species built with BuildStaticCharacter) get identical,
+        // consistently-maintained controllers — one path, not two.
+        EnsureAnimatorController("Croc", "Assets/Models/CrocRiggedAI");
+        EnsureAnimatorController("Roo", "Assets/Models/RooRiggedAI");
         var crocGo = BuildStaticCharacter("Croc", "Assets/Models/CrocRiggedAI", new Vector3(-0.55f, 0, 0), Quaternion.Euler(0, 90, 0));
         var rooGo = BuildStaticCharacter("Roo", "Assets/Models/RooRiggedAI", new Vector3(0.55f, 0, 0), Quaternion.Euler(0, -90, 0));
 
@@ -270,9 +295,10 @@ public static class Day1BuildScript
         sm.defaultState = idle;
 
         var walkClip = FindClipInFolder(modelFolder, "Walking");
+        UnityEditor.Animations.AnimatorState walk = null;
         if (walkClip != null)
         {
-            var walk = sm.AddState("Walk");
+            walk = sm.AddState("Walk");
             walk.motion = walkClip;
             var toWalk = idle.AddTransition(walk);
             toWalk.hasExitTime = false; toWalk.duration = 0.15f;
@@ -285,6 +311,35 @@ public static class Day1BuildScript
         {
             Debug.LogWarning($"EnsureAnimatorController: no Walking clip found in {modelFolder} for {species} — Idle only.");
         }
+
+        // Real running gait (2026-08-13, Shaun: "we need the running jumping
+        // full athletic stuff for all of them" — for every character this
+        // pipeline can rig, not just Croc/Roo). Every run-up/leap-approach
+        // sequence in Day1RuckContest already ramps Speed up to 5.5 (a full
+        // sprint value) during the ground-run phase, but until now the only
+        // state above Idle was Walk, so the legs kept playing a slow walk
+        // cycle at any speed including a full sprint — feet visibly not
+        // matching how fast the body was moving across the ground. The
+        // Running clip already exists for every character in this rig batch
+        // (see ndw-character-library's rig-status checklist — Walking/Running
+        // are generated together, one was just never wired to a state here).
+        var runClip = FindClipInFolder(modelFolder, "Running");
+        if (walk != null && runClip != null)
+        {
+            var run = sm.AddState("Run");
+            run.motion = runClip;
+            var toRun = walk.AddTransition(run);
+            toRun.hasExitTime = false; toRun.duration = 0.15f;
+            toRun.AddCondition(AnimatorConditionMode.Greater, 3f, "Speed");
+            var toWalkBack = run.AddTransition(walk);
+            toWalkBack.hasExitTime = false; toWalkBack.duration = 0.15f;
+            toWalkBack.AddCondition(AnimatorConditionMode.Less, 3f, "Speed");
+        }
+        else if (runClip == null)
+        {
+            Debug.LogWarning($"EnsureAnimatorController: no Running clip found in {modelFolder} for {species} — Walk is the fastest gait available.");
+        }
+
         EditorUtility.SetDirty(controller);
     }
 
