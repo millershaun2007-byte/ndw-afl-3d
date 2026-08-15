@@ -49,6 +49,8 @@ namespace AFL
         float _kickPulseAt = -99f;
         float _kickChargeVisual;   // purely cosmetic lean-back while a kick beat is live
         float _spoiledAt = -99f;  // purely cosmetic swipe while a defender spoils a mark
+        float _tackleLungeAt = -99f;  // purely cosmetic dive while tackling
+        float _staggerAt = -99f;      // purely cosmetic stumble while tackled
 
         public bool IsAirborne { get; private set; }
         public bool HasBall => AFLBall.Instance && AFLBall.Instance.Carrier == this;
@@ -140,6 +142,29 @@ namespace AFL
             if (animator) animator.SetTrigger("Jump");
         }
 
+        /// Called by AFLGameManager (RoverChase beat) when the tackler's
+        /// timing wins the chase contest. A tackle is a ground-level dive
+        /// at the ball carrier, not an aerial reach — a forward horizontal
+        /// burst rather than Jump()'s vertical velocity, so it visually
+        /// closes the last bit of distance at the moment it lands instead
+        /// of rising up and away from the target. No Animator trigger:
+        /// this rig has no lunge/dive clip, and Jump's trigger would read
+        /// wrong here (rising, not diving) — purely the procedural lean
+        /// below, same approach as the kick lean and spoil swipe.
+        public void Tackle()
+        {
+            _horizVel += transform.forward * 4f;
+            _tackleLungeAt = Time.time;
+        }
+
+        /// Called on the ball carrier when a tackle lands — purely a
+        /// cosmetic stumble (see DriveProceduralMotion); the actual ball
+        /// strip is AFLGameManager calling AFLBall.Spoil() separately.
+        public void GetTackled()
+        {
+            _staggerAt = Time.time;
+        }
+
         void DriveAnimator()
         {
             if (!animator) return;
@@ -193,8 +218,28 @@ namespace AFL
             float spoilYaw = spoilEnv * 32f;
             float spoilLurch = spoilEnv * 16f;
 
-            _visual.localPosition = new Vector3(0f, 1f + hop, spoilEnv * 0.12f);
-            _visual.localRotation = Quaternion.Euler(lean + kickLean + spoilLurch, spoilYaw, roll);
+            // Tackle dive (tackler) — a hard forward/down pitch, distinct
+            // from the spoil's yaw-heavy swipe: this one reads as a full-
+            // body dive at the target rather than a one-armed swat.
+            const float lungeDur = 0.4f;
+            float sinceLunge = Time.time - _tackleLungeAt;
+            float lungeT = (sinceLunge >= 0f && sinceLunge < lungeDur) ? sinceLunge / lungeDur : -1f;
+            float lungeEnv = lungeT >= 0f ? Mathf.Sin(lungeT * Mathf.PI) : 0f;   // 0 -> 1 -> 0
+            float lungePitch = lungeEnv * 55f;
+            float lungeDip = lungeEnv * 0.35f;
+
+            // Stumble (tackled ball carrier) — tips backward with a sideways
+            // twist, the opposite read from the tackler's forward dive so
+            // the two players visually react to the same moment differently.
+            const float staggerDur = 0.4f;
+            float sinceStagger = Time.time - _staggerAt;
+            float staggerT = (sinceStagger >= 0f && sinceStagger < staggerDur) ? sinceStagger / staggerDur : -1f;
+            float staggerEnv = staggerT >= 0f ? Mathf.Sin(staggerT * Mathf.PI) : 0f;
+            float staggerPitch = -staggerEnv * 32f;
+            float staggerRoll = staggerEnv * 20f;
+
+            _visual.localPosition = new Vector3(0f, 1f + hop - lungeDip, spoilEnv * 0.12f + lungeEnv * 0.4f);
+            _visual.localRotation = Quaternion.Euler(lean + kickLean + spoilLurch + lungePitch + staggerPitch, spoilYaw, roll + staggerRoll);
             _visual.localScale = new Vector3(1f + squash * 0.6f, 1f - squash, 1f + squash * 0.6f);
         }
 

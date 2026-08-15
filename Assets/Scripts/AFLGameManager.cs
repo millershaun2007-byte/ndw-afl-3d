@@ -14,7 +14,7 @@ namespace AFL
     // never navigating toward a shared point, which is what caused the
     // "four arms, two heads" fusing. See AFLBeatPrompt for the shared
     // "one verb" mechanic and AFLPlayer for forward-only movement.
-    public enum AFLBeat { RuckTap, ClearanceKick, MarkContest, SetShot, Celebration }
+    public enum AFLBeat { RuckTap, RoverChase, ClearanceKick, MarkContest, SetShot, Celebration }
 
     [AddComponentMenu("AFL/AFL Game Manager")]
     public class AFLGameManager : MonoBehaviour
@@ -47,7 +47,7 @@ namespace AFL
         public AFLBeat Beat { get; private set; }
 
         AFLPlayer.Team _actingTeam;   // whose chain this is
-        AFLPlayer _ruck, _receiver, _shooter, _defender;
+        AFLPlayer _ruck, _receiver, _shooter, _defender, _tackler;
         Vector3 _clearanceAimTarget;   // world position the clearance kick aims toward
         string _message = "";
         float _messageUntil, _restartAt = -1f, _beatStartedAt, _scoreLock;
@@ -85,6 +85,7 @@ namespace AFL
             switch (Beat)
             {
                 case AFLBeat.RuckTap: UpdateRuckTapBeat(); break;
+                case AFLBeat.RoverChase: UpdateRoverChaseBeat(); break;
                 case AFLBeat.ClearanceKick: UpdateClearanceKickBeat(); break;
                 case AFLBeat.MarkContest: UpdateMarkContestBeat(); break;
                 case AFLBeat.SetShot: UpdateSetShotBeat(); break;
@@ -193,7 +194,87 @@ namespace AFL
 
             if (ball) ball.Attach(_receiver);
             AnnounceGrade("Tap", grade);
-            BeginClearanceKick();
+            BeginRoverChase();
+        }
+
+        // ---------------------------------------------------------------
+        //  BEAT 1.5 — ROVER CHASE: the defending team's rover chases the
+        //  ball carrier from behind in the same straight lane and tries to
+        //  tackle them before they can dispose of it. Same dual-tap-contest
+        //  shape as MarkContest (one verb, whoever's not the human is bot-
+        //  timed) — the difference is both players actually run this beat
+        //  (SetMoveHeld(true) for both, not just one), so it reads as a
+        //  real chase rather than two players standing still waiting to
+        //  jump. Still straight-line-only — the tackler starts behind the
+        //  carrier in the exact same lane, so "catching up" is a speed/
+        //  timing question, never a steering one (see AFLPlayer's own
+        //  class comment on why free steering was removed).
+        // ---------------------------------------------------------------
+        const float ChaseGapStart = 7f;
+
+        void BeginRoverChase()
+        {
+            _beatStartedAt = Time.time;
+            _botCommitAt = -1f;
+            Beat = AFLBeat.RoverChase;
+
+            var defendingTeam = _actingTeam == AFLPlayer.Team.Home ? AFLPlayer.Team.Away : AFLPlayer.Team.Home;
+            _tackler = FindRuck(defendingTeam) ?? _ruck;
+
+            Vector3 c = centreCircle ? centreCircle.position : Vector3.zero;
+            Vector3 attackDir = _actingTeam == AFLPlayer.Team.Home ? Vector3.forward : Vector3.back;
+
+            PlaceAtSlot(_receiver, c, attackDir);
+            PlaceAtSlot(_tackler, c - attackDir * ChaseGapStart, attackDir);
+
+            // Both run this beat — unlike TakeBeatControl elsewhere (which
+            // hands movement to exactly one bot), a chase needs the
+            // carrier fleeing AND the tackler pursuing at the same time.
+            foreach (var pl in AFLPlayer.All) if (!pl.isUserControlled) pl.SetMoveHeld(false);
+            if (_receiver && !_receiver.isUserControlled) _receiver.SetMoveHeld(true);
+            if (_tackler && !_tackler.isUserControlled) _tackler.SetMoveHeld(true);
+
+            if (cam) cam.CutToSide(_receiver.transform, attackDir);
+
+            bool userIsCarrier = _actingTeam == userTeam;
+            if (prompt) { prompt.ringDuration = 2.0f; prompt.BeginRing(userIsCarrier ? "Tap MARK to sprint clear!" : "Tap MARK to lunge for the tackle!"); }
+            Announce("Chase!");
+        }
+
+        void UpdateRoverChaseBeat()
+        {
+            if (!prompt.IsLive) return;
+
+            bool carrierTapped = false, tacklerTapped = false;
+            if (_actingTeam == userTeam) { carrierTapped = AFLInput.MarkDown; tacklerTapped = BotTap(_tackler); }
+            else { tacklerTapped = AFLInput.MarkDown; carrierTapped = BotTap(_receiver); }
+
+            if (!carrierTapped && !tacklerTapped && prompt.CurrentValue < 1f) return;
+
+            var (grade, _) = carrierTapped || tacklerTapped ? prompt.Resolve() : (0.05f, 0f);
+            prompt.Stop();
+
+            bool carrierEscaped = carrierTapped && grade >= 0.30f;
+            bool tackled = tacklerTapped && grade >= 0.45f && !carrierEscaped;
+
+            if (tackled)
+            {
+                if (_tackler) _tackler.Tackle();
+                if (_receiver) _receiver.GetTackled();
+                if (cam) cam.Punch();
+                AnnounceGrade("TACKLED! Turnover", grade);
+                if (ball) ball.Spoil(_tackler ? _tackler.transform.position : _receiver.transform.position);
+                QueueRestart();
+            }
+            else
+            {
+                // Anything short of a clean tackle and the carrier keeps
+                // the ball — a near-miss lunge doesn't need its own losing
+                // state, same simplification MarkContest's "clean drop"
+                // case makes for a poorly-timed spoil attempt.
+                AnnounceGrade(carrierEscaped ? "Breaks clear!" : "Shrugs off the chase", grade);
+                BeginClearanceKick();
+            }
         }
 
         // ---------------------------------------------------------------
