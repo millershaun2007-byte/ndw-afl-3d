@@ -299,7 +299,8 @@ namespace AFL
             }
             else if (defenderSpoiled)
             {
-                if (_defender) _defender.Jump();
+                if (_defender) _defender.Spoil();
+                if (cam) cam.Punch();
                 Announce("Spoiled! Back to the centre", 1.8f);
                 if (ball) ball.Spoil(_defender ? _defender.transform.position : _clearanceAimTarget);
                 QueueRestart();

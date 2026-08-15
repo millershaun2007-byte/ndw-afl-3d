@@ -48,6 +48,7 @@ namespace AFL
         float _landedAt = -99f;
         float _kickPulseAt = -99f;
         float _kickChargeVisual;   // purely cosmetic lean-back while a kick beat is live
+        float _spoiledAt = -99f;  // purely cosmetic swipe while a defender spoils a mark
 
         public bool IsAirborne { get; private set; }
         public bool HasBall => AFLBall.Instance && AFLBall.Instance.Carrier == this;
@@ -121,6 +122,24 @@ namespace AFL
             if (animator) animator.SetTrigger("Jump");
         }
 
+        /// Called by AFLGameManager when a defender wins a mark contest by
+        /// spoiling rather than catching. Reuses Jump()'s rig/animation
+        /// state (no new Animator parameter needed — this project's real
+        /// motion read comes from DriveProceduralMotion() below, not the
+        /// underlying clip, same as the kick lean and landing squash) but
+        /// a shorter, lower hop than a clean mark: a defender is swatting
+        /// the ball away, not rising to gather it cleanly. The distinct
+        /// read comes from the one-armed swipe layered on in
+        /// DriveProceduralMotion(), not from a separate jump height.
+        public void Spoil()
+        {
+            if (!_cc.isGrounded) return;
+            _vertVel = JumpVelocity * 0.7f;
+            IsAirborne = true;
+            _spoiledAt = Time.time;
+            if (animator) animator.SetTrigger("Jump");
+        }
+
         void DriveAnimator()
         {
             if (!animator) return;
@@ -160,8 +179,22 @@ namespace AFL
             float sinceLand = Time.time - _landedAt;
             float squash = (sinceLand >= 0f && sinceLand < 0.18f) ? (1f - sinceLand / 0.18f) * 0.22f : 0f;
 
-            _visual.localPosition = new Vector3(0f, 1f + hop, 0f);
-            _visual.localRotation = Quaternion.Euler(lean + kickLean, 0f, roll);
+            // One-armed swipe read: a fast yaw snap across the body (as if
+            // swatting the ball sideways) plus an aggressive forward lurch,
+            // envelope rises quick and falls slower — smooth-in/sharp-read,
+            // distinct from Jump()'s plain vertical rise. Duration (0.32s)
+            // sits comfortably above this game's 0.25s minimum timing floor
+            // (see CLAUDE.md "recurring failure" section) since it's purely
+            // cosmetic and never gates input.
+            const float spoilDur = 0.32f;
+            float sinceSpoil = Time.time - _spoiledAt;
+            float spoilT = (sinceSpoil >= 0f && sinceSpoil < spoilDur) ? sinceSpoil / spoilDur : -1f;
+            float spoilEnv = spoilT >= 0f ? Mathf.Sin(spoilT * Mathf.PI) : 0f;   // 0 -> 1 -> 0
+            float spoilYaw = spoilEnv * 32f;
+            float spoilLurch = spoilEnv * 16f;
+
+            _visual.localPosition = new Vector3(0f, 1f + hop, spoilEnv * 0.12f);
+            _visual.localRotation = Quaternion.Euler(lean + kickLean + spoilLurch, spoilYaw, roll);
             _visual.localScale = new Vector3(1f + squash * 0.6f, 1f - squash, 1f + squash * 0.6f);
         }
 
