@@ -527,16 +527,26 @@ namespace AFL
         void EnsureStyles()
         {
             if (_big != null) return;
+            // Real bug (found 2026-08-16): sizing purely off Screen.height meant
+            // a narrow, tall canvas (the real app's constrained mobile iframe —
+            // this game only ever ships embedded, see neurodinoworld's
+            // .iframe-game height:min(72vh,640px) — is exactly this shape) could
+            // compute a font too wide for the actual available width, wrapping
+            // the score line and clipping the second line off top of screen.
+            // Scaling off the smaller of width/height fixes it for both this
+            // narrow embed and any wider/landscape context without special-
+            // casing either.
+            int baseDim = Mathf.Min(Screen.width, Screen.height);
             _big = new GUIStyle(GUI.skin.label)
             {
-                fontSize = Mathf.RoundToInt(Screen.height * 0.05f),
+                fontSize = Mathf.RoundToInt(baseDim * 0.055f),
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleLeft,
                 normal = { textColor = Color.white }
             };
             _small = new GUIStyle(GUI.skin.label)
             {
-                fontSize = Mathf.RoundToInt(Screen.height * 0.035f),
+                fontSize = Mathf.RoundToInt(baseDim * 0.04f),
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleLeft,
                 normal = { textColor = new Color(1f, 0.9f, 0.5f) }
