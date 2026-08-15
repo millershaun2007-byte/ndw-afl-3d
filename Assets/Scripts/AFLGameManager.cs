@@ -14,7 +14,7 @@ namespace AFL
     // never navigating toward a shared point, which is what caused the
     // "four arms, two heads" fusing. See AFLBeatPrompt for the shared
     // "one verb" mechanic and AFLPlayer for forward-only movement.
-    public enum AFLBeat { RuckTap, RoverChase, ClearanceKick, MarkContest, SetShot, Celebration }
+    public enum AFLBeat { RuckTap, RoverChase, ClearanceKick, MarkContest, PlayOnChoice, SnapShot, SetShot, Celebration }
 
     [AddComponentMenu("AFL/AFL Game Manager")]
     public class AFLGameManager : MonoBehaviour
@@ -88,6 +88,8 @@ namespace AFL
                 case AFLBeat.RoverChase: UpdateRoverChaseBeat(); break;
                 case AFLBeat.ClearanceKick: UpdateClearanceKickBeat(); break;
                 case AFLBeat.MarkContest: UpdateMarkContestBeat(); break;
+                case AFLBeat.PlayOnChoice: UpdatePlayOnChoiceBeat(); break;
+                case AFLBeat.SnapShot: UpdateSnapShotBeat(); break;
                 case AFLBeat.SetShot: UpdateSetShotBeat(); break;
             }
 
@@ -376,7 +378,7 @@ namespace AFL
             {
                 if (_forwardOption) { _forwardOption.Jump(); ball.Attach(_forwardOption); }
                 AnnounceGrade(grade >= 0.85f ? "SPECKY MARK!" : "Mark!", grade);
-                BeginSetShot(_forwardOption ?? _receiver);
+                BeginPlayOnChoice(_forwardOption ?? _receiver);
             }
             else if (defenderSpoiled)
             {
@@ -416,13 +418,97 @@ namespace AFL
             return false;
         }
 
-        // Single-relevant-player beats (RuckTap/ClearanceKick/SetShot):
-        // human presses MARK if it's their player, otherwise resolves on
-        // the same bot timer as MarkContest.
+        // Single-relevant-player beats (RuckTap/ClearanceKick/PlayOnChoice/
+        // SnapShot/SetShot): human presses MARK if it's their player,
+        // otherwise resolves on the same bot timer as MarkContest.
         bool ResolveSingleTap(AFLPlayer relevant)
         {
             if (relevant && relevant.isUserControlled) return AFLInput.MarkDown;
             return BotTap(relevant);
+        }
+
+        // ---------------------------------------------------------------
+        //  BEAT 3.5 — PLAY ON CHOICE: after a successful mark, the same
+        //  left/right sweep RuckTap already uses to pick a rover now picks
+        //  between the two things a real mark actually lets you do — take
+        //  the set shot (line up properly, slower, more accurate) or play
+        //  on and snap it immediately (rushed, less accurate, but the
+        //  defence never gets a chance to reset). Same single verb as
+        //  everywhere else; the sweep's side is the whole decision.
+        // ---------------------------------------------------------------
+        void BeginPlayOnChoice(AFLPlayer marker)
+        {
+            _beatStartedAt = Time.time;
+            _botCommitAt = -1f;
+            Beat = AFLBeat.PlayOnChoice;
+            _shooter = marker;
+
+            TakeBeatControl(marker);
+            if (cam) cam.CutToSide(marker.transform, marker.transform.forward);
+
+            if (prompt) prompt.BeginSweep("Tap MARK: LEFT play on & snap! · RIGHT set shot!", 0f);
+            Announce("Play on, or set shot?");
+        }
+
+        void UpdatePlayOnChoiceBeat()
+        {
+            if (!ResolveSingleTap(_shooter)) return;
+            bool playOn = prompt.CurrentValue < 0f;
+            prompt.Stop();
+
+            if (playOn) BeginSnapShot(_shooter);
+            else BeginSetShot(_shooter);
+        }
+
+        // ---------------------------------------------------------------
+        //  BEAT 3.6 — SNAP SHOT: playing on, not squaring up to goal first
+        //  (no SnapFacing call — kicks from however they're already facing
+        //  out of the mark, same attackDir they were placed in for the
+        //  contest). Faster sweep (harder to time) and a wider aim skew
+        //  plus a lower power ceiling than a set shot — a real snap is
+        //  genuinely less reliable, that's the whole trade-off for taking
+        //  it quickly instead of setting up properly.
+        // ---------------------------------------------------------------
+        void BeginSnapShot(AFLPlayer marker)
+        {
+            _beatStartedAt = Time.time;
+            _botCommitAt = -1f;
+            Beat = AFLBeat.SnapShot;
+            _shooter = marker;
+
+            TakeBeatControl(marker);
+            Transform goal = _actingTeam == AFLPlayer.Team.Home ? goalNorth : goalSouth;
+            Vector3 toGoal = goal ? (goal.position - marker.transform.position) : marker.transform.forward;
+            toGoal.y = 0f; toGoal.Normalize();
+            if (cam) cam.CutToSide(marker.transform, toGoal);
+
+            if (prompt) { prompt.sweepSpeed = 2.6f; prompt.BeginSweep("Tap MARK: SNAP shot, quick!", 0f); }
+            Announce("Playing on!");
+        }
+
+        void UpdateSnapShotBeat()
+        {
+            if (_shooter) _shooter.SetKickChargeVisual(Mathf.InverseLerp(-1f, 1f, prompt.CurrentValue));
+            if (!ResolveSingleTap(_shooter)) return;
+            var (grade, _) = prompt.Resolve();
+            prompt.Stop();
+            // Reset immediately after use — this is the one beat that ever
+            // touches AFLBeatPrompt's shared sweepSpeed, so resetting it
+            // right here (rather than scattering a defensive reset across
+            // every other Begin* method) is the whole fix; every future
+            // sweep beat starts clean regardless of how this one resolved.
+            prompt.sweepSpeed = 1.6f;
+
+            Transform goal = _actingTeam == AFLPlayer.Team.Home ? goalNorth : goalSouth;
+            Vector3 toGoal = goal ? (goal.position - _shooter.transform.position) : _shooter.transform.forward;
+            toGoal.y = 0f; toGoal.Normalize();
+            float skewDeg = prompt.CurrentValue * 30f;
+            Vector3 aimed = Quaternion.Euler(0f, skewDeg, 0f) * toGoal;
+
+            _shooter.Kick(Mathf.Lerp(0.4f, 0.85f, grade), aimed);
+            AnnounceGrade("Snap shot away", grade);
+            Beat = AFLBeat.Celebration;
+            QueueRestart();
         }
 
         // ---------------------------------------------------------------
