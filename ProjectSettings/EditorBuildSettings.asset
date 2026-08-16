@@ -6,6 +6,6 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
-    path: Assets/Scenes/AflField.unity
-    guid: ba57462524dfa41dca7407b2e2467eca
+    path: Assets/Scenes/Day1Ruck.unity
+    guid: 03ac6a7e44e0a49049af3ac06715c624
   m_configObjects: {}

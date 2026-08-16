@@ -910,7 +910,6 @@ namespace AFL.Day1
             var rightArm = FindDeepChild(forward, "RightArm");
             Quaternion leftStart = leftArm ? leftArm.localRotation : Quaternion.identity;
             Quaternion rightStart = rightArm ? rightArm.localRotation : Quaternion.identity;
-            var legs = CaptureLegBones(forward);
             float defenderX = defender ? defender.position.x : ownLaneX;
             Vector3 leapEnd = new Vector3(ownLaneX, startPos.y, targetZ);
 
@@ -922,7 +921,6 @@ namespace AFL.Day1
                 forward.position = p;
                 if (leftArm) leftArm.localRotation = leftStart * Quaternion.Euler(0, 0, wave * 155f);
                 if (rightArm) rightArm.localRotation = rightStart * Quaternion.Euler(0, 0, -wave * 155f);
-                PoseLegTuck(legs, wave);
             }
 
             el = 0f;
@@ -963,7 +961,6 @@ namespace AFL.Day1
             forward.position = leapEnd;
             if (leftArm) leftArm.localRotation = leftStart;
             if (rightArm) rightArm.localRotation = rightStart;
-            ResetLegBones(legs);
             if (animator) animator.enabled = true;
         }
 
@@ -1121,54 +1118,6 @@ namespace AFL.Day1
             return null;
         }
 
-        // Reusable leg-tuck pose for airborne moments (2026-08-13, Shaun:
-        // "we need the running jumping full athletic stuff for all of them").
-        // Every character generated through this rig batch shares the same
-        // 24-bone skeleton and bone names (see ndw-character-library's
-        // rig-status notes) — LeftUpLeg/LeftLeg + RightUpLeg/RightLeg for the
-        // thigh/shin — so this is written once against those names, not
-        // per-character. Same pattern as the existing arm-raise code (Z-axis
-        // rotation on the rig's own local space), which is the one part of
-        // this rig's animation already confirmed working via live screenshot.
-        struct LegBones
-        {
-            public Transform leftUpLeg, leftLeg, rightUpLeg, rightLeg;
-            public Quaternion leftUpLegStart, leftLegStart, rightUpLegStart, rightLegStart;
-        }
-
-        static LegBones CaptureLegBones(Transform t)
-        {
-            var b = new LegBones();
-            b.leftUpLeg = FindDeepChild(t, "LeftUpLeg");
-            b.leftLeg = FindDeepChild(t, "LeftLeg");
-            b.rightUpLeg = FindDeepChild(t, "RightUpLeg");
-            b.rightLeg = FindDeepChild(t, "RightLeg");
-            b.leftUpLegStart = b.leftUpLeg ? b.leftUpLeg.localRotation : Quaternion.identity;
-            b.leftLegStart = b.leftLeg ? b.leftLeg.localRotation : Quaternion.identity;
-            b.rightUpLegStart = b.rightUpLeg ? b.rightUpLeg.localRotation : Quaternion.identity;
-            b.rightLegStart = b.rightLeg ? b.rightLeg.localRotation : Quaternion.identity;
-            return b;
-        }
-
-        // tuck=0 is the captured standing pose untouched; tuck=1 is a full
-        // knees-up jump tuck (thighs lift, knees bend) rather than legs
-        // staying rigid while the whole body translates upward.
-        static void PoseLegTuck(LegBones b, float tuck)
-        {
-            if (b.leftUpLeg) b.leftUpLeg.localRotation = b.leftUpLegStart * Quaternion.Euler(0, 0, tuck * 65f);
-            if (b.leftLeg) b.leftLeg.localRotation = b.leftLegStart * Quaternion.Euler(0, 0, -tuck * 100f);
-            if (b.rightUpLeg) b.rightUpLeg.localRotation = b.rightUpLegStart * Quaternion.Euler(0, 0, -tuck * 65f);
-            if (b.rightLeg) b.rightLeg.localRotation = b.rightLegStart * Quaternion.Euler(0, 0, tuck * 100f);
-        }
-
-        static void ResetLegBones(LegBones b)
-        {
-            if (b.leftUpLeg) b.leftUpLeg.localRotation = b.leftUpLegStart;
-            if (b.leftLeg) b.leftLeg.localRotation = b.leftLegStart;
-            if (b.rightUpLeg) b.rightUpLeg.localRotation = b.rightUpLegStart;
-            if (b.rightLeg) b.rightLeg.localRotation = b.rightLegStart;
-        }
-
         // Reach math (measured directly, not eyeballed — see this file's
         // git history for the actual hand-position measurements this is
         // based on): standing with arms raised 140° on the rig's Z axis,
@@ -1220,12 +1169,6 @@ namespace AFL.Day1
             var rightArm = FindDeepChild(t, "RightArm");
             Quaternion leftStart = leftArm ? leftArm.localRotation : Quaternion.identity;
             Quaternion rightStart = rightArm ? rightArm.localRotation : Quaternion.identity;
-            // Real jump tuck for the hop too (2026-08-13, Shaun: "we need the
-            // running jumping full athletic stuff for all of them") — scaled
-            // down to a third the leap's own tuck, matching this hop's own
-            // reduced height/arm-angle scale for a losing/non-reaching jump.
-            var legs = CaptureLegBones(t);
-            float legTuckScale = reachesBall ? 1f : 0.33f;
 
             // Real fix (2026-08-11) — the character now carries a real
             // Animator (Idle state, see Day1BuildScript) so it doesn't sit
@@ -1248,13 +1191,11 @@ namespace AFL.Day1
                 t.localPosition = start + Vector3.up * wave * heightScale + towardCentre * wave;
                 if (leftArm) leftArm.localRotation = leftStart * Quaternion.Euler(0, 0, wave * armAngle);
                 if (rightArm) rightArm.localRotation = rightStart * Quaternion.Euler(0, 0, -wave * armAngle);
-                PoseLegTuck(legs, wave * legTuckScale);
                 yield return null;
             }
             t.localPosition = start;
             if (leftArm) leftArm.localRotation = leftStart;
             if (rightArm) rightArm.localRotation = rightStart;
-            ResetLegBones(legs);
             if (animator) animator.enabled = true;
         }
 

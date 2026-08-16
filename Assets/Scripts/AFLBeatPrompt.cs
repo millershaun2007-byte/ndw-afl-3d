@@ -149,10 +149,7 @@ namespace AFL
         void EnsureStyles()
         {
             if (_textStyle != null) return;
-            // Same fix as AFLGameManager's score HUD (2026-08-16) — scale off
-            // the smaller of width/height so this never sizes too wide for a
-            // narrow embedded canvas, not just tall ones.
-            int fontSize = Mathf.RoundToInt(Mathf.Min(Screen.width, Screen.height) * 0.045f);
+            int fontSize = Mathf.RoundToInt(Screen.height * 0.045f);
             _textStyle = new GUIStyle(GUI.skin.label)
             {
                 fontSize = fontSize,

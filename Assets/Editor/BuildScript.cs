@@ -87,19 +87,7 @@ public static class BuildScript
         // Australian Football League's trademarked name — same category of
         // risk as the earlier "Chaotic Sports" rename away from "Olympics".
         // "Footy" is the generic/colloquial term for the sport, not a mark.
-        //
-        // This name was stale for two full renames (2026-08-16 fix): this
-        // line still hardcoded "Mount Duneed Cats Footy" — the original
-        // private placeholder, before EITHER of the two real renames since
-        // (-> "AFL Footy" -> "Mount Duneed Footy", the latter specifically
-        // for trademark risk, see commit b8639e0). Nothing else in the
-        // pipeline corrects productName, so every real build was silently
-        // shipping the oldest, wrong, pre-trademark-fix name — exactly the
-        // "one fact in two places" failure this project's own CLAUDE.md
-        // warns about by name. If this ever needs to change again, this is
-        // the one line that actually matters — ProjectSettings.asset's own
-        // value gets overwritten by this on every build regardless.
-        PlayerSettings.productName = "Mount Duneed Footy";
+        PlayerSettings.productName = "Mount Duneed Cats Footy";
         PlayerSettings.WebGL.template = "PROJECT:Responsive";
 
         AssetDatabase.Refresh(); // pick up any newly-added model/texture files before the Build* calls load them

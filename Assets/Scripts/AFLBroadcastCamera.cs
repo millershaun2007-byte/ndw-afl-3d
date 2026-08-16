@@ -47,43 +47,6 @@ namespace AFL
             _cam.fieldOfView = fixedFov;
         }
 
-        // ---- Punch — a bounded, self-clearing impact shake ----------------
-        // Does not violate the "no follow, cut only" rule above: it never
-        // tracks a moving target and never runs longer than _punchDuration,
-        // so it can't drift the way the old chase camera did. It only ever
-        // offsets whatever CutTo/CutToSide already framed this beat, and the
-        // next beat's cut always sets transform absolutely, overwriting any
-        // leftover offset outright — there is nothing for this to leak into.
-        Vector3 _punchBasePos;
-        Quaternion _punchBaseRot;
-        float _punchStartedAt = -99f;
-        float _punchStrength;
-        const float PunchDuration = 0.18f;
-
-        /// One-shot camera nudge/shake for an impactful moment (e.g. a
-        /// spoiled mark) — call right when the moment resolves, on top of
-        /// whichever CutTo/CutToSide is already framing the beat.
-        public void Punch(float strength = 0.35f)
-        {
-            _punchBasePos = transform.position;
-            _punchBaseRot = transform.rotation;
-            _punchStartedAt = Time.time;
-            _punchStrength = strength;
-        }
-
-        // LateUpdate (not Update) so this always applies after whichever
-        // beat script may have called CutTo/CutToSide this same frame,
-        // rather than racing script execution order.
-        void LateUpdate()
-        {
-            if (_punchStartedAt < 0f) return;
-            float t = (Time.time - _punchStartedAt) / PunchDuration;
-            if (t >= 1f) { _punchStartedAt = -99f; return; }
-            float env = (1f - t) * Mathf.Sin(t * Mathf.PI * 3f);   // quick decaying shake
-            transform.position = _punchBasePos + transform.forward * env * _punchStrength * 0.5f;
-            transform.rotation = _punchBaseRot * Quaternion.Euler(env * _punchStrength * 4f, 0f, 0f);
-        }
-
         Vector3 ClampToField(Vector3 p)
         {
             p.x = Mathf.Clamp(p.x, -fieldHalfWidth + _safeMargin, fieldHalfWidth - _safeMargin);

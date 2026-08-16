@@ -14,7 +14,7 @@ namespace AFL
     // never navigating toward a shared point, which is what caused the
     // "four arms, two heads" fusing. See AFLBeatPrompt for the shared
     // "one verb" mechanic and AFLPlayer for forward-only movement.
-    public enum AFLBeat { RuckTap, RoverChase, ClearanceKick, MarkContest, PlayOnChoice, SnapShot, SetShot, Celebration }
+    public enum AFLBeat { RuckTap, ClearanceKick, MarkContest, SetShot, Celebration }
 
     [AddComponentMenu("AFL/AFL Game Manager")]
     public class AFLGameManager : MonoBehaviour
@@ -47,7 +47,7 @@ namespace AFL
         public AFLBeat Beat { get; private set; }
 
         AFLPlayer.Team _actingTeam;   // whose chain this is
-        AFLPlayer _ruck, _receiver, _shooter, _defender, _tackler;
+        AFLPlayer _ruck, _receiver, _shooter, _defender;
         Vector3 _clearanceAimTarget;   // world position the clearance kick aims toward
         string _message = "";
         float _messageUntil, _restartAt = -1f, _beatStartedAt, _scoreLock;
@@ -85,11 +85,8 @@ namespace AFL
             switch (Beat)
             {
                 case AFLBeat.RuckTap: UpdateRuckTapBeat(); break;
-                case AFLBeat.RoverChase: UpdateRoverChaseBeat(); break;
                 case AFLBeat.ClearanceKick: UpdateClearanceKickBeat(); break;
                 case AFLBeat.MarkContest: UpdateMarkContestBeat(); break;
-                case AFLBeat.PlayOnChoice: UpdatePlayOnChoiceBeat(); break;
-                case AFLBeat.SnapShot: UpdateSnapShotBeat(); break;
                 case AFLBeat.SetShot: UpdateSetShotBeat(); break;
             }
 
@@ -196,87 +193,7 @@ namespace AFL
 
             if (ball) ball.Attach(_receiver);
             AnnounceGrade("Tap", grade);
-            BeginRoverChase();
-        }
-
-        // ---------------------------------------------------------------
-        //  BEAT 1.5 — ROVER CHASE: the defending team's rover chases the
-        //  ball carrier from behind in the same straight lane and tries to
-        //  tackle them before they can dispose of it. Same dual-tap-contest
-        //  shape as MarkContest (one verb, whoever's not the human is bot-
-        //  timed) — the difference is both players actually run this beat
-        //  (SetMoveHeld(true) for both, not just one), so it reads as a
-        //  real chase rather than two players standing still waiting to
-        //  jump. Still straight-line-only — the tackler starts behind the
-        //  carrier in the exact same lane, so "catching up" is a speed/
-        //  timing question, never a steering one (see AFLPlayer's own
-        //  class comment on why free steering was removed).
-        // ---------------------------------------------------------------
-        const float ChaseGapStart = 7f;
-
-        void BeginRoverChase()
-        {
-            _beatStartedAt = Time.time;
-            _botCommitAt = -1f;
-            Beat = AFLBeat.RoverChase;
-
-            var defendingTeam = _actingTeam == AFLPlayer.Team.Home ? AFLPlayer.Team.Away : AFLPlayer.Team.Home;
-            _tackler = FindRuck(defendingTeam) ?? _ruck;
-
-            Vector3 c = centreCircle ? centreCircle.position : Vector3.zero;
-            Vector3 attackDir = _actingTeam == AFLPlayer.Team.Home ? Vector3.forward : Vector3.back;
-
-            PlaceAtSlot(_receiver, c, attackDir);
-            PlaceAtSlot(_tackler, c - attackDir * ChaseGapStart, attackDir);
-
-            // Both run this beat — unlike TakeBeatControl elsewhere (which
-            // hands movement to exactly one bot), a chase needs the
-            // carrier fleeing AND the tackler pursuing at the same time.
-            foreach (var pl in AFLPlayer.All) if (!pl.isUserControlled) pl.SetMoveHeld(false);
-            if (_receiver && !_receiver.isUserControlled) _receiver.SetMoveHeld(true);
-            if (_tackler && !_tackler.isUserControlled) _tackler.SetMoveHeld(true);
-
-            if (cam) cam.CutToSide(_receiver.transform, attackDir);
-
-            bool userIsCarrier = _actingTeam == userTeam;
-            if (prompt) { prompt.ringDuration = 2.0f; prompt.BeginRing(userIsCarrier ? "Tap MARK to sprint clear!" : "Tap MARK to lunge for the tackle!"); }
-            Announce("Chase!");
-        }
-
-        void UpdateRoverChaseBeat()
-        {
-            if (!prompt.IsLive) return;
-
-            bool carrierTapped = false, tacklerTapped = false;
-            if (_actingTeam == userTeam) { carrierTapped = AFLInput.MarkDown; tacklerTapped = BotTap(_tackler); }
-            else { tacklerTapped = AFLInput.MarkDown; carrierTapped = BotTap(_receiver); }
-
-            if (!carrierTapped && !tacklerTapped && prompt.CurrentValue < 1f) return;
-
-            var (grade, _) = carrierTapped || tacklerTapped ? prompt.Resolve() : (0.05f, 0f);
-            prompt.Stop();
-
-            bool carrierEscaped = carrierTapped && grade >= 0.30f;
-            bool tackled = tacklerTapped && grade >= 0.45f && !carrierEscaped;
-
-            if (tackled)
-            {
-                if (_tackler) _tackler.Tackle();
-                if (_receiver) _receiver.GetTackled();
-                if (cam) cam.Punch();
-                AnnounceGrade("TACKLED! Turnover", grade);
-                if (ball) ball.Spoil(_tackler ? _tackler.transform.position : _receiver.transform.position);
-                QueueRestart();
-            }
-            else
-            {
-                // Anything short of a clean tackle and the carrier keeps
-                // the ball — a near-miss lunge doesn't need its own losing
-                // state, same simplification MarkContest's "clean drop"
-                // case makes for a poorly-timed spoil attempt.
-                AnnounceGrade(carrierEscaped ? "Breaks clear!" : "Shrugs off the chase", grade);
-                BeginClearanceKick();
-            }
+            BeginClearanceKick();
         }
 
         // ---------------------------------------------------------------
@@ -378,12 +295,11 @@ namespace AFL
             {
                 if (_forwardOption) { _forwardOption.Jump(); ball.Attach(_forwardOption); }
                 AnnounceGrade(grade >= 0.85f ? "SPECKY MARK!" : "Mark!", grade);
-                BeginPlayOnChoice(_forwardOption ?? _receiver);
+                BeginSetShot(_forwardOption ?? _receiver);
             }
             else if (defenderSpoiled)
             {
-                if (_defender) _defender.Spoil();
-                if (cam) cam.Punch();
+                if (_defender) _defender.Jump();
                 Announce("Spoiled! Back to the centre", 1.8f);
                 if (ball) ball.Spoil(_defender ? _defender.transform.position : _clearanceAimTarget);
                 QueueRestart();
@@ -418,97 +334,13 @@ namespace AFL
             return false;
         }
 
-        // Single-relevant-player beats (RuckTap/ClearanceKick/PlayOnChoice/
-        // SnapShot/SetShot): human presses MARK if it's their player,
-        // otherwise resolves on the same bot timer as MarkContest.
+        // Single-relevant-player beats (RuckTap/ClearanceKick/SetShot):
+        // human presses MARK if it's their player, otherwise resolves on
+        // the same bot timer as MarkContest.
         bool ResolveSingleTap(AFLPlayer relevant)
         {
             if (relevant && relevant.isUserControlled) return AFLInput.MarkDown;
             return BotTap(relevant);
-        }
-
-        // ---------------------------------------------------------------
-        //  BEAT 3.5 — PLAY ON CHOICE: after a successful mark, the same
-        //  left/right sweep RuckTap already uses to pick a rover now picks
-        //  between the two things a real mark actually lets you do — take
-        //  the set shot (line up properly, slower, more accurate) or play
-        //  on and snap it immediately (rushed, less accurate, but the
-        //  defence never gets a chance to reset). Same single verb as
-        //  everywhere else; the sweep's side is the whole decision.
-        // ---------------------------------------------------------------
-        void BeginPlayOnChoice(AFLPlayer marker)
-        {
-            _beatStartedAt = Time.time;
-            _botCommitAt = -1f;
-            Beat = AFLBeat.PlayOnChoice;
-            _shooter = marker;
-
-            TakeBeatControl(marker);
-            if (cam) cam.CutToSide(marker.transform, marker.transform.forward);
-
-            if (prompt) prompt.BeginSweep("Tap MARK: LEFT play on & snap! · RIGHT set shot!", 0f);
-            Announce("Play on, or set shot?");
-        }
-
-        void UpdatePlayOnChoiceBeat()
-        {
-            if (!ResolveSingleTap(_shooter)) return;
-            bool playOn = prompt.CurrentValue < 0f;
-            prompt.Stop();
-
-            if (playOn) BeginSnapShot(_shooter);
-            else BeginSetShot(_shooter);
-        }
-
-        // ---------------------------------------------------------------
-        //  BEAT 3.6 — SNAP SHOT: playing on, not squaring up to goal first
-        //  (no SnapFacing call — kicks from however they're already facing
-        //  out of the mark, same attackDir they were placed in for the
-        //  contest). Faster sweep (harder to time) and a wider aim skew
-        //  plus a lower power ceiling than a set shot — a real snap is
-        //  genuinely less reliable, that's the whole trade-off for taking
-        //  it quickly instead of setting up properly.
-        // ---------------------------------------------------------------
-        void BeginSnapShot(AFLPlayer marker)
-        {
-            _beatStartedAt = Time.time;
-            _botCommitAt = -1f;
-            Beat = AFLBeat.SnapShot;
-            _shooter = marker;
-
-            TakeBeatControl(marker);
-            Transform goal = _actingTeam == AFLPlayer.Team.Home ? goalNorth : goalSouth;
-            Vector3 toGoal = goal ? (goal.position - marker.transform.position) : marker.transform.forward;
-            toGoal.y = 0f; toGoal.Normalize();
-            if (cam) cam.CutToSide(marker.transform, toGoal);
-
-            if (prompt) { prompt.sweepSpeed = 2.6f; prompt.BeginSweep("Tap MARK: SNAP shot, quick!", 0f); }
-            Announce("Playing on!");
-        }
-
-        void UpdateSnapShotBeat()
-        {
-            if (_shooter) _shooter.SetKickChargeVisual(Mathf.InverseLerp(-1f, 1f, prompt.CurrentValue));
-            if (!ResolveSingleTap(_shooter)) return;
-            var (grade, _) = prompt.Resolve();
-            prompt.Stop();
-            // Reset immediately after use — this is the one beat that ever
-            // touches AFLBeatPrompt's shared sweepSpeed, so resetting it
-            // right here (rather than scattering a defensive reset across
-            // every other Begin* method) is the whole fix; every future
-            // sweep beat starts clean regardless of how this one resolved.
-            prompt.sweepSpeed = 1.6f;
-
-            Transform goal = _actingTeam == AFLPlayer.Team.Home ? goalNorth : goalSouth;
-            Vector3 toGoal = goal ? (goal.position - _shooter.transform.position) : _shooter.transform.forward;
-            toGoal.y = 0f; toGoal.Normalize();
-            float skewDeg = prompt.CurrentValue * 30f;
-            Vector3 aimed = Quaternion.Euler(0f, skewDeg, 0f) * toGoal;
-
-            _shooter.Kick(Mathf.Lerp(0.4f, 0.85f, grade), aimed);
-            AnnounceGrade("Snap shot away", grade);
-            Beat = AFLBeat.Celebration;
-            QueueRestart();
         }
 
         // ---------------------------------------------------------------
@@ -695,26 +527,16 @@ namespace AFL
         void EnsureStyles()
         {
             if (_big != null) return;
-            // Real bug (found 2026-08-16): sizing purely off Screen.height meant
-            // a narrow, tall canvas (the real app's constrained mobile iframe —
-            // this game only ever ships embedded, see neurodinoworld's
-            // .iframe-game height:min(72vh,640px) — is exactly this shape) could
-            // compute a font too wide for the actual available width, wrapping
-            // the score line and clipping the second line off top of screen.
-            // Scaling off the smaller of width/height fixes it for both this
-            // narrow embed and any wider/landscape context without special-
-            // casing either.
-            int baseDim = Mathf.Min(Screen.width, Screen.height);
             _big = new GUIStyle(GUI.skin.label)
             {
-                fontSize = Mathf.RoundToInt(baseDim * 0.055f),
+                fontSize = Mathf.RoundToInt(Screen.height * 0.05f),
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleLeft,
                 normal = { textColor = Color.white }
             };
             _small = new GUIStyle(GUI.skin.label)
             {
-                fontSize = Mathf.RoundToInt(baseDim * 0.04f),
+                fontSize = Mathf.RoundToInt(Screen.height * 0.035f),
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleLeft,
                 normal = { textColor = new Color(1f, 0.9f, 0.5f) }
