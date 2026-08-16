@@ -87,7 +87,7 @@ public static class BuildScript
         // Australian Football League's trademarked name — same category of
         // risk as the earlier "Chaotic Sports" rename away from "Olympics".
         // "Footy" is the generic/colloquial term for the sport, not a mark.
-        PlayerSettings.productName = "Mount Duneed Cats Footy";
+        PlayerSettings.productName = "Mount Duneed Footy";
         PlayerSettings.WebGL.template = "PROJECT:Responsive";
 
         AssetDatabase.Refresh(); // pick up any newly-added model/texture files before the Build* calls load them

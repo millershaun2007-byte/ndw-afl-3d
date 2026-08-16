@@ -19,7 +19,7 @@ public static class Day1BuildScript
 
         var outputPath = System.Environment.GetEnvironmentVariable("NDW_BUILD_OUTPUT") ?? "Build/WebGL";
         System.IO.Directory.CreateDirectory(outputPath);
-        PlayerSettings.productName = "Mount Duneed Cats Footy";
+        PlayerSettings.productName = "Mount Duneed Footy";
         PlayerSettings.WebGL.template = "PROJECT:Day1";
         PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Disabled;
 
