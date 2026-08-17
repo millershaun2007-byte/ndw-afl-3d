@@ -11,7 +11,7 @@ using AFL.Day1;
 // file and Day1RuckContest rather than branching into parallel Day2
 // files. Does not touch AflField.unity or BuildScript.cs — the six-player
 // game is being retired, not merged with this.
-public static class Day1BuildScript
+public static class MainBuildScript
 {
     public static void PerformWebGLBuild()
     {
@@ -25,7 +25,7 @@ public static class Day1BuildScript
 
         var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
         {
-            scenes = new[] { "Assets/Scenes/Day1Ruck.unity" },
+            scenes = new[] { "Assets/Scenes/AflMatch.unity" },
             locationPathName = outputPath,
             target = BuildTarget.WebGL,
             options = BuildOptions.None
@@ -230,8 +230,8 @@ public static class Day1BuildScript
         if (saveToDisk)
         {
             System.IO.Directory.CreateDirectory("Assets/Scenes");
-            EditorSceneManager.SaveScene(scene, "Assets/Scenes/Day1Ruck.unity");
-            EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene("Assets/Scenes/Day1Ruck.unity", true) };
+            EditorSceneManager.SaveScene(scene, "Assets/Scenes/AflMatch.unity");
+            EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene("Assets/Scenes/AflMatch.unity", true) };
         }
     }
 
@@ -379,7 +379,7 @@ public static class Day1BuildScript
         string controllerPath = $"Assets/_Generated/{species}RiggedAIAnimator.controller";
         var controller = AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>(controllerPath);
         if (controller) animator.runtimeAnimatorController = controller;
-        else Debug.LogWarning($"Day1BuildScript: no controller at {controllerPath} for {name}, leaving Animator uncontrolled.");
+        else Debug.LogWarning($"MainBuildScript: no controller at {controllerPath} for {name}, leaving Animator uncontrolled.");
 
         return root;
     }
