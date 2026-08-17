@@ -45,7 +45,8 @@ jobs:
       - name: Build WebGL (MainBuildScript.PerformWebGLBuild)
         uses: game-ci/unity-builder@v4
         env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          # UNITY_LICENSE temporarily removed to test whether login fails
+          # identically without it (diagnostic, 2026-08-17 — revert after)
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         with:
