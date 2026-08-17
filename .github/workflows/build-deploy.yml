@@ -1,0 +1,54 @@
+name: Build and deploy AFL 3D
+
+# Real CI/deploy pipeline (2026-08-17) — replaces the manual local
+# `Unity -batchmode ... && gcloud storage cp` workflow that led to the
+# wrong build silently staying live for weeks (see the main app's
+# ndw_footy_game_still_broken memory). Every push to main now produces a
+# build traceable to a specific commit and deploys it automatically —
+# "what's live" is never ambiguous again.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write # required for keyless GCP auth (Workload Identity Federation)
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          restore-keys: |
+            Library-
+
+      - name: Build WebGL (MainBuildScript.PerformWebGLBuild)
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          targetPlatform: WebGL
+          buildMethod: MainBuildScript.PerformWebGLBuild
+          buildsPath: build
+
+      - name: Authenticate to Google Cloud (keyless, Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/385338500348/locations/global/workloadIdentityPools/github-actions-pool/providers/github-provider
+          service_account: ndw-afl3d-ci-deploy@gen-lang-client-0129781718.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy to gs://ndw-game-builds/afl3d/
+        run: |
+          gcloud storage rsync build/WebGL gs://ndw-game-builds/afl3d/ --recursive --delete-unmatched-destination-objects
+          echo "Deployed commit ${{ github.sha }} to gs://ndw-game-builds/afl3d/"
