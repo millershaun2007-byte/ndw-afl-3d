@@ -14,7 +14,7 @@ namespace AFL
     // never navigating toward a shared point, which is what caused the
     // "four arms, two heads" fusing. See AFLBeatPrompt for the shared
     // "one verb" mechanic and AFLPlayer for forward-only movement.
-    public enum AFLBeat { RuckTap, ClearanceKick, MarkContest, SetShot, Celebration }
+    public enum AFLBeat { RuckTap, ClearanceKick, MarkContest, SetShot, SnapShot, Celebration }
 
     [AddComponentMenu("AFL/AFL Game Manager")]
     public class AFLGameManager : MonoBehaviour
@@ -88,6 +88,7 @@ namespace AFL
                 case AFLBeat.ClearanceKick: UpdateClearanceKickBeat(); break;
                 case AFLBeat.MarkContest: UpdateMarkContestBeat(); break;
                 case AFLBeat.SetShot: UpdateSetShotBeat(); break;
+                case AFLBeat.SnapShot: UpdateSnapShotBeat(); break;
             }
 
             if (_restartAt > 0f && Time.time >= _restartAt)
@@ -306,10 +307,89 @@ namespace AFL
             }
             else
             {
-                Announce("Dropped — back to the centre", 1.8f);
+                // The forward was already right there under the falling
+                // ball — instead of a dead restart, they scoop up the
+                // spill and snap at goal on the run. ball.ResetTo() is an
+                // instant teleport (unlike Spoil()'s real physics launch),
+                // so it's safe to read the position back immediately here.
                 if (ball) ball.ResetTo(_clearanceAimTarget + Vector3.up * 0.5f);
-                QueueRestart();
+                if (_forwardOption)
+                {
+                    Announce("Spilled — snaps at it!", 1.4f);
+                    ball.Attach(_forwardOption);
+                    BeginSnapShot(_forwardOption);
+                }
+                else
+                {
+                    Announce("Dropped — back to the centre", 1.8f);
+                    QueueRestart();
+                }
             }
+        }
+
+        // ---------------------------------------------------------------
+        //  BEAT 4b — SNAP SHOT: a rushed shot off a spilled mark, from
+        //  wherever the ball actually dropped rather than a squared-up
+        //  set-shot position. Genuinely harder to convert than SetShot —
+        //  same mechanic (tap the sweep), tighter accuracy skew and a
+        //  faster-closing prompt, matching a real snap being a lower-
+        //  percentage shot than a clean set shot.
+        // ---------------------------------------------------------------
+        float _snapKickAt;
+        float _savedSnapCamDistance = -1f;
+
+        // Deliberately NOT an interactive tap-timing beat right now — per
+        // direction 2026-08-19: get the scene itself solid first (spill ->
+        // pick up -> camera in -> a real pause, room for commentary later
+        // -> kick), then layer the actual tap contest back in once that's
+        // proven, rather than debug both at once. A real ~4-5s hold, not
+        // the usual ~0.7s beat transition, on purpose.
+        void BeginSnapShot(AFLPlayer marker)
+        {
+            _beatStartedAt = Time.time;
+            _botCommitAt = -1f;
+            Beat = AFLBeat.SnapShot;
+            _shooter = marker;
+
+            Transform snapGoal = _actingTeam == AFLPlayer.Team.Home ? goalNorth : goalSouth;
+            Vector3 toGoal = snapGoal ? (snapGoal.position - marker.transform.position) : marker.transform.forward;
+            toGoal.y = 0f; toGoal.Normalize();
+            marker.SnapFacing(toGoal);
+
+            TakeBeatControl(marker);
+
+            if (cam)
+            {
+                if (_savedSnapCamDistance < 0f) _savedSnapCamDistance = cam.distance;
+                cam.distance = 3.6f;
+                cam.CutToSide(marker.transform, toGoal);
+            }
+
+            Announce("Snap shot!", 5f);
+            _snapKickAt = Time.time + 4.5f;
+        }
+
+        void UpdateSnapShotBeat()
+        {
+            if (Time.time < _snapKickAt) return;
+
+            // Restore the broadcast camera's normal distance now that this
+            // beat's tighter zoom is done with.
+            if (cam && _savedSnapCamDistance >= 0f) { cam.distance = _savedSnapCamDistance; _savedSnapCamDistance = -1f; }
+
+            Transform snapGoal = _actingTeam == AFLPlayer.Team.Home ? goalNorth : goalSouth;
+            Vector3 toGoal = snapGoal ? (snapGoal.position - _shooter.transform.position) : _shooter.transform.forward;
+            toGoal.y = 0f; toGoal.Normalize();
+            // Fixed moderate grade for now (no tap contest yet) — a
+            // plausible "decent but rushed" outcome, not a guaranteed goal.
+            float grade = 0.55f;
+            float skewDeg = 6f;
+            Vector3 aimed = Quaternion.Euler(0f, skewDeg, 0f) * toGoal;
+
+            _shooter.Kick(Mathf.Lerp(0.5f, 0.88f, grade), aimed);
+            AnnounceGrade("Snap away", grade);
+            Beat = AFLBeat.Celebration;
+            QueueRestart();
         }
 
         // Bots share the identical visible cue rather than a hidden
@@ -327,8 +407,19 @@ namespace AFL
             if (!bot || bot.isUserControlled) return false;
             if (_botCommitAt < 0f)
             {
-                float reactionDelay = 0.22f + Random.Range(0f, 0.25f);   // worse than real touch latency
-                _botCommitAt = _beatStartedAt + reactionDelay + Random.Range(0.15f, 0.55f);
+                // Real balance fix (2026-08-19, live playtest: "almost
+                // impossible to win ruck", "human can only win 1 in 10")
+                // — the old jitter range (reactionDelay 0.22-0.47s + a
+                // further 0.15-0.55s) landed the bot consistently close to
+                // ideal on the sweep/ring, since sweepSpeed/ringDuration
+                // are fixed and the bot's commit time is essentially
+                // picking a phase on a deterministic curve. Widened
+                // substantially so the bot's commit time varies over a
+                // much bigger window, landing further from ideal on
+                // average — a human who actually times their own tap well
+                // should now have a real edge, not just a theoretical one.
+                float reactionDelay = 0.35f + Random.Range(0f, 0.6f);
+                _botCommitAt = _beatStartedAt + reactionDelay + Random.Range(0.2f, 1.1f);
             }
             if (Time.time >= _botCommitAt) { _botCommitAt = -1f; return true; }
             return false;
