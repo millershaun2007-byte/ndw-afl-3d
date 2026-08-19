@@ -152,6 +152,13 @@ public static class MainBuildScript
         // to compensate for that distance, not just parity.
         const float dragonScale = 1.083f * 1.3f;
         const float lionScale = 1.227f * 1.3f;
+        // 2026-08-19: measured directly (Renderer bounds, MeasureMiaSummer.cs),
+        // not guessed — Mia=1.634 high, Summer=1.877 (both smaller than
+        // Croc's 2.098 reference), same formula as Dragon/Lion above:
+        // match Croc's height, then the same 1.3 distance compensation
+        // since they stand at the same forward-line distance from camera.
+        const float miaScale = 1.284f * 1.3f;
+        const float summerScale = 1.118f * 1.3f;
         // Real fix (2026-08-12, Shaun: "the speccy so the forward now
         // starts behind runs up"). Forward moved from z=10 to z=5 —
         // behind the defender, who stays at 10 near the actual contest
@@ -161,6 +168,23 @@ public static class MainBuildScript
         var rooDefenderGo = BuildStaticCharacter("RooDefender", "Assets/Models/LionRiggedAI", new Vector3(0.9f, 0, 10f), Quaternion.Euler(0, 180, 0), lionScale);
         var rooForwardGo = BuildStaticCharacter("RooForward", "Assets/Models/LionRiggedAI", new Vector3(0.9f, 0, -5f), Quaternion.Euler(0, 180, 0), lionScale);
         var crocDefenderGo = BuildStaticCharacter("CrocDefender", "Assets/Models/DragonRiggedAI", new Vector3(-0.9f, 0, -10f), Quaternion.identity, dragonScale);
+
+        // 2026-08-19, Shaun: "add 2 more characters so it does work like
+        // the centre" — the forward line had no equivalent of
+        // crocRover/rooRover (a dedicated receiver, separate from whoever
+        // just contested), so a clearance had to awkwardly reuse the
+        // forward/defender pair for a second job. Mia and Summer (already
+        // rigged, with Walking/Running clips, in ndw-character-library)
+        // fill that same rover-style role for each forward-line zone —
+        // stood a little further out from their zone's defender so
+        // there's real room to receive without overlapping them, mirroring
+        // how rover stands behind the ruck rather than on top of it. Scale
+        // untuned (1f) — Dragon/Lion both needed real measured correction
+        // after first render, expect the same here once tested live.
+        EnsureAnimatorController("Mia", "Assets/Models/MiaRiggedAI");
+        EnsureAnimatorController("Summer", "Assets/Models/SummerRiggedAI");
+        var rooClearerGo = BuildStaticCharacter("RooClearer", "Assets/Models/MiaRiggedAI", new Vector3(0.9f, 0, 13f), Quaternion.Euler(0, 180, 0), miaScale);
+        var crocClearerGo = BuildStaticCharacter("CrocClearer", "Assets/Models/SummerRiggedAI", new Vector3(-0.9f, 0, -13f), Quaternion.identity, summerScale);
 
         // Goal posts (2026-08-12, Shaun: "chuck up those... goal posts").
         // Visual only — no collision, no scoring trigger, that's still
@@ -222,6 +246,8 @@ public static class MainBuildScript
         contest.rooDefender = rooDefenderGo.transform;
         contest.rooForward = rooForwardGo.transform;
         contest.crocDefender = crocDefenderGo.transform;
+        contest.rooClearer = rooClearerGo.transform;
+        contest.crocClearer = crocClearerGo.transform;
         contest.ball = ball.transform;
 
         var bridgeGo = new GameObject("TouchBridge");

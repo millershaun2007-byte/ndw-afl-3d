@@ -289,8 +289,12 @@ namespace AFL
             var (grade, _) = attackerTapped || defenderTapped ? prompt.Resolve() : (0.05f, 0f);
             prompt.Stop();
 
-            bool attackerWon = attackerTapped && grade >= 0.30f;
-            bool defenderSpoiled = defenderTapped && grade >= 0.45f && !attackerWon;
+            // 2026-08-19, Shaun: a real mark attempt should never spill — if
+            // the forward actually goes for it, they take the grab unless
+            // the defender's own read is good enough to spoil it outright.
+            // "Spill" now only happens when nobody contests it at all.
+            bool defenderSpoiled = defenderTapped && grade >= 0.45f;
+            bool attackerWon = attackerTapped && !defenderSpoiled;
 
             if (attackerWon)
             {
@@ -307,15 +311,16 @@ namespace AFL
             }
             else
             {
-                // The forward was already right there under the falling
-                // ball — instead of a dead restart, they scoop up the
-                // spill and snap at goal on the run. ball.ResetTo() is an
-                // instant teleport (unlike Spoil()'s real physics launch),
-                // so it's safe to read the position back immediately here.
+                // Only reachable now when neither side actually contested
+                // it (a genuine no-tap scramble) — the forward was already
+                // right there under the falling ball, so instead of a dead
+                // restart they scoop up the loose ball and snap at goal on
+                // the run. ball.ResetTo() is an instant teleport (unlike
+                // Spoil()'s real physics launch), safe to read back here.
                 if (ball) ball.ResetTo(_clearanceAimTarget + Vector3.up * 0.5f);
                 if (_forwardOption)
                 {
-                    Announce("Spilled — snaps at it!", 1.4f);
+                    Announce("Loose ball — snaps at it!", 1.4f);
                     ball.Attach(_forwardOption);
                     BeginSnapShot(_forwardOption);
                 }

@@ -39,6 +39,12 @@ namespace AFL.Day1
         public Transform rooDefender;
         public Transform rooForward;
         public Transform crocDefender;
+        // 2026-08-19: dedicated receivers for the forward line, same role
+        // as crocRover/rooRover for the centre — Mia/Summer, not reused
+        // forward/defender characters (see MainBuildScript's setup for
+        // why: "add 2 more characters so it does work like the centre").
+        public Transform rooClearer;
+        public Transform crocClearer;
         public Transform ball;
 
         // Real fix (2026-08-12, Shaun: "still cant see both teams goals").
@@ -72,6 +78,11 @@ namespace AFL.Day1
         public float peakHeight = 2.1f;
         public float groundY = 1.0f;
         public float hopDuration = 0.45f;
+        // 2026-08-19: rise time for NormalMarkHop, the mark-specific hop
+        // that holds at peak until the outcome is known rather than
+        // landing on a fixed clock (see NormalMarkHop's own header for
+        // why the old plain Hop() couldn't be reused as-is here).
+        public float normalMarkHopRiseDuration = 0.3f;
         public float perfectWindow = 0.5f;
         // Real human reaction time to a reactive tap, compensated for in
         // grading — see the comment on ResolveAndContest below.
@@ -116,7 +127,7 @@ namespace AFL.Day1
             // Captured once — RunStraight/RunToZ move a player's real
             // position and rotation, so without resetting each round they'd
             // keep drifting further from their starting spot every contest.
-            foreach (var mover in new[] { crocRover, rooRover, crocForward, rooDefender, rooForward, crocDefender })
+            foreach (var mover in new[] { crocRover, rooRover, crocForward, rooDefender, rooForward, crocDefender, rooClearer, crocClearer })
             {
                 if (!mover) continue;
                 _movers.Add(mover);
@@ -161,7 +172,15 @@ namespace AFL.Day1
             }
             _message = "Centre bounce...";
             float ideal = throwDuration * 0.5f;
-            _botPressT = ideal + Random.Range(-0.35f, 0.35f);
+            // 2026-08-19, Shaun: "too easy for the crocs" — the human
+            // plays Croc here and gets two structural advantages this bot
+            // never had: reactionCompensation (below) shifts their target
+            // in their favour, AND mashing means only their SINGLE best
+            // tap out of many counts, vs the bot's one uncorrelated random
+            // guess. Narrowing the bot's spread doesn't erase either
+            // advantage but makes Roo a real, competitive opponent instead
+            // of pure noise.
+            _botPressT = ideal + Random.Range(-0.15f, 0.15f);
             // hopFireAt: when the ball freezes at its true visual peak —
             // fixed already (2026-08-11), see git history.
             _hopFireAt = ideal;
@@ -297,11 +316,24 @@ namespace AFL.Day1
         // rising. Waiting until the winner's hop reaches its own peak,
         // plus a short hold, gives a real "caught it, then tapped it
         // away" beat instead of two things happening at once.
-        System.Collections.IEnumerator TapBallAway(bool crocWins)
+        // 2026-08-19, Shaun: "the other defender receives the ball after
+        // the spoil, pause, then they kick — exactly the same as what
+        // happens in the middle." kickerOverride lets the clearance reuse
+        // this whole receive/pause/run/kick sequence unchanged but with
+        // the reinforcement (the idle Lion/Dragon) standing in for the
+        // rover, instead of the ball going to a third, unrelated
+        // character. Null (the centre ruck's own call) keeps the normal
+        // rover behaviour exactly as it was.
+        // 2026-08-19, Shaun: "the defender takes the ball and goes back
+        // and kicks at the opposition goal... would need to be opposite."
+        // reverseDirection flips just the kick's runDir without touching
+        // which team/characters are used — the centre ruck's own call
+        // (reverseDirection: false, the default) is completely unaffected.
+        System.Collections.IEnumerator TapBallAway(bool crocWins, Transform kickerOverride = null, bool reverseDirection = false)
         {
             yield return new WaitForSeconds(hopDuration / 2f + 0.15f);
             Vector3 start = ball.position;
-            Transform rover = crocWins ? crocRover : rooRover;
+            Transform rover = kickerOverride ? kickerOverride : (crocWins ? crocRover : rooRover);
             // Real fix (2026-08-12, Shaun: "receiving the ball in the back
             // of the head need to receive ball in chest or hands"). The old
             // point sat dead-centre above the rover's own pivot with no
@@ -362,7 +394,7 @@ namespace AFL.Day1
             // their own goalposts, which is also "opposite the direction
             // the ball was just tapped", per Shaun's own read of it. Croc's
             // rover taps in from -Z, so runs +Z; Roo's is the reverse.
-            float runDir = crocWins ? 1f : -1f;
+            float runDir = (crocWins ? 1f : -1f) * (reverseDirection ? -1f : 1f);
             yield return RunStraight(rover, runDir);
 
             // Day 3, second slice (2026-08-12, Shaun: "either player takes
@@ -414,9 +446,21 @@ namespace AFL.Day1
             // the run begins avoids that window entirely.
             CutCameraForKick(runDir);
             _markHoldReleased = false;
-            StartCoroutine(SpeccyLeap(forward, defender, peakZ, arriveByPeak));
+            // 2026-08-19, Shaun: bring back the normal (non-leaping) mark
+            // as the common case, speccy as the rarer highlight — real
+            // footy, a speccy is the exception, not the default. This is
+            // exactly the mechanic saved on tag afl-mark-nonspeccy-v1 back
+            // when the speccy leap was first added (2026-08-12), now
+            // reintroduced to coexist rather than replace it. kickHeight
+            // has to track whichever jump actually plays (the project's
+            // own "two numbers that have to agree" trap) — isSpeccy is
+            // threaded into KickAway so the ball's arc always matches the
+            // forward's real reach for whichever jump fires.
+            bool isSpeccy = Random.value < speccyChance;
+            if (isSpeccy) StartCoroutine(SpeccyLeap(forward, defender, peakZ, arriveByPeak));
+            else StartCoroutine(RunToZ(forward, peakZ, arriveByPeak));
             StartCoroutine(RunToZ(defender, peakZ, arriveByPeak));
-            yield return KickAway(rover, runDir, forward);
+            yield return KickAway(rover, runDir, forward, defender, isSpeccy, crocWins);
             // Reset countdown starts from here, not from when the contest
             // first resolved — Update()'s existing reset logic now waits
             // the right amount after the FULL sequence (tap, catch, run,
@@ -447,6 +491,15 @@ namespace AFL.Day1
         // 1.48 (arm-raised standing height) + speccyLeapHeightScale(4)
         // ≈ 5.48. kickHeight raised to match: 0.3 + 5.2 ≈ 5.5.
         public float kickHeight = 5.2f;
+        // 2026-08-19: the normal mark's ball arc, matched to the plain
+        // Hop's real reach (0.3 + 2.7 ≈ 3.0) — same math as kickHeight
+        // above, just for the shorter, non-speccy jump.
+        public float kickHeightNormal = 2.7f;
+        // How often a mark plays out as the full running speccy leap
+        // instead of a normal timed hop — kept deliberately rare so it
+        // reads as a highlight, not the everyday case.
+        [Range(0f, 1f)]
+        public float speccyChance = 0.3f;
         // Real fix (2026-08-12, Shaun: "he runs up way to close"). The
         // forward's target (peakZ, below) is derived from this — at the
         // old value of 10 it only reached z≈12.8, barely past the centre
@@ -466,6 +519,16 @@ namespace AFL.Day1
         // markReactionCompensation is folded in.
         public float markPerfectWindow = 0.25f;
         public float markReactionCompensation = 0.17f;
+        // 2026-08-19, Shaun: "the defender can jump and spoil the normal
+        // mark" — a real bot contest for the non-speccy mark, same
+        // randomized-reaction pattern already used for the initial ruck
+        // tap (_botPressT). Jitter is wide relative to the spoil window
+        // on purpose — the attacker still wins most of the time (they
+        // know the timing, the defender is guessing), the spoil is the
+        // occasional exception, not a coin flip. Both tunable in one
+        // place if the balance needs adjusting after playtesting.
+        public float defenderSpoilWindow = 0.20f;
+        public float defenderSpoilJitter = 0.55f;
 
         // Drop the ball to the foot, brief beat, then kick it away in an
         // arc continuing the same direction as the run. Now interleaved
@@ -477,9 +540,10 @@ namespace AFL.Day1
         // rejected sub-100ms analytic-physics system — just relocated to
         // the kick's flight. "Dont worry about the defender yet" — this
         // grades the forward's own timing only, no opponent comparison.
-        System.Collections.IEnumerator KickAway(Transform t, float zDir, Transform forward)
+        System.Collections.IEnumerator KickAway(Transform t, float zDir, Transform forward, Transform defender, bool isSpeccy, bool humanControlled)
         {
             if (!t || !ball) yield break;
+            int roundAtStart = _roundId;
             var rightHand = FindDeepChild(t, "RightHand");
             var rightFoot = FindDeepChild(t, "RightFoot");
             Vector3 handPos = rightHand ? rightHand.position : ball.position;
@@ -512,6 +576,8 @@ namespace AFL.Day1
             bool markPressed = false;
             float markBestErr = float.MaxValue;
             bool markResolved = false;
+            bool defenderSpoiled = false;
+            bool defendPressed = false;
             // Real fix (2026-08-12, Shaun: "the kick is now way of the
             // forward and defender for the mark scene"). Not a physics
             // change — the wide kick-cut camera just made a mismatch
@@ -533,6 +599,38 @@ namespace AFL.Day1
             // (marked/spilled) is decided and signals SpeccyLeap via
             // _markHoldReleased/_markHoldSucceeded, same mechanism as
             // before.
+            //
+            // 2026-08-19: on a normal (non-speccy) mark, both forward and
+            // defender now use NormalMarkHop instead of the old plain
+            // Hop() — Hop() is a fixed-duration fire-and-forget animation
+            // that lands and returns to ground on its own clock regardless
+            // of when markDeadline actually resolves (originally tuned so
+            // tight against markPerfectWindow that a resolve could land
+            // AFTER the hop had already returned to the ground — "says
+            // mark but the ball is on the ground", the exact bug this
+            // file's own history has already hit once on tag
+            // afl-mark-nonspeccy-v1). NormalMarkHop rises then HOLDS at
+            // peak until told to release, the same pattern SpeccyLeap
+            // already uses above — no clock to race against.
+            bool jumpFired = false;
+            float jumpFireAt = peakT - normalMarkHopRiseDuration;
+            // Defender's spoil attempt — Shaun: "the defender can jump and
+            // spoil the normal mark." Same randomized-reaction idiom as
+            // the initial ruck tap's _botPressT: a wide jitter relative to
+            // the spoil window keeps the attacker winning most of the
+            // time, the spoil is a real but occasional contest, not a
+            // coin flip.
+            float defenderSpoilT = markTargetT + Random.Range(-defenderSpoilJitter, defenderSpoilJitter);
+            // 2026-08-19, Shaun: "the human kicks at goal for themself and
+            // ai" applied to the mark too, once it became clear the same
+            // gap explained "watched without tapping and it still played
+            // out" — Day1Input.TapDown used to be read unconditionally
+            // here regardless of which team was forward, so the human's
+            // own tap (or lack of one) never actually mattered when Roo
+            // was attacking. Same pattern as TakeShotAtGoal's aiTapAt: a
+            // real simulated attempt, not an auto-win, when it's not the
+            // human's turn to act.
+            float aiMarkTapAt = humanControlled ? 0f : markTargetT + Random.Range(-0.15f, 0.15f);
             el = 0f;
             while (el < kickDuration)
             {
@@ -540,26 +638,60 @@ namespace AFL.Day1
                 float f = Mathf.Clamp01(el / kickDuration);
                 if (!ballFrozen)
                 {
-                    float arc = Mathf.Sin(f * Mathf.PI) * kickHeight;
+                    float arc = Mathf.Sin(f * Mathf.PI) * (isSpeccy ? kickHeight : kickHeightNormal);
                     ball.position = Vector3.Lerp(kickStart, kickEnd, f) + Vector3.up * arc;
                     if (el >= peakT) ballFrozen = true;
+                }
+
+                if (!isSpeccy && !jumpFired && el >= jumpFireAt)
+                {
+                    jumpFired = true;
+                    StartCoroutine(NormalMarkHop(forward));
+                    StartCoroutine(NormalMarkHop(defender));
                 }
 
                 // Same best-tap-counts pattern as day 1 (Shaun: "i just
                 // keep hitting tap kid would do that") — mashing helps,
                 // not just the first or last press.
-                if (Day1Input.TapDown)
+                if (humanControlled)
+                {
+                    if (Day1Input.TapDown)
+                    {
+                        markPressed = true;
+                        float err = Mathf.Abs(el - markTargetT);
+                        if (err < markBestErr) markBestErr = err;
+                    }
+                }
+                else if (!markPressed && el >= aiMarkTapAt)
                 {
                     markPressed = true;
-                    float err = Mathf.Abs(el - markTargetT);
-                    if (err < markBestErr) markBestErr = err;
+                    markBestErr = Mathf.Abs(aiMarkTapAt - markTargetT);
                 }
+
+                // 2026-08-19, Shaun: the same "movie" gap the mark and shot
+                // already had — when Roo is forward, Croc is defending,
+                // and defending NEVER read real input at all, always a
+                // bot roll regardless of team. Day1Input.TapDown is free
+                // in this branch (the AI-mark check above doesn't read
+                // it), so this is a genuine human spoil attempt, not a
+                // second thing fighting over the same tap.
+                if (!humanControlled && Day1Input.TapDown) defendPressed = true;
 
                 if (!markResolved && el >= markDeadline)
                 {
                     markResolved = true;
-                    bool marked = markPressed && markBestErr <= markPerfectWindow;
-                    _message = marked ? "MARK!" : "Spilled!";
+                    // 2026-08-19, Shaun: a real leap for the mark should
+                    // never spill — any genuine tap during the window
+                    // secures it now, no more precision-timing drop. The
+                    // defender's own timed jump is the only thing that can
+                    // still deny it on a normal (non-speccy) mark. Human
+                    // defends with a real tap (any tap counts, same rule
+                    // as marking); AI defends via the randomized roll.
+                    defenderSpoiled = !isSpeccy && (humanControlled
+                        ? Mathf.Abs(defenderSpoilT - markTargetT) <= defenderSpoilWindow
+                        : defendPressed);
+                    bool marked = markPressed && !defenderSpoiled;
+                    _message = marked ? "MARK!" : (defenderSpoiled ? "Spoiled by the defender!" : "Spilled!");
                     if (marked) CutCameraToMarkCloseup(forward);
                     _markHoldSucceeded = marked;
                     _markHoldReleased = true;
@@ -580,9 +712,40 @@ namespace AFL.Day1
             // the shot off mid-way — same class of bug as the earlier
             // ball-position race, just at the sequencing level instead
             // of the position-writing level.
-            bool markedResult = markPressed && markBestErr <= markPerfectWindow && markResolved;
+            bool markedResult = markPressed && markResolved && !defenderSpoiled;
             yield return MarkCatchRoutine(forward, markedResult);
-            if (markedResult) yield return TakeShotAtGoal(forward, zDir);
+            if (markedResult) yield return TakeShotAtGoal(forward, zDir, humanControlled);
+            else if (defenderSpoiled)
+            {
+                // 2026-08-19, Shaun: "no further contest, the other
+                // defender gets the ball and kicks out of defence to make
+                // it easier... receives the ball, pause, then kicks exactly
+                // the same as what happens in the middle." No ground-ball
+                // state, no second tap-duel. Then: "add 2 more characters
+                // so it does work like the centre" — Mia/Summer (rooClearer/
+                // crocClearer) are the forward line's own rover equivalent,
+                // a dedicated receiver distinct from whoever just contested
+                // the mark, mirroring crocRover/rooRover exactly. TapBallAway
+                // still separately picks rooForward/crocForward as the
+                // ensuing mark's forward, same as the centre's own
+                // ruck-then-rover structure.
+                // 2026-08-19, Shaun: "that weird kick... like the ball
+                // being shot through a rocket in the character's tummy."
+                // Root cause: the reinforcement was still standing at its
+                // static idle spot while the ball had to reach it from way
+                // up near goal — TapBallAway's own 0.6s "knocked away"
+                // flight then had to cover that whole distance in a fixed
+                // time, reading as a rocket, not a kick. Bringing them to
+                // the actual spoil spot FIRST — a real, visible run-in —
+                // means TapBallAway's own pause-then-receive-then-kick
+                // plays out over a short,
+                // natural distance instead.
+                _message = "Cleared away!";
+                Transform clearer = humanControlled ? rooClearer : crocClearer;
+                yield return RunToZ(clearer, forward.position.z, 0.6f);
+                if (_roundId != roundAtStart) yield break;
+                yield return TapBallAway(!humanControlled, clearer, reverseDirection: true);
+            }
             CutCameraToDefault();
         }
 
@@ -734,7 +897,7 @@ namespace AFL.Day1
         // shot's result and the next round's centre bounce.
         public float shotStartPause = 0.5f;
 
-        System.Collections.IEnumerator TakeShotAtGoal(Transform kicker, float zDir)
+        System.Collections.IEnumerator TakeShotAtGoal(Transform kicker, float zDir, bool humanControlled)
         {
             if (!kicker || !ball) yield break;
             int roundAtStart = _roundId;
@@ -782,18 +945,33 @@ namespace AFL.Day1
             // player chooses. Never hangs: running all the way out
             // without a tap is a real, deliberate miss (max power,
             // way off), not a stall.
-            _message = "Tap when it turns GREEN!";
-            _shotBarVisible = true;
+            _message = humanControlled ? "Tap when it turns GREEN!" : "Lining up the kick...";
+            _shotBarVisible = humanControlled;
             _shotBarValue = 0f;
             bool tapped = false;
             float tapValue = 0f;
             float riseEl = 0f;
+            // 2026-08-19, Shaun: "the human kicks at goal for themself and
+            // ai" — when Roo (the AI's side) is the one shooting, the
+            // human shouldn't have to tap for them. Same randomized-
+            // attempt idiom as the ruck tap's _botPressT: aim near the
+            // green zone with real spread, a fair but beatable AI shot
+            // rather than either an auto-goal or a required human tap.
+            float aiTapAt = humanControlled ? 0f
+                : Mathf.Clamp01(((shotPowerGreenMin + shotPowerGreenMax) / 2f) + Random.Range(-0.18f, 0.18f)) * shotPowerRiseDuration;
             while (riseEl < shotPowerRiseDuration)
             {
                 if (_roundId != roundAtStart) { _shotBarVisible = false; yield break; }
                 riseEl += Time.deltaTime;
                 _shotBarValue = Mathf.Clamp01(riseEl / shotPowerRiseDuration);
-                if (Day1Input.TapDown) { tapped = true; tapValue = _shotBarValue; break; }
+                if (humanControlled)
+                {
+                    if (Day1Input.TapDown) { tapped = true; tapValue = _shotBarValue; break; }
+                }
+                else if (riseEl >= aiTapAt)
+                {
+                    tapped = true; tapValue = _shotBarValue; break;
+                }
                 yield return null;
             }
             if (!tapped) tapValue = 1f;
@@ -1191,6 +1369,70 @@ namespace AFL.Day1
                 t.localPosition = start + Vector3.up * wave * heightScale + towardCentre * wave;
                 if (leftArm) leftArm.localRotation = leftStart * Quaternion.Euler(0, 0, wave * armAngle);
                 if (rightArm) rightArm.localRotation = rightStart * Quaternion.Euler(0, 0, -wave * armAngle);
+                yield return null;
+            }
+            t.localPosition = start;
+            if (leftArm) leftArm.localRotation = leftStart;
+            if (rightArm) rightArm.localRotation = rightStart;
+            if (animator) animator.enabled = true;
+        }
+
+        // 2026-08-19: the normal (non-speccy) mark's jump — used for both
+        // forward and defender. Reuses HopRoutine's own reach numbers
+        // (heightScale 1.65, armAngle 155 — the same math kickHeightNormal
+        // is tuned against) but, critically, does NOT run on a fixed
+        // clock like HopRoutine does. HopRoutine finishes and returns to
+        // the ground on its own schedule regardless of when the mark
+        // actually resolves — that's exactly what caused "says MARK! but
+        // the ball is on the ground" (markDeadline could land after the
+        // fixed-duration hop had already landed and returned). This rises
+        // then HOLDS at peak until KickAway sets _markHoldReleased, same
+        // pattern SpeccyLeap already uses above — no clock to race
+        // against, so the outcome and the pose can never drift apart.
+        System.Collections.IEnumerator NormalMarkHop(Transform t)
+        {
+            if (!t) yield break;
+            int roundAtStart = _roundId;
+            Vector3 start = t.localPosition;
+            const float heightScale = 1.65f;
+            const float armAngle = 155f;
+
+            var leftArm = FindDeepChild(t, "LeftArm");
+            var rightArm = FindDeepChild(t, "RightArm");
+            Quaternion leftStart = leftArm ? leftArm.localRotation : Quaternion.identity;
+            Quaternion rightStart = rightArm ? rightArm.localRotation : Quaternion.identity;
+            var animator = t.GetComponentInChildren<Animator>();
+            if (animator) animator.enabled = false;
+
+            void Pose(float wave)
+            {
+                t.localPosition = start + Vector3.up * wave * heightScale;
+                if (leftArm) leftArm.localRotation = leftStart * Quaternion.Euler(0, 0, wave * armAngle);
+                if (rightArm) rightArm.localRotation = rightStart * Quaternion.Euler(0, 0, -wave * armAngle);
+            }
+
+            float el = 0f;
+            while (el < normalMarkHopRiseDuration)
+            {
+                if (_roundId != roundAtStart) yield break;
+                el += Time.deltaTime;
+                Pose(Mathf.Sin(Mathf.Clamp01(el / normalMarkHopRiseDuration) * Mathf.PI / 2f));
+                yield return null;
+            }
+            Pose(1f);
+
+            while (!_markHoldReleased)
+            {
+                if (_roundId != roundAtStart) yield break;
+                yield return null;
+            }
+
+            el = 0f;
+            while (el < normalMarkHopRiseDuration)
+            {
+                if (_roundId != roundAtStart) yield break;
+                el += Time.deltaTime;
+                Pose(Mathf.Cos(Mathf.Clamp01(el / normalMarkHopRiseDuration) * Mathf.PI / 2f));
                 yield return null;
             }
             t.localPosition = start;

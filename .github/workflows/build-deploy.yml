@@ -42,12 +42,27 @@ jobs:
           restore-keys: |
             Library-
 
+      # 2026-08-19 — the missing piece this pipeline was blocked on.
+      # Unity killed manual .alf/.ulf portal activation for Personal
+      # tier (confirmed directly against Unity's own discussion forum
+      # and this machine's real license file — no classic serial at
+      # all anymore). This is a dedicated third-party action built
+      # specifically to activate Personal via direct credential auth
+      # against Unity's licensing API (not browser automation) — the
+      # sturdier of the two community workarounds found. Genuinely
+      # unverified until this actually runs once; secrets required:
+      # UNITY_EMAIL (already existed from the original pipeline setup),
+      # UNITY_PASSWORD.
+      - name: Activate Unity Personal license
+        uses: RageAgainstThePixel/activate-unity-license@v2
+        with:
+          license: 'Personal'
+          username: ${{ secrets.UNITY_EMAIL }}
+          password: ${{ secrets.UNITY_PASSWORD }}
+          license-version: '6.x'
+
       - name: Build WebGL (MainBuildScript.PerformWebGLBuild)
         uses: game-ci/unity-builder@v4
-        env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         with:
           targetPlatform: WebGL
           buildMethod: MainBuildScript.PerformWebGLBuild
