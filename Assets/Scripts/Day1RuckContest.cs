@@ -636,6 +636,15 @@ namespace AFL.Day1
             // real simulated attempt, not an auto-win, when it's not the
             // human's turn to act.
             float aiMarkTapAt = humanControlled ? 0f : markTargetT + Random.Range(-0.15f, 0.15f);
+            // 2026-08-19, Shaun: "there is only one button" — with one
+            // tap doing everything, there was no way to know whether this
+            // beat wanted you marking or defending. No message was ever
+            // set during this whole window (the last text on screen was
+            // whatever the run-in left behind), so a tap here was
+            // genuinely a guess. Telling the player their actual role for
+            // this specific round is the real fix, not a code bug in the
+            // tap detection itself (checked — it's sound).
+            _message = humanControlled ? "Go up for the mark!" : "Defend! Tap to spoil!";
             el = 0f;
             while (el < kickDuration)
             {
@@ -697,6 +706,11 @@ namespace AFL.Day1
                         : defendPressed);
                     bool marked = markPressed && !defenderSpoiled;
                     _message = marked ? "MARK!" : (defenderSpoiled ? "Spoiled by the defender!" : "Spilled!");
+                    // 2026-08-19, TEMPORARY diagnostic — hard to pin down
+                    // from description alone across several live tests
+                    // tonight. Remove once the spoil/rushed-behind chain
+                    // is confirmed reliably working.
+                    _message += $" [speccy={isSpeccy} humanCtrl={humanControlled} markPressed={markPressed} defendPressed={defendPressed}]";
                     if (marked) CutCameraToMarkCloseup(forward);
                     _markHoldSucceeded = marked;
                     _markHoldReleased = true;
@@ -720,18 +734,89 @@ namespace AFL.Day1
             bool markedResult = markPressed && markResolved && !defenderSpoiled;
             yield return MarkCatchRoutine(forward, markedResult);
             if (markedResult) yield return TakeShotAtGoal(forward, zDir, humanControlled);
+            else if (defenderSpoiled)
+            {
+                // 2026-08-19, Shaun: "the defender spoiled the ball
+                // through the points, no second play, just a straight
+                // spoil through the points if they spoil it." A real,
+                // authentic AFL moment — spoiling it hard under pressure
+                // can knock it straight through the defender's own behind
+                // posts for a rushed point, rather than a clean clearance.
+                // Deliberately minimal: one direct kick-arc through the
+                // outer posts, then the round resets — no clearance chain
+                // layered on top of this yet.
+                _message = "Rushed behind — one point!";
+                Vector3 behindKickStart = ball.position;
+                Vector3 behindTarget = new Vector3(1.6f, behindKickStart.y, zDir * goalZ);
+                float behindEl = 0f;
+                while (behindEl < shotKickDuration)
+                {
+                    if (_roundId != roundAtStart) yield break;
+                    behindEl += Time.deltaTime;
+                    float f = Mathf.Clamp01(behindEl / shotKickDuration);
+                    float arc = Mathf.Sin(f * Mathf.PI) * shotKickHeight;
+                    ball.position = Vector3.Lerp(behindKickStart, behindTarget, f) + Vector3.up * arc;
+                    yield return null;
+                }
+                ball.position = behindTarget;
+
+                // 2026-08-19, Shaun: "next step, kick out from full back
+                // after a point." Real AFL — after a behind, the
+                // defending team's own player kicks it back into play
+                // from the goal square. Reuses the defender who was
+                // already right there for the spoil. Deliberately
+                // minimal again: run to the goal square, kick it back
+                // toward centre, stop — no new contest chained on yet.
+                Vector3 goalSquare = new Vector3(0f, defender.position.y, zDir * goalZ);
+                yield return RunToZ(defender, goalSquare.z, 0.6f);
+                if (_roundId != roundAtStart) yield break;
+
+                // 2026-08-19, Shaun: "pause, zoom in on the player, then
+                // they kick it clearly like they do kicking out of the
+                // centre." Reusing the same two camera beats already
+                // proven elsewhere: CutCameraToMarkCloseup for the zoom
+                // (same one a mark uses), CutCameraForKick for the wide
+                // framing during the kick itself (same one the centre's
+                // own rover kick uses) — direction is -zDir here since
+                // the fullback kicks back toward centre, not further
+                // into the attacking end.
+                _message = "Kicks out from fullback!";
+                // 2026-08-19, Shaun: "the issue is turning around and
+                // kicking the other way." Real bug — RunToZ sets facing
+                // from net movement direction, but the defender is
+                // already standing right at/near the goal square from
+                // the mark contest, so that "run" can be a near-zero
+                // distance with an arbitrary resulting facing. Setting
+                // the kick-out facing explicitly instead of trusting
+                // RunToZ's rotation for what's practically a non-move.
+                defender.rotation = Quaternion.Euler(0, zDir > 0 ? 180 : 0, 0);
+                CutCameraToMarkCloseup(defender);
+                yield return new WaitForSeconds(catchPause);
+                if (_roundId != roundAtStart) yield break;
+                CutCameraForKick(-zDir);
+
+                Vector3 kickOutStart = ball.position;
+                Vector3 kickOutTarget = new Vector3(0f, kickOutStart.y, 0f);
+                float kickOutEl = 0f;
+                while (kickOutEl < shotKickDuration)
+                {
+                    if (_roundId != roundAtStart) yield break;
+                    kickOutEl += Time.deltaTime;
+                    float f = Mathf.Clamp01(kickOutEl / shotKickDuration);
+                    float arc = Mathf.Sin(f * Mathf.PI) * shotKickHeight;
+                    ball.position = Vector3.Lerp(kickOutStart, kickOutTarget, f) + Vector3.up * arc;
+                    yield return null;
+                }
+                ball.position = kickOutTarget;
+            }
             else
             {
                 // 2026-08-19, Shaun: "so the spoil, after the spoil the
                 // ball gets into the other player's hands, that's the next
                 // step, just add that, nothing else after that, we add the
                 // next step. This has only worked doing one step at a
-                // time." Deliberately stopping here — no kick yet, no
-                // continuing into a new mark contest. That was the actual
-                // lesson from the "everyone charging" confusion: the
-                // chained kick+contest was too much to verify in one go.
-                // Covers both an active spoil and a genuine uncontested
-                // drop the same way — either way nobody marked it, so the
+                // time." A genuine uncontested drop (nobody tapped, not an
+                // active spoil) still gets the clearance treatment — the
                 // defending team's clearer takes it.
                 _message = "Cleared away!";
                 Transform clearer = humanControlled ? rooClearer : crocClearer;
