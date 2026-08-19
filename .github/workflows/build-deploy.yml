@@ -49,10 +49,20 @@ jobs:
       # all anymore). This is a dedicated third-party action built
       # specifically to activate Personal via direct credential auth
       # against Unity's licensing API (not browser automation) — the
-      # sturdier of the two community workarounds found. Genuinely
-      # unverified until this actually runs once; secrets required:
-      # UNITY_EMAIL (already existed from the original pipeline setup),
-      # UNITY_PASSWORD.
+      # sturdier of the two community workarounds found.
+      #
+      # First real run failed before ever testing the credentials:
+      # "Unity Hub is not installed or not accessible" — this action
+      # drives licensing through Hub's own CLI, which the runner never
+      # had installed. unity-setup (same author) installs Hub only
+      # (unity-version: None skips downloading a full Editor, since
+      # game-ci/unity-builder below handles the actual build via its
+      # own Docker image separately).
+      - name: Install Unity Hub
+        uses: RageAgainstThePixel/unity-setup@v2
+        with:
+          unity-version: None
+
       - name: Activate Unity Personal license
         uses: RageAgainstThePixel/activate-unity-license@v2
         with:
