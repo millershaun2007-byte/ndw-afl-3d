@@ -153,12 +153,18 @@ public static class MainBuildScript
         const float dragonScale = 1.083f * 1.3f;
         const float lionScale = 1.227f * 1.3f;
         // 2026-08-19: measured directly (Renderer bounds, MeasureMiaSummer.cs),
-        // not guessed — Mia=1.634 high, Summer=1.877 (both smaller than
-        // Croc's 2.098 reference), same formula as Dragon/Lion above:
-        // match Croc's height, then the same 1.3 distance compensation
-        // since they stand at the same forward-line distance from camera.
+        // not guessed — Mia=1.634 high (smaller than Croc's 2.098
+        // reference), same formula as Dragon/Lion above: match Croc's
+        // height, then the same 1.3 distance compensation since they
+        // stand at the same forward-line distance from camera.
+        //
+        // 2026-08-19: Shaun (a real photo-based character) was tried for
+        // Roo's forward-line pair and for CrocClearer — reverted, "looks
+        // ridiculous" / "the game is messed up now". Not investigated
+        // further tonight; if revisited later, check scale/pose/rig
+        // compatibility with this project's Generic-animation pipeline
+        // before reusing.
         const float miaScale = 1.284f * 1.3f;
-        const float summerScale = 1.118f * 1.3f;
         // Real fix (2026-08-12, Shaun: "the speccy so the forward now
         // starts behind runs up"). Forward moved from z=10 to z=5 —
         // behind the defender, who stays at 10 near the actual contest
@@ -182,9 +188,16 @@ public static class MainBuildScript
         // untuned (1f) — Dragon/Lion both needed real measured correction
         // after first render, expect the same here once tested live.
         EnsureAnimatorController("Mia", "Assets/Models/MiaRiggedAI");
-        EnsureAnimatorController("Summer", "Assets/Models/SummerRiggedAI");
         var rooClearerGo = BuildStaticCharacter("RooClearer", "Assets/Models/MiaRiggedAI", new Vector3(0.9f, 0, 13f), Quaternion.Euler(0, 180, 0), miaScale);
-        var crocClearerGo = BuildStaticCharacter("CrocClearer", "Assets/Models/SummerRiggedAI", new Vector3(-0.9f, 0, -13f), Quaternion.identity, summerScale);
+        // 2026-08-19, Shaun: "if the other summer looks better its a white
+        // tiny ghost in this game... noticed this in the safari game but
+        // couldn't be bothered saying anything" — a real, pre-existing
+        // rendering bug in the Summer asset itself (confirmed present in
+        // ndw-safari-3d too, not something tonight's integration caused).
+        // Swapped for Croc's own species — already proven working
+        // everywhere else in this game, default scale (1f), no
+        // correction needed since Croc is the reference height itself.
+        var crocClearerGo = BuildStaticCharacter("CrocClearer", "Assets/Models/CrocRiggedAI", new Vector3(-0.9f, 0, -13f), Quaternion.identity);
 
         // Goal posts (2026-08-12, Shaun: "chuck up those... goal posts").
         // Visual only — no collision, no scoring trigger, that's still

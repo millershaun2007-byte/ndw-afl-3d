@@ -83,6 +83,11 @@ namespace AFL.Day1
         // landing on a fixed clock (see NormalMarkHop's own header for
         // why the old plain Hop() couldn't be reused as-is here).
         public float normalMarkHopRiseDuration = 0.3f;
+        // 2026-08-19: guaranteed minimum time NormalMarkHop/SpeccyLeap
+        // hold at their peak pose once released, so a frame-timing hitch
+        // can't collapse the hold to ~0 duration and drop straight into
+        // the fall before the peak was ever visibly held.
+        public float minMarkHoldDuration = 0.2f;
         public float perfectWindow = 0.5f;
         // Real human reaction time to a reactive tap, compensated for in
         // grading — see the comment on ResolveAndContest below.
@@ -715,36 +720,24 @@ namespace AFL.Day1
             bool markedResult = markPressed && markResolved && !defenderSpoiled;
             yield return MarkCatchRoutine(forward, markedResult);
             if (markedResult) yield return TakeShotAtGoal(forward, zDir, humanControlled);
-            else if (defenderSpoiled)
+            else
             {
-                // 2026-08-19, Shaun: "no further contest, the other
-                // defender gets the ball and kicks out of defence to make
-                // it easier... receives the ball, pause, then kicks exactly
-                // the same as what happens in the middle." No ground-ball
-                // state, no second tap-duel. Then: "add 2 more characters
-                // so it does work like the centre" — Mia/Summer (rooClearer/
-                // crocClearer) are the forward line's own rover equivalent,
-                // a dedicated receiver distinct from whoever just contested
-                // the mark, mirroring crocRover/rooRover exactly. TapBallAway
-                // still separately picks rooForward/crocForward as the
-                // ensuing mark's forward, same as the centre's own
-                // ruck-then-rover structure.
-                // 2026-08-19, Shaun: "that weird kick... like the ball
-                // being shot through a rocket in the character's tummy."
-                // Root cause: the reinforcement was still standing at its
-                // static idle spot while the ball had to reach it from way
-                // up near goal — TapBallAway's own 0.6s "knocked away"
-                // flight then had to cover that whole distance in a fixed
-                // time, reading as a rocket, not a kick. Bringing them to
-                // the actual spoil spot FIRST — a real, visible run-in —
-                // means TapBallAway's own pause-then-receive-then-kick
-                // plays out over a short,
-                // natural distance instead.
+                // 2026-08-19, Shaun: "so the spoil, after the spoil the
+                // ball gets into the other player's hands, that's the next
+                // step, just add that, nothing else after that, we add the
+                // next step. This has only worked doing one step at a
+                // time." Deliberately stopping here — no kick yet, no
+                // continuing into a new mark contest. That was the actual
+                // lesson from the "everyone charging" confusion: the
+                // chained kick+contest was too much to verify in one go.
+                // Covers both an active spoil and a genuine uncontested
+                // drop the same way — either way nobody marked it, so the
+                // defending team's clearer takes it.
                 _message = "Cleared away!";
                 Transform clearer = humanControlled ? rooClearer : crocClearer;
                 yield return RunToZ(clearer, forward.position.z, 0.6f);
                 if (_roundId != roundAtStart) yield break;
-                yield return TapBallAway(!humanControlled, clearer, reverseDirection: true);
+                yield return MarkCatchRoutine(clearer, true);
             }
             CutCameraToDefault();
         }
@@ -1111,9 +1104,21 @@ namespace AFL.Day1
             }
             Pose(1f, zTracks: true);
 
-            while (!_markHoldReleased)
+            // 2026-08-19, Shaun: "marks the ball but the ball is on the
+            // ground... only sometimes." Real race: a single frame-timing
+            // hitch (GC pause, asset streaming) can push el past BOTH
+            // jumpFireAt and markDeadline in the same frame — since
+            // StartCoroutine runs synchronously up to its first yield,
+            // _markHoldReleased can already be true before the rise above
+            // has even properly played out over real frames, collapsing
+            // the hold to ~0 duration and dropping straight into the fall.
+            // A guaranteed minimum hold makes a hitch unable to skip the
+            // peak pose entirely, whatever else happens with the timing.
+            float minHoldEl = 0f;
+            while (!_markHoldReleased || minHoldEl < minMarkHoldDuration)
             {
                 if (_roundId != roundAtStart) yield break;
+                minHoldEl += Time.deltaTime;
                 yield return null;
             }
             if (_markHoldSucceeded)
@@ -1421,9 +1426,14 @@ namespace AFL.Day1
             }
             Pose(1f);
 
-            while (!_markHoldReleased)
+            // See SpeccyLeap's identical guard above for why this can't
+            // just be "while (!_markHoldReleased)" — a frame-timing hitch
+            // can make that already true before the rise even finishes.
+            float minHoldEl = 0f;
+            while (!_markHoldReleased || minHoldEl < minMarkHoldDuration)
             {
                 if (_roundId != roundAtStart) yield break;
+                minHoldEl += Time.deltaTime;
                 yield return null;
             }
 
@@ -1503,7 +1513,12 @@ namespace AFL.Day1
     public static class Day1Input
     {
         public static bool TouchTapDown;
-        public static bool TapDown => Input.GetKeyDown(KeyCode.Space) || TouchTapDown;
+        // 2026-08-19, Shaun: relying on "remember to press spacebar, not
+        // click" was fragile for real testing — a direct mouse/touch
+        // click on the canvas is the natural interaction and should just
+        // work, not only the external app-bridge (TapPressed) or the
+        // spacebar fallback.
+        public static bool TapDown => Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0) || TouchTapDown;
         internal static void ClearOneShot() { TouchTapDown = false; }
     }
 

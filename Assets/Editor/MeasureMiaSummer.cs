@@ -7,6 +7,7 @@ public static class MeasureMiaSummer
     {
         Measure("Mia", "Assets/Models/MiaRiggedAI/MiaRigged.glb");
         Measure("Summer", "Assets/Models/SummerRiggedAI/SummerRigged.glb");
+        Measure("Shaun", "Assets/Models/ShaunRiggedAI/ShaunRigged.glb");
     }
 
     static void Measure(string name, string path)
