@@ -60,6 +60,7 @@ namespace AFL.Day1
         // and side-on only for the kick's flight, then cut back once the
         // mark resolves.
         Camera _mainCam;
+        Coroutine _defenderRunToZ;
         Vector3 _camDefaultPos;
         Quaternion _camDefaultRot;
         // Must match Day1BuildScript's BuildGoalPosts z position.
@@ -464,7 +465,20 @@ namespace AFL.Day1
             bool isSpeccy = Random.value < speccyChance;
             if (isSpeccy) StartCoroutine(SpeccyLeap(forward, defender, peakZ, arriveByPeak));
             else StartCoroutine(RunToZ(forward, peakZ, arriveByPeak));
-            StartCoroutine(RunToZ(defender, peakZ, arriveByPeak));
+            // 2026-08-19, Shaun: "the kickout person's ability — looks
+            // like they may not be able to move." Real bug, found by
+            // checking the actual timing, not guessing: arriveByPeak
+            // (~1.2s) starts counting from HERE, partway through
+            // KickAway's own el timeline (jumpFireAt onward), so this
+            // run doesn't actually finish until AFTER KickAway's loop
+            // (kickDuration=1.1) has already exited into mark resolution
+            // — meaning the later kick-out RunToZ(defender, ...) call
+            // starts while this ORIGINAL one is still running, both
+            // writing defender.position/.rotation at once. Exactly this
+            // project's own documented recurring failure (one fact
+            // written in two places). Stored so the kick-out step can
+            // explicitly stop it first.
+            _defenderRunToZ = StartCoroutine(RunToZ(defender, peakZ, arriveByPeak));
             yield return KickAway(rover, runDir, forward, defender, isSpeccy, crocWins);
             // Reset countdown starts from here, not from when the contest
             // first resolved — Update()'s existing reset logic now waits
@@ -767,6 +781,10 @@ namespace AFL.Day1
                 // already right there for the spoil. Deliberately
                 // minimal again: run to the goal square, kick it back
                 // toward centre, stop — no new contest chained on yet.
+                // Stop the original mark-contest run before starting a
+                // new one for the same character — see the field's own
+                // comment for the confirmed race this was causing.
+                if (_defenderRunToZ != null) StopCoroutine(_defenderRunToZ);
                 Vector3 goalSquare = new Vector3(0f, defender.position.y, zDir * goalZ);
                 yield return RunToZ(defender, goalSquare.z, 0.6f);
                 if (_roundId != roundAtStart) yield break;
