@@ -335,7 +335,17 @@ namespace AFL.Day1
         // reverseDirection flips just the kick's runDir without touching
         // which team/characters are used — the centre ruck's own call
         // (reverseDirection: false, the default) is completely unaffected.
-        System.Collections.IEnumerator TapBallAway(bool crocWins, Transform kickerOverride = null, bool reverseDirection = false)
+        // 2026-08-21 — chainDepth added for the second contest after a
+        // kick-out (see SECOND-CONTEST-BRIEF.md). This method was already
+        // re-entrant (the clearance path already reused it), so the
+        // second contest is just another call — but a spoil at that
+        // point would otherwise chain a THIRD kick-out, then a fourth
+        // contest, without limit. chainDepth stops that at the first
+        // level: only chainDepth==0 (the original centre-bounce contest)
+        // is allowed to chain into a kick-out's own second contest; any
+        // deeper spoil ends the round cleanly instead (see KickAway's
+        // defenderSpoiled branch).
+        System.Collections.IEnumerator TapBallAway(bool crocWins, Transform kickerOverride = null, bool reverseDirection = false, int chainDepth = 0)
         {
             yield return new WaitForSeconds(hopDuration / 2f + 0.15f);
             Vector3 start = ball.position;
@@ -432,6 +442,21 @@ namespace AFL.Day1
             // yet. That's real, separate scope for later.
             Transform forward = crocWins ? crocForward : rooForward;
             Transform defender = crocWins ? rooDefender : crocDefender;
+            // 2026-08-21 — chained contest only (chainDepth > 0, see
+            // SECOND-CONTEST-BRIEF.md point 3). forward/defender are
+            // wherever the FIRST contest (and the kick-out's own
+            // defender-slide) left them — their original forward-line
+            // spawn positions, which have nothing to do with where this
+            // new contest is actually happening (anchored on rover's own
+            // position, set by the caller to the kick-out's landing
+            // spot). Without this they'd run at the new contest zone
+            // from an arbitrary leftover position instead of a real
+            // start line.
+            if (chainDepth > 0)
+            {
+                forward.position = new Vector3(forward.position.x, forward.position.y, rover.position.z);
+                defender.position = new Vector3(defender.position.x, defender.position.y, rover.position.z);
+            }
             float peakZ = rover.position.z + runDir * kickDistance * 0.5f;
             float arriveByPeak = kickDropDuration + kickPause + kickDuration * 0.5f;
             // Real fix (2026-08-12, Shaun: "the speccy... forward now
@@ -450,7 +475,12 @@ namespace AFL.Day1
             // ~0.65s of the run (the old cut point), the forward loomed
             // huge/clipped at the bottom of frame. Cutting wide right as
             // the run begins avoids that window entirely.
-            CutCameraForKick(runDir);
+            // 2026-08-21 — chained contest passes its own anchor (peakZ's
+            // own basis, rover.position.z) instead of the default
+            // goalZ-pinned pivot, which would point at the wrong end of
+            // the ground for a contest happening mid-field. Original
+            // (chainDepth==0) call is unaffected — contestZ stays null.
+            CutCameraForKick(runDir, chainDepth > 0 ? (float?)rover.position.z : null);
             _markHoldReleased = false;
             // 2026-08-19, Shaun: bring back the normal (non-leaping) mark
             // as the common case, speccy as the rarer highlight — real
@@ -479,7 +509,7 @@ namespace AFL.Day1
             // written in two places). Stored so the kick-out step can
             // explicitly stop it first.
             _defenderRunToZ = StartCoroutine(RunToZ(defender, peakZ, arriveByPeak));
-            yield return KickAway(rover, runDir, forward, defender, isSpeccy, crocWins);
+            yield return KickAway(rover, runDir, forward, defender, isSpeccy, crocWins, chainDepth);
             // Reset countdown starts from here, not from when the contest
             // first resolved — Update()'s existing reset logic now waits
             // the right amount after the FULL sequence (tap, catch, run,
@@ -559,7 +589,7 @@ namespace AFL.Day1
         // rejected sub-100ms analytic-physics system — just relocated to
         // the kick's flight. "Dont worry about the defender yet" — this
         // grades the forward's own timing only, no opponent comparison.
-        System.Collections.IEnumerator KickAway(Transform t, float zDir, Transform forward, Transform defender, bool isSpeccy, bool humanControlled)
+        System.Collections.IEnumerator KickAway(Transform t, float zDir, Transform forward, Transform defender, bool isSpeccy, bool humanControlled, int chainDepth = 0)
         {
             if (!t || !ball) yield break;
             int roundAtStart = _roundId;
@@ -917,6 +947,42 @@ namespace AFL.Day1
                     yield return null;
                 }
                 ball.position = kickOutTarget;
+
+                // 2026-08-21 — second contest chain (see
+                // SECOND-CONTEST-BRIEF.md). TapBallAway was already
+                // re-entrant (the clearance path below already reuses
+                // it) — chain into it here, anchored on the kick-out's
+                // own landing spot. Recursion guard: only chainDepth==0
+                // (the original centre-bounce contest) is allowed to
+                // chain — a spoil on THIS second contest ends the round
+                // honestly instead of chaining a third kick-out, per
+                // CLAUDE.md's placeholder-ending rule.
+                if (chainDepth == 0)
+                {
+                    // Reposition defender (the kick-out kicker, now
+                    // acting as this new contest's "rover") onto the
+                    // ball's actual landing spot — TapBallAway's own
+                    // peakZ and camera pivot both derive from
+                    // rover.position.z, so this is what anchors the
+                    // whole chained contest on where the ball really is
+                    // instead of where the kicker used to stand
+                    // (SECOND-CONTEST-BRIEF.md point 1).
+                    defender.position = kickOutTarget;
+                    // crocWins flips — the team that just kicked out now
+                    // has the ball/momentum for this contest, the
+                    // opponent's original crocWins negated.
+                    // reverseDirection keeps the ball moving further
+                    // away from the kicking team's own goal, continuing
+                    // the same direction the kick-out itself traveled.
+                    yield return TapBallAway(crocWins: !humanControlled, kickerOverride: defender, reverseDirection: true, chainDepth: chainDepth + 1);
+                }
+                else
+                {
+                    // Depth >= 1 — end honestly here (CLAUDE.md's
+                    // placeholder-ending rule) rather than chain a third
+                    // kick-out that was never built.
+                    _message = "Rushed out of bounds — play stops!";
+                }
             }
             else
             {
@@ -936,13 +1002,20 @@ namespace AFL.Day1
             CutCameraToDefault();
         }
 
-        void CutCameraForKick(float zDir)
+        // 2026-08-21 — contestZ lets a chained contest (e.g. the second
+        // mark after a kick-out) override the pivot instead of always
+        // pinning to goalZ. pivotZ = zDir * (goalZ - 5f) is only correct
+        // when the contest is heading INTO the goal (the centre bounce's
+        // own rover kick) — a contest happening mid-ground, moving away
+        // from the goal, needs the pivot to follow it instead. Existing
+        // callers pass one argument and are unaffected.
+        void CutCameraForKick(float zDir, float? contestZ = null)
         {
             if (!_mainCam) return;
             // Pivot sits between the forward's zone (~z=10) and the goal
             // (goalZ) so both the ball's landing and the posts are framed
             // together, not just one or the other.
-            float pivotZ = zDir * (goalZ - 5f);
+            float pivotZ = contestZ ?? (zDir * (goalZ - 5f));
             _mainCam.transform.position = new Vector3(kickCamSide, kickCamHeight, pivotZ);
             // Real fix (2026-08-12, same pass as the speccy). LookAt
             // height raised from 1.5 to 3 — with the leap now reaching
