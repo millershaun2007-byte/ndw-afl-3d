@@ -774,8 +774,20 @@ namespace AFL.Day1
                 // entire time. Reset to ground level here, once, before
                 // either kick arc starts.
                 ball.position = new Vector3(ball.position.x, groundY, ball.position.z);
+                // 2026-08-21 — real fix, found by tracing coordinates
+                // rather than guessing at symptoms again (see
+                // KICKOUT-BRIEF.md). Ball and kicker must end up on the
+                // SAME side. behindTarget used to hardcode +1.6 while
+                // clearX (below) followed the defender's spawn sign — so
+                // half the time they finished 4.2 units apart on
+                // OPPOSITE sides of the goal, which is why "can't see the
+                // player near the ball" survived three earlier fix
+                // attempts that each addressed a real but secondary
+                // issue. Captured once here, before the slide, while
+                // defender.position.x still holds the spawn value.
+                float side = Mathf.Sign(defender.position.x == 0f ? 1f : defender.position.x);
                 Vector3 behindKickStart = ball.position;
-                Vector3 behindTarget = new Vector3(1.6f, behindKickStart.y, zDir * goalZ);
+                Vector3 behindTarget = new Vector3(side * 1.6f, behindKickStart.y, zDir * goalZ);
                 float behindEl = 0f;
                 while (behindEl < shotKickDuration)
                 {
@@ -811,9 +823,9 @@ namespace AFL.Day1
                 // (±0.6). The close-up camera's fixed (7,3,0) world-space
                 // offset then looked straight through a post to reach
                 // them. Slide clear of the post cluster (posts span
-                // -1.3..1.3) before the close-up cuts in, keeping
-                // whichever side they were already on.
-                float clearX = Mathf.Sign(defender.position.x == 0 ? 1f : defender.position.x) * 2.6f;
+                // -1.3..1.3) before the close-up cuts in — same `side` as
+                // the ball above now, not a separately-derived sign.
+                float clearX = side * 2.6f;
                 float slideEl = 0f;
                 Vector3 slideStart = defender.position;
                 while (slideEl < 0.3f)
@@ -843,7 +855,14 @@ namespace AFL.Day1
                 // the kick-out facing explicitly instead of trusting
                 // RunToZ's rotation for what's practically a non-move.
                 defender.rotation = Quaternion.Euler(0, zDir > 0 ? 180 : 0, 0);
-                CutCameraToMarkCloseup(defender);
+                // 2026-08-21 — mirrored variant, not the shared
+                // CutCameraToMarkCloseup(Transform) the mark beat uses
+                // (that framing is already signed off, left untouched).
+                // The original's fixed +X offset means when the subject
+                // ends up on -X (half the spawn sides), the camera sits
+                // INSIDE the post cluster's sightline — the exact
+                // occlusion the slide above exists to avoid.
+                CutCameraToMarkCloseup(defender, side);
                 yield return new WaitForSeconds(kickOutPause);
                 if (_roundId != roundAtStart) yield break;
                 // 2026-08-21, Shaun: "you need to zoom right in make sure
@@ -854,7 +873,20 @@ namespace AFL.Day1
                 // cuts in once the leg has actually snapped forward, so
                 // the kick itself is genuinely visible before the ball
                 // starts flying, not hidden behind a camera cut.
-                yield return KickMotion(defender, kickMotionDuration);
+                //
+                // 2026-08-21 — the actual defect this whole beat had:
+                // the ball was landing at behindTarget and never moving
+                // again until the kick-out arc itself, while the leg
+                // snapped at the defender's own position — a metre-plus
+                // away even on the correctly-signed side. Kicker and
+                // ball were two unrelated objects that happened to
+                // animate at the same time. Put it on the boot and keep
+                // it there through the motion, same idiom
+                // MarkCatchRoutine already uses for the hand (track the
+                // real bone, don't guess a nearby point).
+                var boot = FindDeepChild(defender, "RightFoot");
+                if (ball) ball.position = boot ? boot.position : defender.position + Vector3.up * (groundY * 0.5f);
+                yield return StartCoroutine(KickMotionWithBall(defender, boot, kickMotionDuration));
                 if (_roundId != roundAtStart) yield break;
                 // 2026-08-21, Shaun (live playtest): "camera nowhere near
                 // the person" — first attempted fix (flipping this to
@@ -967,6 +999,24 @@ namespace AFL.Day1
             if (!_mainCam || !forward) return;
             _mainCam.transform.position = forward.position + new Vector3(7f, 3f, 0f);
             _mainCam.transform.LookAt(forward.position + Vector3.up * 1.2f);
+        }
+
+        // 2026-08-21 — mirrored variant for the kick-out beat only. Do
+        // not fold `side` into the original above: the mark beat uses
+        // that one as-is and Shaun has already signed off on its framing
+        // ("really being able to see the person grabbing the mark") —
+        // changing shared behaviour here would silently alter a beat
+        // that's currently accepted. The fixed +X offset above means
+        // that when the subject is actually on -X (half of the kick-out's
+        // two spawn sides), the camera ends up INSIDE the post cluster's
+        // sightline — the exact occlusion the kick-out's defender-slide
+        // exists to avoid. Kick-out uses this; the mark keeps the
+        // original.
+        void CutCameraToMarkCloseup(Transform subject, float side)
+        {
+            if (!_mainCam || !subject) return;
+            _mainCam.transform.position = subject.position + new Vector3(side * 7f, 3f, 0f);
+            _mainCam.transform.LookAt(subject.position + Vector3.up * 1.2f);
         }
 
         // Real fix (2026-08-12, Shaun: "with a mark the forward catches
@@ -1634,6 +1684,29 @@ namespace AFL.Day1
             }
             upLeg.localRotation = legStart;
             if (animator) animator.enabled = true;
+        }
+
+        // 2026-08-21 — KickMotion, but the ball rides the boot for the
+        // duration instead of sitting wherever it landed after the
+        // previous kick. Split out rather than folded into KickMotion
+        // itself because the centre-clearance kick calls that one with
+        // the ball already in flight and must not have it yanked back to
+        // the kicker's foot mid-arc. Same idiom as MarkCatchRoutine
+        // tracking the forward's real hand bone rather than a guessed
+        // nearby point.
+        System.Collections.IEnumerator KickMotionWithBall(Transform t, Transform boot, float duration)
+        {
+            int roundAtStart = _roundId;
+            var inner = StartCoroutine(KickMotion(t, duration));
+            float el = 0f;
+            while (el < duration)
+            {
+                if (_roundId != roundAtStart) yield break;
+                el += Time.deltaTime;
+                if (ball && boot) ball.position = boot.position;
+                yield return null;
+            }
+            yield return inner;
         }
 
         // 2026-08-19: the normal (non-speccy) mark's jump — used for both
