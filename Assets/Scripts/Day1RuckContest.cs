@@ -760,6 +760,20 @@ namespace AFL.Day1
                 // outer posts, then the round resets — no clearance chain
                 // layered on top of this yet.
                 _message = "Rushed behind — one point!";
+                // 2026-08-21, Shaun (live playtest): "the ball randomly
+                // goes to the top of the goal posts" — the REAL root
+                // cause, found by tracing actual numbers, not the camera
+                // at all (that was a real but secondary issue, already
+                // fixed above). The ball was still frozen at the mark
+                // contest's peak jump height (groundY + kickHeightNormal
+                // = 1.0 + 2.7 = 3.7) from before the spoil — ALREADY
+                // taller than the goal posts themselves (3.2) — and
+                // nothing ever brought it back down to a sensible resting
+                // height before this whole rushed-behind + kick-out
+                // sequence, so it visibly hovered near/above the post the
+                // entire time. Reset to ground level here, once, before
+                // either kick arc starts.
+                ball.position = new Vector3(ball.position.x, groundY, ball.position.z);
                 Vector3 behindKickStart = ball.position;
                 Vector3 behindTarget = new Vector3(1.6f, behindKickStart.y, zDir * goalZ);
                 float behindEl = 0f;
