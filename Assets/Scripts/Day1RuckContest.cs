@@ -412,6 +412,21 @@ namespace AFL.Day1
             // rover taps in from -Z, so runs +Z; Roo's is the reverse.
             float runDir = (crocWins ? 1f : -1f) * (reverseDirection ? -1f : 1f);
             yield return RunStraight(rover, runDir);
+            // 2026-08-21 — real bug, found by computing the actual
+            // numbers rather than guessing again: every chain hop
+            // (kick-out's second contest, an out-of-range mark, a spoil
+            // past the first contest) advances the rover by runDistance
+            // (6) here, then peakZ below adds another kickDistance*0.5
+            // (8) — 14 units further downfield per hop, with no bounds
+            // check. The kick-out itself already starts the chain
+            // partway to a goal (kickOutTargetZ), so after just 1-2 hops
+            // this can already exceed the field's own real half-length
+            // (goalZ=20) — confirmed as the actual cause of the camera
+            // ending up pointed at the sky in live testing (the pivot
+            // landed outside the field entirely, not a ball-height or
+            // stale-camera issue as first guessed). Clamp to stay on the
+            // actual ground regardless of chain depth.
+            rover.position = new Vector3(rover.position.x, rover.position.y, Mathf.Clamp(rover.position.z, -(goalZ - 2f), goalZ - 2f));
 
             // Day 3, second slice (2026-08-12, Shaun: "either player takes
             // these few steps then does a kick", "quick pause or just do
@@ -457,7 +472,11 @@ namespace AFL.Day1
                 forward.position = new Vector3(forward.position.x, forward.position.y, rover.position.z);
                 defender.position = new Vector3(defender.position.x, defender.position.y, rover.position.z);
             }
-            float peakZ = rover.position.z + runDir * kickDistance * 0.5f;
+            // Clamped for the same reason rover.position.z was clamped
+            // above — this adds another kickDistance*0.5 (8 units)
+            // beyond rover's already-clamped position, which alone can
+            // still land outside the field on a deep chain hop.
+            float peakZ = Mathf.Clamp(rover.position.z + runDir * kickDistance * 0.5f, -(goalZ - 2f), goalZ - 2f);
             float arriveByPeak = kickDropDuration + kickPause + kickDuration * 0.5f;
             // Real fix (2026-08-12, Shaun: "the speccy... forward now
             // starts behind runs up jumps really high on the opponents
@@ -630,7 +649,13 @@ namespace AFL.Day1
             // * 0.5, the same instant the Sin curve below actually peaks)
             // — the cue IS the ball's height, same principle as day 1.
             Vector3 kickStart = ball.position;
-            Vector3 kickEnd = kickStart + new Vector3(0, 0, zDir * kickDistance);
+            // Same field-bounds clamp as TapBallAway's peakZ, applied
+            // here too — this kick's own full kickDistance (16, not
+            // halved) can independently push the ball's landing spot
+            // outside the field on a deep chain hop, one level below
+            // where the TapBallAway-level clamps already catch it.
+            float kickEndZ = Mathf.Clamp(kickStart.z + zDir * kickDistance, -(goalZ - 2f), goalZ - 2f);
+            Vector3 kickEnd = new Vector3(kickStart.x, kickStart.y, kickEndZ);
             float peakT = kickDuration * 0.5f;
             float markTargetT = peakT + markReactionCompensation;
             float markDeadline = Mathf.Min(peakT + markPerfectWindow, kickDuration);
