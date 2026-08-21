@@ -150,4 +150,13 @@ jobs:
       - name: Deploy to gs://ndw-game-builds/afl3d/
         run: |
           gcloud storage rsync build/WebGL gs://ndw-game-builds/afl3d/ --recursive --delete-unmatched-destination-objects
+          # 2026-08-22 — real bug hit live: plain rsync leaves every object
+          # with no Cache-Control, so GCS's default (~1hr) caching means a
+          # browser that already loaded this game can silently keep serving
+          # a stale mix of old+new files after the next deploy (old loader.js
+          # against a new WebGL.data, etc.) until its own cache expires.
+          # This was fixed once before via a manual setmeta call that didn't
+          # survive this pipeline's 2026-08-21 rebuild — setting it here,
+          # every deploy, so it can't quietly regress again.
+          gcloud storage objects update gs://ndw-game-builds/afl3d/index.html gs://ndw-game-builds/afl3d/Build/WebGL.data gs://ndw-game-builds/afl3d/Build/WebGL.wasm gs://ndw-game-builds/afl3d/Build/WebGL.loader.js gs://ndw-game-builds/afl3d/Build/WebGL.framework.js --cache-control="no-cache, max-age=0"
           echo "Deployed commit ${{ github.sha }} to gs://ndw-game-builds/afl3d/"
