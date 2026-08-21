@@ -127,6 +127,20 @@ namespace AFL.Day1
         {
             if (crocsInPossession) _crocScore += points; else _rooScore += points;
         }
+
+        // 2026-08-21, Shaun: "can we set up 3 minute quarters" — real match
+        // structure on top of the score above. The clock only ever advances
+        // the round-restart decision at the SAME point Update() already
+        // waited for a round to fully finish (_sequenceComplete) — never
+        // mid-contest — so time running out doesn't cut a kick or a mark
+        // off partway through, same "let the sequence complete" discipline
+        // as everything else _roundId-gated in this file.
+        public float quarterDuration = 180f; // 3 real minutes
+        public float quarterBreakPause = 3f;
+        int _quarter = 1;
+        float _quarterTimeRemaining;
+        bool _matchOver;
+        bool _handlingRoundEnd;
         // Real fix (2026-08-12) — found via a live Playwright check, not
         // guessed: the mark's 1s ball-hold loop and the round-reset timer
         // (1.2s after the full sequence) land almost exactly coincident,
@@ -164,6 +178,7 @@ namespace AFL.Day1
                 _camDefaultPos = _mainCam.transform.position;
                 _camDefaultRot = _mainCam.transform.rotation;
             }
+            _quarterTimeRemaining = quarterDuration;
             BeginThrow();
         }
 
@@ -228,8 +243,31 @@ namespace AFL.Day1
             _inputDeadline = ideal + perfectWindow;
         }
 
+        System.Collections.IEnumerator HandleRoundEnd()
+        {
+            if (_quarterTimeRemaining <= 0f)
+            {
+                if (_quarter >= 4)
+                {
+                    _matchOver = true;
+                    string result = _crocScore > _rooScore ? "CROCS WIN!" : _rooScore > _crocScore ? "ROOS WIN!" : "IT'S A DRAW!";
+                    _message = "FULL TIME! " + result;
+                    _handlingRoundEnd = false;
+                    yield break;
+                }
+                _message = "End of Quarter " + _quarter + "!";
+                _quarter++;
+                yield return new WaitForSeconds(quarterBreakPause);
+                _quarterTimeRemaining = quarterDuration;
+            }
+            _handlingRoundEnd = false;
+            BeginThrow();
+        }
+
         void Update()
         {
+            if (!_matchOver) _quarterTimeRemaining -= Time.deltaTime;
+
             if (_resolved)
             {
                 // Real fix (2026-08-12) — adding the catch-pause-then-run
@@ -239,7 +277,17 @@ namespace AFL.Day1
                 // reset now waits on _sequenceComplete (set at the true end
                 // of TapBallAway) rather than a timer that predates the run
                 // existing at all.
-                if (_sequenceComplete && Time.time - _resolvedAt > 1.2f) BeginThrow();
+                //
+                // 2026-08-21 — this is also the ONLY point that ever
+                // starts a new round, so it's the one safe place to check
+                // whether the quarter clock has run out too: never mid-
+                // contest, only once the previous one has genuinely
+                // finished playing out.
+                if (_sequenceComplete && !_handlingRoundEnd && Time.time - _resolvedAt > 1.2f)
+                {
+                    _handlingRoundEnd = true;
+                    StartCoroutine(HandleRoundEnd());
+                }
                 return;
             }
 
@@ -2096,7 +2144,9 @@ namespace AFL.Day1
             GUI.color = new Color(0f, 0f, 0f, 0.65f);
             GUI.DrawTexture(new Rect(0, 0, Screen.width, scoreH), Texture2D.whiteTexture);
             GUI.color = Color.white;
-            GUI.Label(new Rect(0, 0, Screen.width, scoreH), "CROCS " + _crocScore + "  —  " + _rooScore + " ROOS", _scoreStyle);
+            float clockSecs = Mathf.Max(0f, _quarterTimeRemaining);
+            string clock = _matchOver ? "FULL TIME" : "Q" + _quarter + "  " + Mathf.FloorToInt(clockSecs / 60f) + ":" + Mathf.FloorToInt(clockSecs % 60f).ToString("00");
+            GUI.Label(new Rect(0, 0, Screen.width, scoreH), "CROCS " + _crocScore + "   " + clock + "   " + _rooScore + " ROOS", _scoreStyle);
 
             int panelH = Mathf.RoundToInt(Screen.height * 0.14f);
             int y = Mathf.RoundToInt(Screen.height * 0.08f) + scoreH;
