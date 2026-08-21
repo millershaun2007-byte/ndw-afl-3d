@@ -108,6 +108,25 @@ namespace AFL.Day1
         float _resolvedAt;
         string _message = "Centre bounce...";
         GUIStyle _style;
+        GUIStyle _scoreStyle;
+
+        // 2026-08-21, Shaun: "we could probably hook up a scoreboard now" —
+        // real running match score, not just narrated text. Both current
+        // scoring events (a goal in TakeShotAtGoal, a rushed behind in the
+        // spoil branch above) already exist as messages but never actually
+        // tallied anything. AddScore takes the SAME crocsInPossession/
+        // humanControlled value already threaded through every contest
+        // (they're the same boolean by identity throughout this file) —
+        // whichever team was attacking in that specific contest is who a
+        // goal or rushed behind is credited to, same as real AFL scoring
+        // (a rushed behind scores for the attacking team even though the
+        // defender is the one who touched it through).
+        int _crocScore;
+        int _rooScore;
+        void AddScore(bool crocsInPossession, int points)
+        {
+            if (crocsInPossession) _crocScore += points; else _rooScore += points;
+        }
         // Real fix (2026-08-12) — found via a live Playwright check, not
         // guessed: the mark's 1s ball-hold loop and the round-reset timer
         // (1.2s after the full sequence) land almost exactly coincident,
@@ -927,6 +946,7 @@ namespace AFL.Day1
                 // can knock it straight through the defender's own behind
                 // posts for a rushed point, rather than a clean clearance.
                 _message = "Rushed behind — one point!";
+                AddScore(humanControlled, 1);
                 // 2026-08-21, Shaun (live playtest): "the ball randomly
                 // goes to the top of the goal posts" — the REAL root
                 // cause, found by tracing actual numbers, not the camera
@@ -1471,6 +1491,7 @@ namespace AFL.Day1
 
             bool isGoal = tapped && tapValue >= shotPowerGreenMin && tapValue <= shotPowerGreenMax;
             _message = isGoal ? "GOAL!" : "Off target!";
+            if (isGoal) AddScore(humanControlled, 6);
 
             Vector3 kickStart = ball.position;
             Vector3 goalCentre = new Vector3(0, kickStart.y, zDir * goalZ);
@@ -2058,8 +2079,27 @@ namespace AFL.Day1
                     normal = { textColor = Color.white }
                 };
             }
+            if (_scoreStyle == null)
+            {
+                _scoreStyle = new GUIStyle(GUI.skin.label)
+                {
+                    fontSize = Mathf.RoundToInt(Screen.height * 0.045f),
+                    fontStyle = FontStyle.Bold,
+                    alignment = TextAnchor.MiddleCenter,
+                    normal = { textColor = Color.white }
+                };
+            }
+            // Persistent scoreboard, always visible — separate strip above
+            // the transient message bar below so a score change doesn't
+            // fight for the same space as "GOAL!"/"Centre bounce..." etc.
+            int scoreH = Mathf.RoundToInt(Screen.height * 0.065f);
+            GUI.color = new Color(0f, 0f, 0f, 0.65f);
+            GUI.DrawTexture(new Rect(0, 0, Screen.width, scoreH), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+            GUI.Label(new Rect(0, 0, Screen.width, scoreH), "CROCS " + _crocScore + "  —  " + _rooScore + " ROOS", _scoreStyle);
+
             int panelH = Mathf.RoundToInt(Screen.height * 0.14f);
-            int y = Mathf.RoundToInt(Screen.height * 0.08f);
+            int y = Mathf.RoundToInt(Screen.height * 0.08f) + scoreH;
             GUI.color = new Color(0f, 0f, 0f, 0.65f);
             GUI.DrawTexture(new Rect(0, y, Screen.width, panelH), Texture2D.whiteTexture);
             GUI.color = Color.white;
