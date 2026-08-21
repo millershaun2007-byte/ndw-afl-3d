@@ -852,6 +852,24 @@ namespace AFL.Day1
             yield return MarkCatchRoutine(forward, markedResult);
             if (markedResult)
             {
+                // 2026-08-21, Shaun: "move back to just when the mark is
+                // taken after the kick in, we literally need to take one
+                // step at a time." Scoping this chained contest (the
+                // kick-out's own second contest, chainDepth > 0) back to
+                // stopping right at a confirmed mark — not yet chaining
+                // into a shot at goal or a further contest for THIS
+                // beat, so the mark itself (positioning, camera) can be
+                // verified on its own before building what comes after
+                // it. The original centre-bounce contest (chainDepth==0)
+                // is untouched — its own mark-then-shot flow is
+                // pre-existing, already-signed-off behaviour.
+                if (chainDepth > 0)
+                {
+                    _message = "Mark taken — play stops here for now!";
+                    yield return new WaitForSeconds(catchPause);
+                    CutCameraToDefault();
+                    yield break;
+                }
                 // 2026-08-21, Shaun: "if they take the mark same thing as
                 // the start they kick the ball towards the forward" — a
                 // mark taken mid-ground shouldn't jump straight to a set
