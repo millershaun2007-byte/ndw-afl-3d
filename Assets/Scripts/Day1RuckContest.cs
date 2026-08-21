@@ -578,6 +578,18 @@ namespace AFL.Day1
         // place if the balance needs adjusting after playtesting.
         public float defenderSpoilWindow = 0.20f;
         public float defenderSpoilJitter = 0.55f;
+        // 2026-08-21, Shaun: "after some spoils another character gets
+        // the ball goes for a run and kicks the ball into the forward
+        // line exactly the same as what would happen in the centre" —
+        // and "if they take the mark same thing as the start they kick
+        // the ball towards the forward." Both outcomes (mark out of
+        // range, and a spoil after the first kick-out) now chain into
+        // another TapBallAway instead of ending the round — real
+        // football, but contest->spoil->clearer->contest has no natural
+        // terminus, so it's capped. 3 is a starting guess (per the brief
+        // this came from), not a measured value — the real constraint is
+        // how long a child will actually sit through one round.
+        public int maxChainDepth = 3;
 
         // Drop the ball to the foot, brief beat, then kick it away in an
         // arc continuing the same direction as the run. Now interleaved
@@ -777,18 +789,51 @@ namespace AFL.Day1
             // of the position-writing level.
             bool markedResult = markPressed && markResolved && !defenderSpoiled;
             yield return MarkCatchRoutine(forward, markedResult);
-            if (markedResult) yield return TakeShotAtGoal(forward, zDir, humanControlled);
+            if (markedResult)
+            {
+                // 2026-08-21, Shaun: "if they take the mark same thing as
+                // the start they kick the ball towards the forward" — a
+                // mark taken mid-ground shouldn't jump straight to a set
+                // shot from 60 metres out, only one taken within real
+                // shooting range does. shotRangeZ is DERIVED from
+                // kickDistance (how far a kick actually travels) rather
+                // than picked by eye — if kick power is ever re-tuned,
+                // this follows automatically instead of silently drifting
+                // out of sync with it (the exact trap CLAUDE.md warns
+                // about at its own top).
+                float shotRangeZ = goalZ - kickDistance;
+                if (Mathf.Abs(ball.position.z) >= shotRangeZ)
+                {
+                    yield return TakeShotAtGoal(forward, zDir, humanControlled);
+                }
+                else
+                {
+                    // Out of range — the marker plays on, same team,
+                    // same direction (no reverse), continuing toward
+                    // their own forward line via the same TapBallAway
+                    // chain as everything else.
+                    yield return ContinueChainOrEnd(humanControlled, forward, chainDepth);
+                }
+            }
             else if (defenderSpoiled)
             {
+                // 2026-08-21, Shaun (correcting SECOND-CONTEST-BRIEF.md,
+                // via CLEARANCE-CHAIN-BRIEF.md): a rushed behind + literal
+                // kick-out only makes real football sense at the very
+                // first contest — the only one that happens right at a
+                // goal line, where a spoil can actually produce a score.
+                // Every later spoil (chainDepth > 0) happens mid-ground,
+                // same as any other loose ball — it gets the same simple
+                // clearance handoff as an uncontested drop, not another
+                // goal-line sequence.
+                if (chainDepth == 0)
+                {
                 // 2026-08-19, Shaun: "the defender spoiled the ball
                 // through the points, no second play, just a straight
                 // spoil through the points if they spoil it." A real,
                 // authentic AFL moment — spoiling it hard under pressure
                 // can knock it straight through the defender's own behind
                 // posts for a rushed point, rather than a clean clearance.
-                // Deliberately minimal: one direct kick-arc through the
-                // outer posts, then the round resets — no clearance chain
-                // layered on top of this yet.
                 _message = "Rushed behind — one point!";
                 // 2026-08-21, Shaun (live playtest): "the ball randomly
                 // goes to the top of the goal posts" — the REAL root
@@ -949,39 +994,42 @@ namespace AFL.Day1
                 ball.position = kickOutTarget;
 
                 // 2026-08-21 — second contest chain (see
-                // SECOND-CONTEST-BRIEF.md). TapBallAway was already
-                // re-entrant (the clearance path below already reuses
-                // it) — chain into it here, anchored on the kick-out's
-                // own landing spot. Recursion guard: only chainDepth==0
-                // (the original centre-bounce contest) is allowed to
-                // chain — a spoil on THIS second contest ends the round
-                // honestly instead of chaining a third kick-out, per
-                // CLAUDE.md's placeholder-ending rule.
-                if (chainDepth == 0)
-                {
-                    // Reposition defender (the kick-out kicker, now
-                    // acting as this new contest's "rover") onto the
-                    // ball's actual landing spot — TapBallAway's own
-                    // peakZ and camera pivot both derive from
-                    // rover.position.z, so this is what anchors the
-                    // whole chained contest on where the ball really is
-                    // instead of where the kicker used to stand
-                    // (SECOND-CONTEST-BRIEF.md point 1).
-                    defender.position = kickOutTarget;
-                    // crocWins flips — the team that just kicked out now
-                    // has the ball/momentum for this contest, the
-                    // opponent's original crocWins negated.
-                    // reverseDirection keeps the ball moving further
-                    // away from the kicking team's own goal, continuing
-                    // the same direction the kick-out itself traveled.
-                    yield return TapBallAway(crocWins: !humanControlled, kickerOverride: defender, reverseDirection: true, chainDepth: chainDepth + 1);
+                // SECOND-CONTEST-BRIEF.md, and note this whole block only
+                // runs at chainDepth==0 per the outer check above, so the
+                // chain is always allowed here — the earlier depth guard
+                // that lived on this specific call was removed, the real
+                // bound now lives in ContinueChainOrEnd/maxChainDepth for
+                // every OTHER spoil in the chain). Reposition defender
+                // (the kick-out kicker, now acting as this new contest's
+                // "rover") onto the ball's actual landing spot —
+                // TapBallAway's own peakZ and camera pivot both derive
+                // from rover.position.z, so this is what anchors the
+                // whole chained contest on where the ball really is
+                // instead of where the kicker used to stand
+                // (SECOND-CONTEST-BRIEF.md point 1).
+                defender.position = kickOutTarget;
+                // crocWins flips — the team that just kicked out now has
+                // the ball/momentum for this contest, the opponent's
+                // original crocWins negated. reverseDirection keeps the
+                // ball moving further away from the kicking team's own
+                // goal, continuing the same direction the kick-out itself
+                // traveled.
+                yield return TapBallAway(crocWins: !humanControlled, kickerOverride: defender, reverseDirection: true, chainDepth: chainDepth + 1);
                 }
                 else
                 {
-                    // Depth >= 1 — end honestly here (CLAUDE.md's
-                    // placeholder-ending rule) rather than chain a third
-                    // kick-out that was never built.
-                    _message = "Rushed out of bounds — play stops!";
+                    // 2026-08-21 — a spoil past the first contest is just
+                    // a mid-ground loose ball, same treatment as an
+                    // uncontested drop below (no goal-line/behind
+                    // mechanic — that only makes sense right at a goal).
+                    _message = "Spoiled — cleared away!";
+                    Transform spoilClearer = humanControlled ? rooClearer : crocClearer;
+                    spoilClearer.position = new Vector3(spoilClearer.position.x, spoilClearer.position.y, ball.position.z);
+                    yield return RunToZ(spoilClearer, ball.position.z, 0.4f);
+                    if (_roundId != roundAtStart) yield break;
+                    yield return MarkCatchRoutine(spoilClearer, true);
+                    if (_roundId != roundAtStart) yield break;
+                    yield return ContinueChainOrEnd(!humanControlled, spoilClearer, chainDepth);
                 }
             }
             else
@@ -998,8 +1046,35 @@ namespace AFL.Day1
                 yield return RunToZ(clearer, forward.position.z, 0.6f);
                 if (_roundId != roundAtStart) yield break;
                 yield return MarkCatchRoutine(clearer, true);
+                if (_roundId != roundAtStart) yield break;
+                // 2026-08-21, Shaun: "after some spoils another character
+                // gets the ball goes for a run and kicks the ball into
+                // the forward line exactly the same as what would happen
+                // in the centre" — the clearer doesn't just receive it
+                // and stop, they continue the chain the same way
+                // everything else in this game does.
+                yield return ContinueChainOrEnd(!humanControlled, clearer, chainDepth);
             }
             CutCameraToDefault();
+        }
+
+        // 2026-08-21 — shared by "Cleared away!" (an uncontested drop)
+        // and a spoil on any contest past the first (see below — only
+        // the very first, goal-line contest gets the rushed-behind/
+        // kick-out treatment; every later spoil is just a clearance,
+        // same as this). Continues via the same TapBallAway everything
+        // else in this game reuses, bounded by maxChainDepth so
+        // contest->spoil->clearer->contest can't recurse forever. At the
+        // cap, end honestly (CLAUDE.md's placeholder-ending rule)
+        // instead of stalling into not-yet-built work.
+        System.Collections.IEnumerator ContinueChainOrEnd(bool newCrocWins, Transform newRover, int chainDepth)
+        {
+            if (chainDepth >= maxChainDepth)
+            {
+                _message = "Time's up — turnover!";
+                yield break;
+            }
+            yield return TapBallAway(crocWins: newCrocWins, kickerOverride: newRover, reverseDirection: false, chainDepth: chainDepth + 1);
         }
 
         // 2026-08-21 — contestZ lets a chained contest (e.g. the second
