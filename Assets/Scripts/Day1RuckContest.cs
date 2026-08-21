@@ -811,13 +811,28 @@ namespace AFL.Day1
                 CutCameraToMarkCloseup(defender);
                 yield return new WaitForSeconds(kickOutPause);
                 if (_roundId != roundAtStart) yield break;
-                CutCameraForKick(-zDir);
-                // 2026-08-21, Shaun: "even when zoomed in pause again if
-                // necessary" — the wide kick-arc camera needs its own
-                // beat to settle before the ball actually launches, not
-                // an instant cut-then-move straight out of the close-up.
-                yield return new WaitForSeconds(catchPause);
+                // 2026-08-21, Shaun: "you need to zoom right in make sure
+                // you have the camera on the player then make sure you
+                // see them kick the ball out." Stay on the zoomed-in
+                // close-up through the WHOLE kick motion (yielded, not
+                // fired-and-forgotten) — the wide kick-arc camera only
+                // cuts in once the leg has actually snapped forward, so
+                // the kick itself is genuinely visible before the ball
+                // starts flying, not hidden behind a camera cut.
+                yield return KickMotion(defender, kickMotionDuration);
                 if (_roundId != roundAtStart) yield break;
+                // 2026-08-21, Shaun (live playtest): "camera nowhere near
+                // the person" — real bug found by tracing the actual
+                // math. CutCameraForKick's pivotZ = direction *
+                // (goalZ - 5), meant to sit near where the ball's flight
+                // actually happens. Passing -zDir here put the pivot at
+                // the OPPOSITE end of the ground (~z=-15) from where the
+                // kick-out actually travels (z=0..+goalZ, the same end
+                // the mark/spoil just happened at) — a ~35-unit
+                // mismatch. Plain zDir (not negated) is the goal-square's
+                // own sign (see goalSquare above), matching where this
+                // kick genuinely starts.
+                CutCameraForKick(zDir);
 
                 Vector3 kickOutStart = ball.position;
                 Vector3 kickOutTarget = new Vector3(0f, kickOutStart.y, 0f);
@@ -1269,6 +1284,10 @@ namespace AFL.Day1
         // (not touching catchPause's other, faster uses elsewhere in
         // this file) so the kick-out reads as a real, deliberate moment.
         public float kickOutPause = 1.6f;
+        // How long the zoomed-in kick motion itself takes (backswing +
+        // forward snap) before the camera cuts wide and the ball starts
+        // flying — see KickMotion below and its call site.
+        public float kickMotionDuration = 0.6f;
         // Real fix (2026-08-12, Shaun: "run of a bit far", then "can be a
         // slower like 4 step run"). 14 units / 1.8s was a full sprint pace
         // with no acceleration — cut down to a short, deliberate few-step
@@ -1500,6 +1519,57 @@ namespace AFL.Day1
             t.localPosition = start;
             if (leftArm) leftArm.localRotation = leftStart;
             if (rightArm) rightArm.localRotation = rightStart;
+            if (animator) animator.enabled = true;
+        }
+
+        // 2026-08-21, Shaun (live playtest): "the ball randomly goes to
+        // the top of the goal posts and then goes to middle... make sure
+        // you see them kick the ball out." Real root cause — there was
+        // never any kicking MOTION anywhere in this file, only jump/hop
+        // animations (HopRoutine, NormalMarkHop, SpeccyLeap). The ball
+        // just moved on its own while the character stood static, which
+        // is exactly why a kick read as "random" rather than caused by
+        // the player. Same technique as HopRoutine (direct bone
+        // rotation, Animator disabled for the duration, no clip needed)
+        // but driving RightUpLeg instead of the arms — a real backswing
+        // then forward snap, timed so the foot is at full forward
+        // extension right when the ball actually starts moving (see the
+        // call site — this is started slightly before the ball's own
+        // kickOutEl loop, not at the same instant).
+        public float kickMotionBackswingFrac = 0.35f;
+        public float kickMotionLegAngle = 65f;
+        System.Collections.IEnumerator KickMotion(Transform t, float duration)
+        {
+            if (!t) yield break;
+            var upLeg = FindDeepChild(t, "RightUpLeg");
+            if (!upLeg) yield break;
+            Quaternion legStart = upLeg.localRotation;
+            var animator = t.GetComponentInChildren<Animator>();
+            if (animator) animator.enabled = false;
+
+            float el = 0f;
+            while (el < duration)
+            {
+                el += Time.deltaTime;
+                float f = Mathf.Clamp01(el / duration);
+                // Backswing (leg draws back) for the first fraction, then
+                // a fast forward snap through the rest — a real kick
+                // isn't a symmetric wave like the hop's reach gesture,
+                // the forward snap is the sharp, fast part.
+                float angle;
+                if (f < kickMotionBackswingFrac)
+                {
+                    angle = Mathf.Lerp(0f, -25f, f / kickMotionBackswingFrac);
+                }
+                else
+                {
+                    float snapF = (f - kickMotionBackswingFrac) / (1f - kickMotionBackswingFrac);
+                    angle = Mathf.Lerp(-25f, kickMotionLegAngle, Mathf.Sin(snapF * Mathf.PI * 0.5f));
+                }
+                upLeg.localRotation = legStart * Quaternion.Euler(angle, 0, 0);
+                yield return null;
+            }
+            upLeg.localRotation = legStart;
             if (animator) animator.enabled = true;
         }
 
