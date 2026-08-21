@@ -812,6 +812,18 @@ namespace AFL.Day1
                     // same direction (no reverse), continuing toward
                     // their own forward line via the same TapBallAway
                     // chain as everything else.
+                    //
+                    // 2026-08-21, Shaun: "the ball going in the air until
+                    // ground level like the kickout just pause then bring
+                    // it down" — same class of bug as the spoil branch
+                    // below and the kick-out's own original defect: the
+                    // ball is still wherever MarkCatchRoutine left it
+                    // (elevated, mid-catch height), and nothing resets
+                    // the camera before chaining into the next contest.
+                    ball.position = new Vector3(ball.position.x, groundY, ball.position.z);
+                    CutCameraToDefault();
+                    yield return new WaitForSeconds(catchPause);
+                    if (_roundId != roundAtStart) yield break;
                     yield return ContinueChainOrEnd(humanControlled, forward, chainDepth);
                 }
             }
@@ -1023,6 +1035,22 @@ namespace AFL.Day1
                     // uncontested drop below (no goal-line/behind
                     // mechanic — that only makes sense right at a goal).
                     _message = "Spoiled — cleared away!";
+                    // 2026-08-21, Shaun: "the ball going in the air until
+                    // ground level like the kickout just pause then bring
+                    // it down" — same real bug as the kick-out's original
+                    // "floats near the goal post" defect: the ball is
+                    // still frozen at this contest's own peak jump height
+                    // from before the spoil, never reset to a sensible
+                    // resting height. Also reset the camera to the known-
+                    // safe default here — this branch didn't cut to
+                    // anything of its own, so it was inheriting whatever
+                    // pivot the PREVIOUS chain hop's wide kick-shot left
+                    // behind, which is exactly the kind of drift that
+                    // produced a camera pointed at the sky in testing.
+                    ball.position = new Vector3(ball.position.x, groundY, ball.position.z);
+                    CutCameraToDefault();
+                    yield return new WaitForSeconds(catchPause);
+                    if (_roundId != roundAtStart) yield break;
                     Transform spoilClearer = humanControlled ? rooClearer : crocClearer;
                     spoilClearer.position = new Vector3(spoilClearer.position.x, spoilClearer.position.y, ball.position.z);
                     yield return RunToZ(spoilClearer, ball.position.z, 0.4f);
@@ -1046,6 +1074,17 @@ namespace AFL.Day1
                 yield return RunToZ(clearer, forward.position.z, 0.6f);
                 if (_roundId != roundAtStart) yield break;
                 yield return MarkCatchRoutine(clearer, true);
+                if (_roundId != roundAtStart) yield break;
+                // 2026-08-21, Shaun: "the ball going in the air until
+                // ground level like the kickout just pause then bring it
+                // down" — same class of bug as the other two chain
+                // continuations: MarkCatchRoutine leaves the ball at the
+                // clearer's hand (elevated), and nothing resets the
+                // camera before the next contest. Ground it and cut to
+                // the known-safe default before chaining on.
+                ball.position = new Vector3(ball.position.x, groundY, ball.position.z);
+                CutCameraToDefault();
+                yield return new WaitForSeconds(catchPause);
                 if (_roundId != roundAtStart) yield break;
                 // 2026-08-21, Shaun: "after some spoils another character
                 // gets the ball goes for a run and kicks the ball into
