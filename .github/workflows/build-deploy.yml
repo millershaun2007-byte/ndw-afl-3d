@@ -58,6 +58,14 @@ jobs:
       # (unity-version: None skips downloading a full Editor, since
       # game-ci/unity-builder below handles the actual build via its
       # own Docker image separately).
+      # unity-setup@v2 hard-codes /opt/unityhub/unityhub but the unityhub
+      # Debian package now installs the binary at /usr/bin/unityhub.
+      # Create the symlink so the action finds it at the expected path.
+      - name: Symlink Unity Hub to expected path
+        run: |
+          sudo mkdir -p /opt/unityhub
+          sudo ln -sf /usr/bin/unityhub /opt/unityhub/unityhub
+
       - name: Install Unity Hub
         uses: RageAgainstThePixel/unity-setup@v2
         with:
