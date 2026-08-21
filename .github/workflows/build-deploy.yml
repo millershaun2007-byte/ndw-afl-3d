@@ -54,17 +54,18 @@ jobs:
       # First real run failed before ever testing the credentials:
       # "Unity Hub is not installed or not accessible" — this action
       # drives licensing through Hub's own CLI, which the runner never
-      # had installed. unity-setup (same author) installs Hub only
-      # (unity-version: None skips downloading a full Editor, since
-      # game-ci/unity-builder below handles the actual build via its
-      # own Docker image separately).
+      # had installed. unity-setup (same author) installs Hub.
       #
-      # 2026-08-21 — unity-setup@v2 uses apt to install Unity Hub (which
-      # the modern Debian package places at /usr/bin/unityhub and
-      # /usr/lib/unityhub/), but after installing it looks for the binary
-      # at /opt/unityhub/unityhub and fails. The apt install itself
+      # unity-setup@v2 uses apt to install Unity Hub (which the modern
+      # Debian package places at /usr/bin/unityhub and /usr/lib/unityhub/),
+      # but after installing it looks for the binary at
+      # /opt/unityhub/unityhub and fails. The apt install itself
       # succeeds, so continue-on-error lets us capture the installed files
-      # and create the expected /opt/unityhub/ layout in the next step.
+      # and create the expected /opt/unityhub/ layout in the next step —
+      # kept as Hub-only (unity-version: None) here specifically so this
+      # first call fails fast at the same known point rather than also
+      # attempting (and failing) an Editor download before the path fix
+      # below has even run.
       - name: Install Unity Hub
         uses: RageAgainstThePixel/unity-setup@v2
         continue-on-error: true
@@ -88,6 +89,32 @@ jobs:
           sudo rm -rf /opt/unityhub
           sudo ln -sfn /usr/lib/unityhub /opt/unityhub
 
+      # 2026-08-21 — real Editor install, not Hub-only. Previously skipped
+      # (the step above's unity-version: None) because game-ci/unity-builder
+      # below built via its own separate Docker container. Removed that:
+      # its Docker container never saw the license activated on the bare
+      # runner below, since they're two different environments — confirmed
+      # by a real run reaching "Build WebGL" with a working Hub+license and
+      # still failing with "Missing Unity License File and no Serial was
+      # found" (unity-builder's own activation script only supports a
+      # classic UNITY_SERIAL or a floating UNITY_LICENSING_SERVER, neither
+      # of which apply to a Personal-tier credential-only account — see
+      # the 2026-08-19 comment above on why the manual .ulf/UNITY_LICENSE
+      # route is dead for Personal tier too). Building directly on this
+      # runner, in the same place the license activates, is the only path
+      # that actually has a working license where the build runs. Now that
+      # Hub's own path is fixed (previous step), this second unity-setup
+      # call can get all the way through to a real Editor+module install
+      # instead of failing at the same early Hub self-check as the first
+      # call. cache-installation speeds up subsequent runs — this is a
+      # multi-GB download otherwise, on every single push.
+      - name: Install Unity Editor + WebGL module
+        id: unity
+        uses: RageAgainstThePixel/unity-setup@v2
+        with:
+          build-targets: WebGL
+          cache-installation: true
+
       - name: Activate Unity Personal license
         uses: RageAgainstThePixel/activate-unity-license@v2
         with:
@@ -96,12 +123,21 @@ jobs:
           password: ${{ secrets.UNITY_PASSWORD }}
           license-version: '6.x'
 
+      # Direct Editor invocation on this same runner (see the "Install
+      # Unity Editor" step's comment for why, replacing game-ci/unity-
+      # builder's Docker-based build). Same command/method as the
+      # confirmed-working local build (2026-08-21, ~/Projects/ndw-afl-3d,
+      # NDW_BUILD_RESULT=Succeeded, 0 errors/warnings, 43s) — MainBuildScript
+      # itself reads NDW_BUILD_OUTPUT for where to write the build.
       - name: Build WebGL (MainBuildScript.PerformWebGLBuild)
-        uses: game-ci/unity-builder@v4
-        with:
-          targetPlatform: WebGL
-          buildMethod: MainBuildScript.PerformWebGLBuild
-          buildsPath: build
+        env:
+          NDW_BUILD_OUTPUT: build/WebGL
+        run: |
+          "${{ steps.unity.outputs.unity-editor-path }}" \
+            -batchmode -quit -nographics \
+            -projectPath "$(pwd)" \
+            -executeMethod MainBuildScript.PerformWebGLBuild \
+            -logFile /dev/stdout
 
       - name: Authenticate to Google Cloud (keyless, Workload Identity Federation)
         uses: google-github-actions/auth@v2
