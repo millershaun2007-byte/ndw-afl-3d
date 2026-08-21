@@ -71,17 +71,22 @@ jobs:
         with:
           unity-version: None
 
-      # The Debian unityhub package installs the binary to /usr/bin/unityhub
-      # and the Electron app tree (including resources/app.asar) to
-      # /usr/lib/unityhub/. unity-setup@v2 and activate-unity-license@v2
-      # both call getInstalledHubVersion(), which resolves the executable
-      # then looks for a sibling resources/app.asar. Recreate the expected
-      # /opt/unityhub/ layout as symlinks into the real install location.
+      # The Debian unityhub package installs its whole app tree — the
+      # binary, resources/app.asar, AND the separate UnityLicensingClient_V1
+      # directory activate-unity-license@v2 needs — under /usr/lib/unityhub/,
+      # with /usr/bin/unityhub just a symlink to the binary inside it.
+      # unity-setup@v2 and activate-unity-license@v2 both hard-code
+      # /opt/unityhub/ and each turned out to need a DIFFERENT file from
+      # that real tree (binary, then resources/app.asar, then
+      # UnityLicensingClient_V1/Unity.Licensing.Client) — symlinking them
+      # in one at a time was chasing the same fact in two places (see this
+      # repo's own CLAUDE.md on that recurring bug class). One directory
+      # symlink covers the whole tree instead, so nothing else under it
+      # can be missing next time a different step needs a different file.
       - name: Fix Unity Hub path layout for unity-setup@v2
         run: |
-          sudo mkdir -p /opt/unityhub/resources
-          sudo ln -sf /usr/bin/unityhub /opt/unityhub/unityhub
-          sudo ln -sf /usr/lib/unityhub/resources/app.asar /opt/unityhub/resources/app.asar
+          sudo rm -rf /opt/unityhub
+          sudo ln -sfn /usr/lib/unityhub /opt/unityhub
 
       - name: Activate Unity Personal license
         uses: RageAgainstThePixel/activate-unity-license@v2
