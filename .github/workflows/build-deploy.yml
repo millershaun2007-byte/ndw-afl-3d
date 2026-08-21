@@ -66,6 +66,23 @@ jobs:
           sudo mkdir -p /opt/unityhub
           sudo ln -sf /usr/bin/unityhub /opt/unityhub/unityhub
 
+      # TEMPORARY — figure out where the unityhub apt package (3.21.0)
+      # actually puts its resources/app.asar, since unity-setup@v2's
+      # getInstalledHubVersion() needs THAT to sit next to whatever
+      # executable it resolves (not just the binary itself, which is all
+      # the symlink above covers). Remove once the real fix lands.
+      - name: DEBUG - locate real unityhub install layout
+        run: |
+          sudo apt-get install -y --no-install-recommends unityhub xvfb ffmpeg libgtk2.0-0 libglu1-mesa libgconf-2-4 libncurses5 pulseaudio || true
+          echo "--- dpkg -L unityhub ---"
+          dpkg -L unityhub || true
+          echo "--- readlink /usr/bin/unityhub ---"
+          readlink -f /usr/bin/unityhub || true
+          echo "--- find for app.asar ---"
+          sudo find / -xdev -iname 'app.asar' 2>/dev/null || true
+          echo "--- find for unityhub dirs ---"
+          sudo find /usr /opt -maxdepth 3 -iname '*unityhub*' 2>/dev/null || true
+
       - name: Install Unity Hub
         uses: RageAgainstThePixel/unity-setup@v2
         with:
