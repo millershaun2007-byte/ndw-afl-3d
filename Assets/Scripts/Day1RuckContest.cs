@@ -809,9 +809,15 @@ namespace AFL.Day1
                 // RunToZ's rotation for what's practically a non-move.
                 defender.rotation = Quaternion.Euler(0, zDir > 0 ? 180 : 0, 0);
                 CutCameraToMarkCloseup(defender);
-                yield return new WaitForSeconds(catchPause);
+                yield return new WaitForSeconds(kickOutPause);
                 if (_roundId != roundAtStart) yield break;
                 CutCameraForKick(-zDir);
+                // 2026-08-21, Shaun: "even when zoomed in pause again if
+                // necessary" — the wide kick-arc camera needs its own
+                // beat to settle before the ball actually launches, not
+                // an instant cut-then-move straight out of the close-up.
+                yield return new WaitForSeconds(catchPause);
+                if (_roundId != roundAtStart) yield break;
 
                 Vector3 kickOutStart = ball.position;
                 Vector3 kickOutTarget = new Vector3(0f, kickOutStart.y, 0f);
@@ -1251,6 +1257,18 @@ namespace AFL.Day1
         }
 
         public float catchPause = 0.5f;
+        // 2026-08-21, Shaun: kick-out from fullback felt broken — "the
+        // ball randomly goes to the top of the goal posts and then goes
+        // to middle... we need to pause at the player kicking in, can
+        // really have a decent pause to get it right." The camera was
+        // already zooming to the kicker (CutCameraToMarkCloseup) before
+        // this beat, but only held for the shared catchPause (0.5s) —
+        // nowhere near long enough to actually read a static close-up
+        // before the wide kick-arc camera cuts in and the ball moves. A
+        // dedicated, much longer pause for this one beat specifically
+        // (not touching catchPause's other, faster uses elsewhere in
+        // this file) so the kick-out reads as a real, deliberate moment.
+        public float kickOutPause = 1.6f;
         // Real fix (2026-08-12, Shaun: "run of a bit far", then "can be a
         // slower like 4 step run"). 14 units / 1.8s was a full sprint pace
         // with no acceleration — cut down to a short, deliberate few-step
