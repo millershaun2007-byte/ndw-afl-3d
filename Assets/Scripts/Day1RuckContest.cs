@@ -856,24 +856,21 @@ namespace AFL.Day1
             yield return MarkCatchRoutine(forward, markedResult);
             if (markedResult)
             {
-                // 2026-08-21, Shaun: "move back to just when the mark is
-                // taken after the kick in, we literally need to take one
-                // step at a time." Scoping this chained contest (the
-                // kick-out's own second contest, chainDepth > 0) back to
-                // stopping right at a confirmed mark — not yet chaining
-                // into a shot at goal or a further contest for THIS
-                // beat, so the mark itself (positioning, camera) can be
-                // verified on its own before building what comes after
-                // it. The original centre-bounce contest (chainDepth==0)
-                // is untouched — its own mark-then-shot flow is
-                // pre-existing, already-signed-off behaviour.
-                if (chainDepth > 0)
-                {
-                    _message = "Mark taken — play stops here for now!";
-                    yield return new WaitForSeconds(catchPause);
-                    CutCameraToDefault();
-                    yield break;
-                }
+                // 2026-08-21, Shaun: previously scoped the chained contest
+                // (chainDepth > 0, after a kick-out) to stop dead right at
+                // a confirmed mark — deliberate, so the mark itself
+                // (positioning, camera) could be verified in isolation
+                // first (see git history for that intermediate state).
+                // Confirmed working; Shaun then asked for the natural next
+                // step: "getting up to the forward down the other end
+                // they just need to go back and kick the goal down the
+                // other end" — a mark at chainDepth > 0 now uses the exact
+                // same shot-at-goal / continue-chain logic as the original
+                // centre-bounce contest (chainDepth == 0), below. No
+                // special-casing needed — TakeShotAtGoal and
+                // ContinueChainOrEnd already take kicker/zDir/chainDepth
+                // as arguments, not an assumption about which contest this
+                // is.
                 // 2026-08-21, Shaun: "if they take the mark same thing as
                 // the start they kick the ball towards the forward" — a
                 // mark taken mid-ground shouldn't jump straight to a set
