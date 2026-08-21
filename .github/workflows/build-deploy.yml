@@ -58,34 +58,30 @@ jobs:
       # (unity-version: None skips downloading a full Editor, since
       # game-ci/unity-builder below handles the actual build via its
       # own Docker image separately).
-      # 2026-08-21 — the binary-only symlink attempted here previously
-      # (/opt/unityhub/unityhub -> /usr/bin/unityhub) didn't actually fix
-      # anything: it ran before unity-setup@v2 even adds Unity's own apt
-      # repo, so it started as a dangling symlink, AND even once real,
-      # getInstalledHubVersion() needs a sibling resources/app.asar next
-      # to whatever executable resolves — a lone binary symlink doesn't
-      # carry that along. Removed; real fix pending the diagnostic below.
+      #
+      # 2026-08-21 — unity-setup@v2 uses apt to install Unity Hub (which
+      # the modern Debian package places at /usr/bin/unityhub and
+      # /usr/lib/unityhub/), but after installing it looks for the binary
+      # at /opt/unityhub/unityhub and fails. The apt install itself
+      # succeeds, so continue-on-error lets us capture the installed files
+      # and create the expected /opt/unityhub/ layout in the next step.
       - name: Install Unity Hub
         uses: RageAgainstThePixel/unity-setup@v2
+        continue-on-error: true
         with:
           unity-version: None
 
-      # TEMPORARY — this step above is expected to still fail right now.
-      # Need the REAL post-install file layout (after unity-setup@v2's
-      # own apt-get install actually runs) to know where the real
-      # resources/app.asar lives, so the eventual fix targets the right
-      # path instead of guessing again. Remove once the real fix lands.
-      - name: DEBUG - locate real unityhub install layout
-        if: always()
+      # The Debian unityhub package installs the binary to /usr/bin/unityhub
+      # and the Electron app tree (including resources/app.asar) to
+      # /usr/lib/unityhub/. unity-setup@v2 and activate-unity-license@v2
+      # both call getInstalledHubVersion(), which resolves the executable
+      # then looks for a sibling resources/app.asar. Recreate the expected
+      # /opt/unityhub/ layout as symlinks into the real install location.
+      - name: Fix Unity Hub path layout for unity-setup@v2
         run: |
-          echo "--- dpkg -L unityhub ---"
-          dpkg -L unityhub || true
-          echo "--- readlink /usr/bin/unityhub ---"
-          readlink -f /usr/bin/unityhub || true
-          echo "--- find for app.asar ---"
-          sudo find / -xdev -iname 'app.asar' 2>/dev/null || true
-          echo "--- find for unityhub-related dirs/files ---"
-          sudo find /usr /opt -iname '*unityhub*' 2>/dev/null || true
+          sudo mkdir -p /opt/unityhub/resources
+          sudo ln -sf /usr/bin/unityhub /opt/unityhub/unityhub
+          sudo ln -sf /usr/lib/unityhub/resources/app.asar /opt/unityhub/resources/app.asar
 
       - name: Activate Unity Personal license
         uses: RageAgainstThePixel/activate-unity-license@v2
