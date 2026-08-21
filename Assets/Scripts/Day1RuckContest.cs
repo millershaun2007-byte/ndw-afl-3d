@@ -109,6 +109,7 @@ namespace AFL.Day1
         string _message = "Centre bounce...";
         GUIStyle _style;
         GUIStyle _scoreStyle;
+        GUIStyle _roundStyle;
 
         // 2026-08-21, Shaun: "we could probably hook up a scoreboard now" —
         // real running match score, not just narrated text. Both current
@@ -141,6 +142,28 @@ namespace AFL.Day1
         float _quarterTimeRemaining;
         bool _matchOver;
         bool _handlingRoundEnd;
+
+        // 2026-08-22, Shaun: "lets have a wildcard round finals and a grand
+        // final just make up teams apart from mount dunned cats and well
+        // add all the players and map more logistics later." Scoped
+        // exactly as asked — made-up OPPONENT NAMES for a 3-round finals
+        // series, nothing else. Real rosters/new character models for
+        // these teams are explicitly deferred, not built here: Croc is
+        // always the home team (Mount Duneed Cats), Roo is always the
+        // away side, same as every contest already in this file — only
+        // the DISPLAY NAME attached to "Roo" changes each round. No new
+        // gameplay, no new characters, just relabeling the existing
+        // Croc-vs-Roo match with finals-series context.
+        const string HomeTeamLong = "Mount Duneed Cats";
+        const string HomeTeamShort = "CATS";
+        struct Fixture { public string round; public string awayLong; public string awayShort; }
+        readonly Fixture[] _fixtures = new Fixture[]
+        {
+            new Fixture { round = "Wildcard Round", awayLong = "Bannockburn Bulldogs", awayShort = "BULLDOGS" },
+            new Fixture { round = "Finals",         awayLong = "Torquay Tigers",       awayShort = "TIGERS"   },
+            new Fixture { round = "Grand Final",    awayLong = "Ocean Grove Sharks",   awayShort = "SHARKS"   },
+        };
+        int _fixtureIndex;
         // Real fix (2026-08-12) — found via a live Playwright check, not
         // guessed: the mark's 1s ball-hold loop and the round-reset timer
         // (1.2s after the full sequence) land almost exactly coincident,
@@ -249,10 +272,42 @@ namespace AFL.Day1
             {
                 if (_quarter >= 4)
                 {
-                    _matchOver = true;
-                    string result = _crocScore > _rooScore ? "CROCS WIN!" : _rooScore > _crocScore ? "ROOS WIN!" : "IT'S A DRAW!";
-                    _message = "FULL TIME! " + result;
+                    Fixture f = _fixtures[_fixtureIndex];
+                    bool draw = _crocScore == _rooScore;
+                    bool homeWon = _crocScore > _rooScore;
+                    bool isGrandFinal = _fixtureIndex >= _fixtures.Length - 1;
+
+                    if (draw)
+                    {
+                        // Logistics deferred per Shaun's own scoping — a
+                        // finals draw would need a real replay/extra-time
+                        // rule to resolve. Not built yet: hold here rather
+                        // than silently picking a fake winner.
+                        _matchOver = true;
+                        _message = "FULL TIME! " + f.round.ToUpper() + " — IT'S A DRAW!";
+                        _handlingRoundEnd = false;
+                        yield break;
+                    }
+
+                    string winnerName = homeWon ? HomeTeamLong : f.awayLong;
+                    if (isGrandFinal)
+                    {
+                        _matchOver = true;
+                        _message = winnerName.ToUpper() + " ARE PREMIERS!";
+                        _handlingRoundEnd = false;
+                        yield break;
+                    }
+
+                    Fixture next = _fixtures[_fixtureIndex + 1];
+                    _message = winnerName + " win the " + f.round + "! Next: " + next.round + " vs " + next.awayLong;
+                    yield return new WaitForSeconds(quarterBreakPause * 2f);
+                    _fixtureIndex++;
+                    _quarter = 1;
+                    _crocScore = 0;
+                    _rooScore = 0;
+                    _quarterTimeRemaining = quarterDuration;
                     _handlingRoundEnd = false;
+                    BeginThrow();
                     yield break;
                 }
                 _message = "End of Quarter " + _quarter + "!";
@@ -2137,19 +2192,38 @@ namespace AFL.Day1
                     normal = { textColor = Color.white }
                 };
             }
+            if (_roundStyle == null)
+            {
+                _roundStyle = new GUIStyle(GUI.skin.label)
+                {
+                    fontSize = Mathf.RoundToInt(Screen.height * 0.028f),
+                    fontStyle = FontStyle.Bold,
+                    alignment = TextAnchor.MiddleCenter,
+                    normal = { textColor = new Color(1f, 0.85f, 0.3f) }
+                };
+            }
+            // Small persistent round-name strip (Wildcard Round / Finals /
+            // Grand Final) above the score itself — the finals series is
+            // otherwise invisible outside the transition messages.
+            int roundH = Mathf.RoundToInt(Screen.height * 0.04f);
+            GUI.color = new Color(0f, 0f, 0f, 0.65f);
+            GUI.DrawTexture(new Rect(0, 0, Screen.width, roundH), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+            GUI.Label(new Rect(0, 0, Screen.width, roundH), _fixtures[_fixtureIndex].round.ToUpper(), _roundStyle);
+
             // Persistent scoreboard, always visible — separate strip above
             // the transient message bar below so a score change doesn't
             // fight for the same space as "GOAL!"/"Centre bounce..." etc.
             int scoreH = Mathf.RoundToInt(Screen.height * 0.065f);
             GUI.color = new Color(0f, 0f, 0f, 0.65f);
-            GUI.DrawTexture(new Rect(0, 0, Screen.width, scoreH), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(0, roundH, Screen.width, scoreH), Texture2D.whiteTexture);
             GUI.color = Color.white;
             float clockSecs = Mathf.Max(0f, _quarterTimeRemaining);
             string clock = _matchOver ? "FULL TIME" : "Q" + _quarter + "  " + Mathf.FloorToInt(clockSecs / 60f) + ":" + Mathf.FloorToInt(clockSecs % 60f).ToString("00");
-            GUI.Label(new Rect(0, 0, Screen.width, scoreH), "CROCS " + _crocScore + "   " + clock + "   " + _rooScore + " ROOS", _scoreStyle);
+            GUI.Label(new Rect(0, roundH, Screen.width, scoreH), HomeTeamShort + " " + _crocScore + "   " + clock + "   " + _rooScore + " " + _fixtures[_fixtureIndex].awayShort, _scoreStyle);
 
             int panelH = Mathf.RoundToInt(Screen.height * 0.14f);
-            int y = Mathf.RoundToInt(Screen.height * 0.08f) + scoreH;
+            int y = Mathf.RoundToInt(Screen.height * 0.08f) + scoreH + roundH;
             GUI.color = new Color(0f, 0f, 0f, 0.65f);
             GUI.DrawTexture(new Rect(0, y, Screen.width, panelH), Texture2D.whiteTexture);
             GUI.color = Color.white;
