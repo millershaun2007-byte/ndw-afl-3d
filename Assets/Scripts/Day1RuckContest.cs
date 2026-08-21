@@ -330,11 +330,29 @@ namespace AFL.Day1
         // rover, instead of the ball going to a third, unrelated
         // character. Null (the centre ruck's own call) keeps the normal
         // rover behaviour exactly as it was.
-        // 2026-08-19, Shaun: "the defender takes the ball and goes back
-        // and kicks at the opposition goal... would need to be opposite."
-        // reverseDirection flips just the kick's runDir without touching
-        // which team/characters are used — the centre ruck's own call
-        // (reverseDirection: false, the default) is completely unaffected.
+        // 2026-08-21 — real bug found by re-deriving the actual numbers,
+        // not guessing at the symptom again ("all over the shop" / "the
+        // defence... works it up towards the other goals"). A team's
+        // attacking direction is fixed for the whole game — Crocs always
+        // +Z, Roos always −Z — it's a property of the TEAM, not of
+        // possession. The old reverseDirection parameter flipped runDir
+        // a SECOND time, independently of the crocWins flip that already
+        // happens when possession changes hands — the kick-out's own
+        // chain call (crocWins: !humanControlled, reverseDirection: true)
+        // had both flips at once, which cancel: possession changes teams
+        // but the direction stays exactly what it was, so the recovering
+        // team ends up running toward the goal they were just defending
+        // instead of their own. Removed entirely — a team's direction
+        // now derives from nothing but which team it is.
+        //
+        // Renamed crocWins -> crocsInPossession in this function
+        // specifically: it stopped meaning "won the tap" the moment this
+        // became re-entrant (called again mid-round with the ball
+        // already loose) — it now means "which team currently has it,"
+        // ongoing state rather than a one-off event. The old name
+        // describing an event, tracking state that changes over a
+        // round, is exactly how the direction bug above went unnoticed.
+        //
         // 2026-08-21 — chainDepth added for the second contest after a
         // kick-out (see SECOND-CONTEST-BRIEF.md). This method was already
         // re-entrant (the clearance path already reused it), so the
@@ -345,11 +363,11 @@ namespace AFL.Day1
         // is allowed to chain into a kick-out's own second contest; any
         // deeper spoil ends the round cleanly instead (see KickAway's
         // defenderSpoiled branch).
-        System.Collections.IEnumerator TapBallAway(bool crocWins, Transform kickerOverride = null, bool reverseDirection = false, int chainDepth = 0)
+        System.Collections.IEnumerator TapBallAway(bool crocsInPossession, Transform kickerOverride = null, int chainDepth = 0)
         {
             yield return new WaitForSeconds(hopDuration / 2f + 0.15f);
             Vector3 start = ball.position;
-            Transform rover = kickerOverride ? kickerOverride : (crocWins ? crocRover : rooRover);
+            Transform rover = kickerOverride ? kickerOverride : (crocsInPossession ? crocRover : rooRover);
             // Real fix (2026-08-12, Shaun: "receiving the ball in the back
             // of the head need to receive ball in chest or hands"). The old
             // point sat dead-centre above the rover's own pivot with no
@@ -392,7 +410,7 @@ namespace AFL.Day1
             // that's explicitly a later day's asset work. A clear message
             // is enough to make the handoff read as one continuous phase
             // rather than the ball just stopping.
-            _message = crocWins ? "Crocs' rover gets it!" : "Roos' rover gets it!";
+            _message = crocsInPossession ? "Crocs' rover gets it!" : "Roos' rover gets it!";
 
             // Day 3, first slice (2026-08-12, Shaun: "after they receive the
             // ball slight pause then they run... just run straight ahead").
@@ -404,13 +422,12 @@ namespace AFL.Day1
             // Real fix, same message — run direction is NOT "whichever way
             // the rover happens to be facing" (Shaun: "they face the wrong
             // way, if they run the opposite way to what's set up that's
-            // fine"). It's defined directly from the tap: the ball travels
-            // from the ruck to the rover, who stands behind their own ruck
-            // player, so the run is the mirror of that — straight toward
-            // their own goalposts, which is also "opposite the direction
-            // the ball was just tapped", per Shaun's own read of it. Croc's
-            // rover taps in from -Z, so runs +Z; Roo's is the reverse.
-            float runDir = (crocWins ? 1f : -1f) * (reverseDirection ? -1f : 1f);
+            // fine"). Croc always attacks +Z, Roo always -Z — fixed for
+            // the whole game, a property of the TEAM, not of possession
+            // or of how this particular call got here (see this
+            // function's own header comment on the reverseDirection bug
+            // this replaced).
+            float runDir = crocsInPossession ? 1f : -1f;
             yield return RunStraight(rover, runDir);
             // 2026-08-21 — real bug, found by computing the actual
             // numbers rather than guessing again: every chain hop
@@ -435,7 +452,7 @@ namespace AFL.Day1
             // "kangaroo could just drop the ball on its foot and kick it
             // same as the croc" — one shared mechanic for both, not a
             // per-species animation).
-            _message = crocWins ? "Crocs run it out!" : "Roos run it out!";
+            _message = crocsInPossession ? "Crocs run it out!" : "Roos run it out!";
 
             // Real fix (2026-08-12, Shaun: "youve kind of gone a bit
             // rouge with this one" — the automatic run-to-landing-spot
@@ -455,8 +472,8 @@ namespace AFL.Day1
             // into position (visual presence, matches "one contest zone
             // per end" already built), just no role in grading the catch
             // yet. That's real, separate scope for later.
-            Transform forward = crocWins ? crocForward : rooForward;
-            Transform defender = crocWins ? rooDefender : crocDefender;
+            Transform forward = crocsInPossession ? crocForward : rooForward;
+            Transform defender = crocsInPossession ? rooDefender : crocDefender;
             // 2026-08-21 — chained contest only (chainDepth > 0, see
             // SECOND-CONTEST-BRIEF.md point 3). forward/defender are
             // wherever the FIRST contest (and the kick-out's own
@@ -536,7 +553,7 @@ namespace AFL.Day1
             // written in two places). Stored so the kick-out step can
             // explicitly stop it first.
             _defenderRunToZ = StartCoroutine(RunToZ(defender, peakZ, arriveByPeak));
-            yield return KickAway(rover, runDir, forward, defender, isSpeccy, crocWins, chainDepth);
+            yield return KickAway(rover, runDir, forward, defender, isSpeccy, crocsInPossession, chainDepth);
             // Reset countdown starts from here, not from when the contest
             // first resolved — Update()'s existing reset logic now waits
             // the right amount after the FULL sequence (tap, catch, run,
@@ -1064,13 +1081,12 @@ namespace AFL.Day1
                 // instead of where the kicker used to stand
                 // (SECOND-CONTEST-BRIEF.md point 1).
                 defender.position = kickOutTarget;
-                // crocWins flips — the team that just kicked out now has
-                // the ball/momentum for this contest, the opponent's
-                // original crocWins negated. reverseDirection keeps the
-                // ball moving further away from the kicking team's own
-                // goal, continuing the same direction the kick-out itself
-                // traveled.
-                yield return TapBallAway(crocWins: !humanControlled, kickerOverride: defender, reverseDirection: true, chainDepth: chainDepth + 1);
+                // Possession flips to the team that just kicked out —
+                // TapBallAway derives their run direction from nothing
+                // but which team that is (see its own header comment on
+                // the reverseDirection bug this replaced); no separate
+                // direction override needed or correct here.
+                yield return TapBallAway(crocsInPossession: !humanControlled, kickerOverride: defender, chainDepth: chainDepth + 1);
                 }
                 else
                 {
@@ -1150,14 +1166,14 @@ namespace AFL.Day1
         // contest->spoil->clearer->contest can't recurse forever. At the
         // cap, end honestly (CLAUDE.md's placeholder-ending rule)
         // instead of stalling into not-yet-built work.
-        System.Collections.IEnumerator ContinueChainOrEnd(bool newCrocWins, Transform newRover, int chainDepth)
+        System.Collections.IEnumerator ContinueChainOrEnd(bool crocsInPossession, Transform newRover, int chainDepth)
         {
             if (chainDepth >= maxChainDepth)
             {
                 _message = "Time's up — turnover!";
                 yield break;
             }
-            yield return TapBallAway(crocWins: newCrocWins, kickerOverride: newRover, reverseDirection: false, chainDepth: chainDepth + 1);
+            yield return TapBallAway(crocsInPossession: crocsInPossession, kickerOverride: newRover, chainDepth: chainDepth + 1);
         }
 
         // 2026-08-21 — contestZ lets a chained contest (e.g. the second
