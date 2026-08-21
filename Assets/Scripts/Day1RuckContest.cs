@@ -494,12 +494,20 @@ namespace AFL.Day1
             // ~0.65s of the run (the old cut point), the forward loomed
             // huge/clipped at the bottom of frame. Cutting wide right as
             // the run begins avoids that window entirely.
-            // 2026-08-21 — chained contest passes its own anchor (peakZ's
-            // own basis, rover.position.z) instead of the default
-            // goalZ-pinned pivot, which would point at the wrong end of
-            // the ground for a contest happening mid-field. Original
-            // (chainDepth==0) call is unaffected — contestZ stays null.
-            CutCameraForKick(runDir, chainDepth > 0 ? (float?)rover.position.z : null);
+            // 2026-08-21 — chained contest passes its own anchor instead
+            // of the default goalZ-pinned pivot, which would point at
+            // the wrong end of the ground for a contest happening
+            // mid-field. Original (chainDepth==0) call is unaffected —
+            // contestZ stays null.
+            //
+            // Real bug, found by re-deriving the actual numbers: this
+            // passed rover.position.z (peakZ's own INPUT) instead of
+            // peakZ itself — the contest happens at peakZ, which is
+            // rover.position.z + runDir*kickDistance*0.5, a full 8 units
+            // further out. The camera was aimed 8 units short of the
+            // actual action on every chained contest. peakZ is already
+            // computed above, use it directly.
+            CutCameraForKick(runDir, chainDepth > 0 ? (float?)peakZ : null);
             _markHoldReleased = false;
             // 2026-08-19, Shaun: bring back the normal (non-leaping) mark
             // as the common case, speccy as the rarer highlight — real
@@ -787,12 +795,16 @@ namespace AFL.Day1
                         : defendPressed);
                     bool marked = markPressed && !defenderSpoiled;
                     _message = marked ? "MARK!" : (defenderSpoiled ? "Spoiled by the defender!" : "Spilled!");
-                    // 2026-08-19, TEMPORARY diagnostic — hard to pin down
-                    // from description alone across several live tests
-                    // tonight. Remove once the spoil/rushed-behind chain
-                    // is confirmed reliably working.
-                    _message += $" [speccy={isSpeccy} humanCtrl={humanControlled} markPressed={markPressed} defendPressed={defendPressed}]";
-                    if (marked) CutCameraToMarkCloseup(forward);
+                    // 2026-08-21 — real bug: this called the unmirrored
+                    // CutCameraToMarkCloseup(forward) (fixed +7 X
+                    // offset). Rarely showed at the centre bounce since
+                    // the forward starts near the middle, but chained
+                    // contests put players out at ±1.6/±2.6 — on the -X
+                    // side this puts the camera INSIDE the post cluster's
+                    // sightline, the exact occlusion the mirrored
+                    // overload (already used for the kick-out) exists to
+                    // avoid.
+                    if (marked) CutCameraToMarkCloseup(forward, Mathf.Sign(forward.position.x == 0f ? 1f : forward.position.x));
                     _markHoldSucceeded = marked;
                     _markHoldReleased = true;
                 }
