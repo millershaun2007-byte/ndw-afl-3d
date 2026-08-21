@@ -802,6 +802,27 @@ namespace AFL.Day1
                 Vector3 goalSquare = new Vector3(0f, defender.position.y, zDir * goalZ);
                 yield return RunToZ(defender, goalSquare.z, 0.6f);
                 if (_roundId != roundAtStart) yield break;
+                // 2026-08-21, Shaun (live playtest): still couldn't
+                // actually see the player even after the ball-height and
+                // camera fixes above — RunToZ only ever moves Z, so the
+                // defender's X stayed wherever the mark contest left them
+                // (~±0.9, the defender-zone spawn X from MainBuildScript)
+                // — almost exactly between the two inner goal posts
+                // (±0.6). The close-up camera's fixed (7,3,0) world-space
+                // offset then looked straight through a post to reach
+                // them. Slide clear of the post cluster (posts span
+                // -1.3..1.3) before the close-up cuts in, keeping
+                // whichever side they were already on.
+                float clearX = Mathf.Sign(defender.position.x == 0 ? 1f : defender.position.x) * 2.6f;
+                float slideEl = 0f;
+                Vector3 slideStart = defender.position;
+                while (slideEl < 0.3f)
+                {
+                    slideEl += Time.deltaTime;
+                    defender.position = Vector3.Lerp(slideStart, new Vector3(clearX, slideStart.y, slideStart.z), Mathf.Clamp01(slideEl / 0.3f));
+                    yield return null;
+                }
+                if (_roundId != roundAtStart) yield break;
 
                 // 2026-08-19, Shaun: "pause, zoom in on the player, then
                 // they kick it clearly like they do kicking out of the
