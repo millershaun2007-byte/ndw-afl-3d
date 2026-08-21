@@ -494,6 +494,10 @@ namespace AFL.Day1
             // beyond rover's already-clamped position, which alone can
             // still land outside the field on a deep chain hop.
             float peakZ = Mathf.Clamp(rover.position.z + runDir * kickDistance * 0.5f, -(goalZ - 2f), goalZ - 2f);
+            // TEMPORARY diagnostic — Shaun: "it always seems to go back
+            // to the defensive team's goals... this is where you are
+            // confused." Print the actual numbers instead of reasoning
+            // through the geometry a fourth time.
             float arriveByPeak = kickDropDuration + kickPause + kickDuration * 0.5f;
             // Real fix (2026-08-12, Shaun: "the speccy... forward now
             // starts behind runs up jumps really high on the opponents
