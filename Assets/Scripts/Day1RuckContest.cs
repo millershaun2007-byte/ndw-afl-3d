@@ -822,20 +822,23 @@ namespace AFL.Day1
                 yield return KickMotion(defender, kickMotionDuration);
                 if (_roundId != roundAtStart) yield break;
                 // 2026-08-21, Shaun (live playtest): "camera nowhere near
-                // the person" — real bug found by tracing the actual
-                // math. CutCameraForKick's pivotZ = direction *
-                // (goalZ - 5), meant to sit near where the ball's flight
-                // actually happens. Passing -zDir here put the pivot at
-                // the OPPOSITE end of the ground (~z=-15) from where the
-                // kick-out actually travels (z=0..+goalZ, the same end
-                // the mark/spoil just happened at) — a ~35-unit
-                // mismatch. Plain zDir (not negated) is the goal-square's
-                // own sign (see goalSquare above), matching where this
-                // kick genuinely starts.
-                CutCameraForKick(zDir);
+                // the person" — first attempted fix (flipping this to
+                // plain zDir) was still wrong. Real problem: this whole
+                // kick travels the full ground length (goal square to
+                // centre, ~20 units), far more than the static, non-
+                // panning CutCameraForKick was ever built to cover (see
+                // CutCameraForKickOut's own comment) — so no single sign
+                // choice on the OLD camera call would have fixed it, a
+                // dedicated wide shot was the actual fix needed.
+                // 2026-08-21, Shaun: "does not have to go all the way to
+                // the centre" — a real fullback kick-out doesn't need to
+                // reach dead centre, and a shorter traverse is also
+                // easier to frame cleanly in one static shot.
+                float kickOutTargetZ = zDir * goalZ - zDir * kickOutDistance;
+                CutCameraForKickOut(zDir * goalZ, kickOutTargetZ);
 
                 Vector3 kickOutStart = ball.position;
-                Vector3 kickOutTarget = new Vector3(0f, kickOutStart.y, 0f);
+                Vector3 kickOutTarget = new Vector3(0f, kickOutStart.y, kickOutTargetZ);
                 float kickOutEl = 0f;
                 while (kickOutEl < shotKickDuration)
                 {
@@ -880,6 +883,27 @@ namespace AFL.Day1
             // the OLD ground-level lookAt pushed the peak of the jump up
             // near/above the top of frame. Centering higher keeps the
             // whole leap comfortably in view.
+            _mainCam.transform.LookAt(new Vector3(0, 3f, pivotZ));
+        }
+
+        // 2026-08-21, Shaun (live playtest, second pass — the sign fix
+        // alone didn't actually fix it): CutCameraForKick is a static,
+        // non-tracking side-on shot tuned for the FORWARD's own kick
+        // (~kickDistance=16 units, pivoted 5 units short of the goal).
+        // The kick-out travels the ENTIRE ground length instead — goal
+        // square (z=goalZ) all the way to centre (z=0), a full ~20-unit
+        // traverse — so reusing that same fixed, un-panning camera meant
+        // most of the flight happened off-frame regardless of which end
+        // it pivoted toward; only the very start (near the post) was
+        // ever actually in shot. Dedicated wide shot instead: pivots at
+        // the true midpoint of this specific kick's path, pulled back
+        // further (1.6x the normal side/height) so the whole traverse
+        // fits in one static frame instead of just a slice of it.
+        void CutCameraForKickOut(float startZ, float endZ)
+        {
+            if (!_mainCam) return;
+            float pivotZ = (startZ + endZ) * 0.5f;
+            _mainCam.transform.position = new Vector3(kickCamSide * 1.6f, kickCamHeight * 1.6f, pivotZ);
             _mainCam.transform.LookAt(new Vector3(0, 3f, pivotZ));
         }
 
@@ -1288,6 +1312,10 @@ namespace AFL.Day1
         // forward snap) before the camera cuts wide and the ball starts
         // flying — see KickMotion below and its call site.
         public float kickMotionDuration = 0.6f;
+        // How far the kick-out actually travels back from the goal
+        // square — deliberately short of dead centre (goalZ=20 would be
+        // the full traverse), see the call site's own comment.
+        public float kickOutDistance = 12f;
         // Real fix (2026-08-12, Shaun: "run of a bit far", then "can be a
         // slower like 4 step run"). 14 units / 1.8s was a full sprint pace
         // with no acceleration — cut down to a short, deliberate few-step
