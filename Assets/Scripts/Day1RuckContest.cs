@@ -610,13 +610,20 @@ namespace AFL.Day1
         // line exactly the same as what would happen in the centre" —
         // and "if they take the mark same thing as the start they kick
         // the ball towards the forward." Both outcomes (mark out of
-        // range, and a spoil after the first kick-out) now chain into
+        // range, and a spoil after the first kick-out) chain into
         // another TapBallAway instead of ending the round — real
         // football, but contest->spoil->clearer->contest has no natural
-        // terminus, so it's capped. 3 is a starting guess (per the brief
-        // this came from), not a measured value — the real constraint is
-        // how long a child will actually sit through one round.
-        public int maxChainDepth = 3;
+        // terminus, so it's capped.
+        //
+        // 2026-08-21, Shaun (live playtest — "all over the shop"): 3 let
+        // the chain work the ball the FULL length of the ground in one
+        // round (kick-out, mark, clearance, mark, clearance...), which
+        // read as too sprawling/chaotic to actually follow. Capped to 1:
+        // the kick-out's own first contest still gets its full mark-or-
+        // spoiled-clearance treatment, but if THAT needs to chain again
+        // (a spoil on it, or an out-of-range mark), it stops there and
+        // resets instead of working further up the ground.
+        public int maxChainDepth = 1;
 
         // Drop the ball to the foot, brief beat, then kick it away in an
         // arc continuing the same direction as the run. Now interleaved
