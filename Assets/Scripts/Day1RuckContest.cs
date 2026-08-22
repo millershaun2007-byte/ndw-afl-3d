@@ -550,6 +550,25 @@ namespace AFL.Day1
             // function's own header comment on the reverseDirection bug
             // this replaced).
             float runDir = crocsInPossession ? 1f : -1f;
+            // 2026-08-23, Shaun: "when the rover gets the ball the other
+            // rover can chase the player with the ball if they catch them
+            // it causes the kick to fall short of the forward. then its
+            // stal now to kick to forward for normal mark." The opposing
+            // rover (still back at the ruck contest, not otherwise doing
+            // anything during this beat) chases alongside the ball-
+            // carrier's own run. Decide-then-perform (this file's own
+            // established principle, same idiom defenderSpoilT/_botPressT
+            // already use for a fair-but-beatable AI contest) — the catch
+            // outcome is rolled before the run starts, not derived from
+            // simulating two independent movements and comparing
+            // positions after the fact. Caught -> reuses the exact
+            // "falls short" scene already built and verified tonight
+            // (ShortKickLanding, via a per-round effective undershoot
+            // below); not caught -> completely unchanged normal-distance
+            // kick to a normal mark, same as before this feature existed.
+            Transform chaser = crocsInPossession ? rooRover : crocRover;
+            bool caughtByChaser = chaser && Random.value < chaseCatchChance;
+            if (chaser) StartCoroutine(RunStraight(chaser, runDir, carriesBall: false));
             yield return RunStraight(rover, runDir);
             // 2026-08-21 — real bug, found by computing the actual
             // numbers rather than guessing again: every chain hop
@@ -574,7 +593,9 @@ namespace AFL.Day1
             // "kangaroo could just drop the ball on its foot and kick it
             // same as the croc" — one shared mechanic for both, not a
             // per-species animation).
-            _message = crocsInPossession ? "Crocs run it out!" : "Roos run it out!";
+            _message = caughtByChaser
+                ? (crocsInPossession ? "Caught by the Roo!" : "Caught by the Croc!")
+                : (crocsInPossession ? "Crocs run it out!" : "Roos run it out!");
 
             // Real fix (2026-08-12, Shaun: "youve kind of gone a bit
             // rouge with this one" — the automatic run-to-landing-spot
@@ -616,7 +637,13 @@ namespace AFL.Day1
             // used for peakZ (the forward/defender run target) below, and
             // passed explicitly into KickAway so the ball's own flight
             // can't drift out of sync with where the forward actually is.
-            float effectiveKickDistance = Mathf.Max(2f, kickDistance - shortKickUndershoot);
+            // 2026-08-23 — the chase's own catch outcome (caughtByChaser,
+            // above) now feeds this too: shortKickUndershoot alone stays 0
+            // (the "no change from normal" default, see its own comment),
+            // real per-round undershoot instead comes from getting
+            // physically caught by the chasing rover, via
+            // chaseTackleUndershoot below.
+            float effectiveKickDistance = Mathf.Max(2f, kickDistance - shortKickUndershoot - (caughtByChaser ? chaseTackleUndershoot : 0f));
             // Clamped for the same reason rover.position.z was clamped
             // above — this adds another effectiveKickDistance*0.5 (8
             // units at full distance) beyond rover's already-clamped
@@ -757,6 +784,15 @@ namespace AFL.Day1
         // short in real play — that's a genuine game-balance call, not
         // something to silently pick a probability for here.
         public float shortKickUndershoot = 0f;
+        // 2026-08-23 — the chase mechanic's own tunables (see
+        // caughtByChaser in TapBallAway). chaseCatchChance is deliberately
+        // NOT near-certain either way: "if they catch them" implies a real
+        // contest, not a coin flip most rounds ignore or a near-guaranteed
+        // disruption every time. chaseTackleUndershoot reuses the exact
+        // magnitude (5) already tuned and verified for the "falls short"
+        // scene earlier tonight, not a newly-guessed value.
+        public float chaseCatchChance = 0.35f;
+        public float chaseTackleUndershoot = 5f;
         public float kickDuration = 1.1f;
         public float kickDropDuration = 0.35f;
 
@@ -2095,7 +2131,14 @@ namespace AFL.Day1
         // lane so a straight run is always correct. No kick yet (that's
         // the next slice); this ends on an honest placeholder message, not
         // a stall into not-yet-built work.
-        System.Collections.IEnumerator RunStraight(Transform t, float zDir)
+        // carriesBall: 2026-08-23, added for the chasing rover (see the
+        // catch-causes-a-short-kick mechanic in TapBallAway) — this
+        // function unconditionally moved the single global `ball` to the
+        // runner's own hand every frame, correct for the ball-carrying
+        // rover but would hijack the ball onto the CHASER's hand instead
+        // if reused as-is. Existing callers all pass nothing, so they keep
+        // carrying the ball exactly as before.
+        System.Collections.IEnumerator RunStraight(Transform t, float zDir, bool carriesBall = true)
         {
             if (!t) yield break;
             var animator = t.GetComponentInChildren<Animator>();
@@ -2143,7 +2186,7 @@ namespace AFL.Day1
                 // decelerate arc for the physical movement instead.
                 float smoothF = Mathf.SmoothStep(0f, 1f, f);
                 t.position = Vector3.Lerp(start, end, smoothF);
-                if (ball)
+                if (carriesBall && ball)
                 {
                     // Real fix (2026-08-12, Shaun: "arms moving when it
                     // runs just ball in middle of its chest still"). The
@@ -2171,7 +2214,7 @@ namespace AFL.Day1
                 yield return null;
             }
             t.position = end;
-            if (ball)
+            if (carriesBall && ball)
             {
                 if (rightHand) ball.position = rightHand.position;
                 else if (leftHand) ball.position = leftHand.position;
