@@ -746,10 +746,17 @@ namespace AFL.Day1
         // read ONCE in TapBallAway to build effectiveKickDistance, which
         // is then passed explicitly into KickAway as a parameter — a
         // single source of truth, not two formulas that happen to agree
-        // today. 0 = no change from normal. Set to a real value (5) for
-        // this test scene so a short kick is deterministic and visible
-        // every round, not a rare thing to wait for.
-        public float shortKickUndershoot = 5f;
+        // today. 0 = no change from normal. Was set to 5 for the short-
+        // kick scene's own build/test session so it fired deterministically
+        // every round instead of being a rare thing to wait for — now that
+        // BOTH that scene and the follow-on play-on-a-mark scene are built
+        // and need testing, a permanently-forced short kick makes the
+        // NORMAL full-distance mark (which play-on hangs off) unreachable.
+        // Back to 0 (real normal-distance kicks, mark/play-on reachable
+        // again) until Shaun decides how often a kick should actually fall
+        // short in real play — that's a genuine game-balance call, not
+        // something to silently pick a probability for here.
+        public float shortKickUndershoot = 0f;
         public float kickDuration = 1.1f;
         public float kickDropDuration = 0.35f;
 
@@ -1037,6 +1044,44 @@ namespace AFL.Day1
             yield return MarkCatchRoutine(forward, markedResult);
             if (markedResult)
             {
+                // 2026-08-23, Shaun: "when the forward marks they can play
+                // on and kick a snap" — real AFL: after a mark, a player
+                // can choose to play on immediately (a spontaneous, lower-
+                // ceremony snap) instead of the normal set-shot routine.
+                // Deliberately checked BEFORE the shotRangeZ range check
+                // below, not gated by it — playing on is a real, if risky,
+                // choice even from outside normal shooting range (a genuine
+                // "have a crack from here anyway" decision), not just an
+                // alternate path once already in range. Same "the human
+                // decides for themself, AI gets a real randomized attempt
+                // too" fairness principle this file already uses for the
+                // mark/spoil/tap-at-goal decisions above.
+                bool playOn = false;
+                bool aiWantsPlayOn = !humanControlled && Random.value < aiPlayOnChance;
+                _message = humanControlled ? "Tap to play on!" : (aiWantsPlayOn ? "Thinking about playing on..." : "Sizing up the shot...");
+                float aiPlayOnAt = aiWantsPlayOn ? Random.Range(0.15f, playOnWindow) : 0f;
+                float pw = 0f;
+                while (pw < playOnWindow)
+                {
+                    if (_roundId != roundAtStart) yield break;
+                    pw += Time.deltaTime;
+                    if (humanControlled)
+                    {
+                        if (Day1Input.TapDown) { playOn = true; break; }
+                    }
+                    else if (aiWantsPlayOn && pw >= aiPlayOnAt)
+                    {
+                        playOn = true; break;
+                    }
+                    yield return null;
+                }
+
+                if (playOn)
+                {
+                    yield return PlayOnSnap(forward, zDir, humanControlled);
+                    yield break;
+                }
+
                 // 2026-08-21, Shaun: previously scoped the chained contest
                 // (chainDepth > 0, after a kick-out) to stop dead right at
                 // a confirmed mark — deliberate, so the mark itself
@@ -1486,6 +1531,16 @@ namespace AFL.Day1
         // the round is allowed to reset.
         public float markHoldBeforeShot = 0.6f;
 
+        // 2026-08-23 — the play-on decision window, checked right after a
+        // confirmed mark (see TapBallAway/KickAway's own markedResult
+        // block). Long enough to be a real, comfortable decision (not a
+        // twitch-timing window like markPerfectWindow/defenderSpoilWindow,
+        // which grade precision — this just grades whether you tapped at
+        // all) but short enough that not deciding reads as a real choice
+        // ("play it safe") rather than a stall.
+        public float playOnWindow = 1.2f;
+        public float aiPlayOnChance = 0.3f;
+
         // How long the forward's run from wherever they are to the ball's
         // actual short-landing spot takes — same time-based-not-speed-based
         // convention every other RunToZ call in this file already uses
@@ -1697,6 +1752,19 @@ namespace AFL.Day1
             yield return RunToZ(kicker, markSpotZ, shotRunInDuration);
             if (_roundId != roundAtStart) yield break;
 
+            yield return ShootAtGoalCore(kicker, zDir, humanControlled);
+        }
+
+        // The actual drop/power-bar/kick-arc/scoring — extracted
+        // 2026-08-23 so the full set shot (TakeShotAtGoal, after its own
+        // step-back/run-in above) and the immediate play-on snap
+        // (PlayOnSnap, below — no step-back/run-in at all, that's the
+        // whole point of playing on) share one real implementation instead
+        // of two copies of the same mechanic that could drift apart, this
+        // file's own recurring "one fact in two places" trap.
+        System.Collections.IEnumerator ShootAtGoalCore(Transform kicker, float zDir, bool humanControlled)
+        {
+            int roundAtStart = _roundId;
             var rightHand = FindDeepChild(kicker, "RightHand");
             var rightFoot = FindDeepChild(kicker, "RightFoot");
             Vector3 handPos = rightHand ? rightHand.position : ball.position;
@@ -1796,6 +1864,27 @@ namespace AFL.Day1
                 holdEl += Time.deltaTime;
                 yield return null;
             }
+        }
+
+        // 2026-08-23, Shaun: "when the forward marks they can play on and
+        // kick a snap." No step-back/run-in ritual at all — that deliberate
+        // ceremony IS what a normal set shot has and a snap doesn't, real
+        // football. Still cuts to the correct wide kick camera first
+        // (pivoted on the kicker's own real current position via contestZ,
+        // same "aim it at where the action actually is" fix TakeShotAtGoal
+        // itself needed — see that function's own contestZ comment) and
+        // still gives a real beat before the power bar starts so the cut
+        // doesn't feel instant/jarring, just a much shorter one
+        // (shotSetupPause, not the full step-back+pause+run-in sequence).
+        System.Collections.IEnumerator PlayOnSnap(Transform kicker, float zDir, bool humanControlled)
+        {
+            if (!kicker || !ball) yield break;
+            int roundAtStart = _roundId;
+            _message = "Plays on — snaps for goal!";
+            CutCameraForKick(zDir, kicker.position.z);
+            yield return new WaitForSeconds(shotSetupPause);
+            if (_roundId != roundAtStart) yield break;
+            yield return ShootAtGoalCore(kicker, zDir, humanControlled);
         }
 
         public float speccyLeapRiseDuration = 0.5f;
