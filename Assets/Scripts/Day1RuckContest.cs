@@ -611,11 +611,18 @@ namespace AFL.Day1
                 forward.position = new Vector3(forward.position.x, forward.position.y, rover.position.z);
                 defender.position = new Vector3(defender.position.x, defender.position.y, rover.position.z);
             }
+            // Single source of truth for this kick's real distance — see
+            // shortKickUndershoot's own comment above. Computed once here,
+            // used for peakZ (the forward/defender run target) below, and
+            // passed explicitly into KickAway so the ball's own flight
+            // can't drift out of sync with where the forward actually is.
+            float effectiveKickDistance = Mathf.Max(2f, kickDistance - shortKickUndershoot);
             // Clamped for the same reason rover.position.z was clamped
-            // above — this adds another kickDistance*0.5 (8 units)
-            // beyond rover's already-clamped position, which alone can
-            // still land outside the field on a deep chain hop.
-            float peakZ = Mathf.Clamp(rover.position.z + runDir * kickDistance * 0.5f, -(goalZ - 2f), goalZ - 2f);
+            // above — this adds another effectiveKickDistance*0.5 (8
+            // units at full distance) beyond rover's already-clamped
+            // position, which alone can still land outside the field on a
+            // deep chain hop.
+            float peakZ = Mathf.Clamp(rover.position.z + runDir * effectiveKickDistance * 0.5f, -(goalZ - 2f), goalZ - 2f);
             // TEMPORARY diagnostic — Shaun: "it always seems to go back
             // to the defensive team's goals... this is where you are
             // confused." Print the actual numbers instead of reasoning
@@ -679,7 +686,7 @@ namespace AFL.Day1
             // written in two places). Stored so the kick-out step can
             // explicitly stop it first.
             _defenderRunToZ = StartCoroutine(RunToZ(defender, peakZ, arriveByPeak));
-            yield return KickAway(rover, runDir, forward, defender, isSpeccy, crocsInPossession, chainDepth);
+            yield return KickAway(rover, runDir, forward, defender, isSpeccy, crocsInPossession, chainDepth, effectiveKickDistance);
             // Reset countdown starts from here, not from when the contest
             // first resolved — Update()'s existing reset logic now waits
             // the right amount after the FULL sequence (tap, catch, run,
@@ -727,6 +734,22 @@ namespace AFL.Day1
         // leaving room for Day 5's shot at goal rather than standing
         // half the ground away from it.
         public float kickDistance = 16f;
+        // 2026-08-23, Shaun: "set a scene up... where the kick into the
+        // forward line falls short of the forward." kickDistance alone
+        // can't do this safely — it already feeds BOTH the forward/
+        // defender's run target (peakZ, TapBallAway below) AND the ball's
+        // own flight/freeze point (KickAway), computed independently in
+        // two separate places from the same constant. They've only ever
+        // stayed in sync because kickDistance never varied — exactly the
+        // "one fact written in two places" trap this file's own header
+        // warns about, just not yet triggered. shortKickUndershoot is
+        // read ONCE in TapBallAway to build effectiveKickDistance, which
+        // is then passed explicitly into KickAway as a parameter — a
+        // single source of truth, not two formulas that happen to agree
+        // today. 0 = no change from normal. Set to a real value (5) for
+        // this test scene so a short kick is deterministic and visible
+        // every round, not a rare thing to wait for.
+        public float shortKickUndershoot = 5f;
         public float kickDuration = 1.1f;
         public float kickDropDuration = 0.35f;
 
@@ -778,8 +801,14 @@ namespace AFL.Day1
         // rejected sub-100ms analytic-physics system — just relocated to
         // the kick's flight. "Dont worry about the defender yet" — this
         // grades the forward's own timing only, no opponent comparison.
-        System.Collections.IEnumerator KickAway(Transform t, float zDir, Transform forward, Transform defender, bool isSpeccy, bool humanControlled, int chainDepth = 0)
+        // effectiveDistance defaults to kickDistance (the old behaviour)
+        // only so this signature isn't a silent breaking change for any
+        // future caller that doesn't know about shortKickUndershoot yet —
+        // the one real call site (TapBallAway) always passes its own
+        // effectiveKickDistance explicitly, never relies on this default.
+        System.Collections.IEnumerator KickAway(Transform t, float zDir, Transform forward, Transform defender, bool isSpeccy, bool humanControlled, int chainDepth = 0, float? effectiveDistance = null)
         {
+            float kickDist = effectiveDistance ?? kickDistance;
             if (!t || !ball) yield break;
             int roundAtStart = _roundId;
             var rightHand = FindDeepChild(t, "RightHand");
@@ -808,12 +837,42 @@ namespace AFL.Day1
             // — the cue IS the ball's height, same principle as day 1.
             Vector3 kickStart = ball.position;
             // Same field-bounds clamp as TapBallAway's peakZ, applied
-            // here too — this kick's own full kickDistance (16, not
-            // halved) can independently push the ball's landing spot
-            // outside the field on a deep chain hop, one level below
-            // where the TapBallAway-level clamps already catch it.
-            float kickEndZ = Mathf.Clamp(kickStart.z + zDir * kickDistance, -(goalZ - 2f), goalZ - 2f);
+            // here too — this kick's own full kickDist (not halved) can
+            // independently push the ball's landing spot outside the
+            // field on a deep chain hop, one level below where the
+            // TapBallAway-level clamps already catch it. Uses kickDist
+            // (the passed-in effective distance), NOT the public
+            // kickDistance field directly — see this function's own
+            // signature comment for why.
+            float kickEndZ = Mathf.Clamp(kickStart.z + zDir * kickDist, -(goalZ - 2f), goalZ - 2f);
             Vector3 kickEnd = new Vector3(kickStart.x, kickStart.y, kickEndZ);
+
+            // 2026-08-23, Shaun: "set a scene up... where the kick...
+            // falls short of the forward" — first of a planned series of
+            // distinct football scenarios ("this is one scene... finish
+            // this first part first" before building the next one, the
+            // forward gathering a short kick and snapping at goal).
+            // A short kick isn't a markable contest at all — there's no
+            // ball in the air near the forward to jump for — so this
+            // deliberately does NOT reuse the mark/spoil timing window
+            // below (jumpFireAt, NormalMarkHop, "Go up for the mark!").
+            // That window is built entirely around a ball arriving AT the
+            // forward's position at a fixed time; a short kick lands
+            // somewhere else on the ground first, so grading a timed tap
+            // against it would be grading a contest that isn't actually
+            // happening on screen. Ends the round cleanly here (same
+            // "Time's up" no-further-action pattern ContinueChainOrEnd
+            // already uses at maxChainDepth) rather than chaining into a
+            // new contest — the gather+snap-kick mechanic is explicit
+            // future scope, not built yet, so this round has nothing
+            // further to hand off to.
+            bool isShortKick = kickDist < kickDistance - 0.01f;
+            if (isShortKick)
+            {
+                yield return ShortKickLanding(kickStart, kickEnd, isSpeccy);
+                yield break;
+            }
+
             float peakT = kickDuration * 0.5f;
             float markTargetT = peakT + markReactionCompensation;
             float markDeadline = Mathf.Min(peakT + markPerfectWindow, kickDuration);
@@ -1426,6 +1485,43 @@ namespace AFL.Day1
         // whole chain (catch hold, then a shot if marked) finishes before
         // the round is allowed to reset.
         public float markHoldBeforeShot = 0.6f;
+
+        // 2026-08-23 — the short-kick scene KickAway branches into above
+        // (isShortKick). Deliberately its own simple coroutine rather than
+        // extra branching bolted into the existing mark/spoil loop: that
+        // loop's whole shape (jumpFireAt, markDeadline, defenderSpoilT) is
+        // built around timing a catch against a ball that arrives AT a
+        // fixed point at a fixed instant, which a short kick genuinely
+        // doesn't do. Flies the ball its own real (shorter) distance —
+        // no artificial freeze needed here, unlike KickAway's own
+        // ball-freeze-at-peak hack for the mark case, since a short kick
+        // is supposed to visibly travel less, not travel the same amount
+        // and stop early.
+        System.Collections.IEnumerator ShortKickLanding(Vector3 kickStart, Vector3 kickEnd, bool isSpeccy)
+        {
+            int roundAtStart = _roundId;
+            _message = "It falls short!";
+            float el = 0f;
+            while (el < kickDuration)
+            {
+                if (_roundId != roundAtStart) yield break;
+                el += Time.deltaTime;
+                float f = Mathf.Clamp01(el / kickDuration);
+                float arc = Mathf.Sin(f * Mathf.PI) * (isSpeccy ? kickHeight : kickHeightNormal);
+                ball.position = Vector3.Lerp(kickStart, kickEnd, f) + Vector3.up * arc;
+                yield return null;
+            }
+            ball.position = new Vector3(kickEnd.x, groundY, kickEnd.z);
+            CutCameraToDefault();
+            yield return new WaitForSeconds(catchPause);
+            if (_roundId != roundAtStart) yield break;
+            // Round ends here, same "nothing further to hand off to"
+            // pattern ContinueChainOrEnd uses at maxChainDepth — the
+            // forward gathering this loose ball and snapping at goal is
+            // real future scope (see this function's own header comment),
+            // not built yet, so there's no next beat to chain into.
+            _message = "Falls short — loose ball!";
+        }
 
         System.Collections.IEnumerator MarkCatchRoutine(Transform forward, bool marked)
         {
