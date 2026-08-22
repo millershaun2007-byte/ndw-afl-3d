@@ -1601,10 +1601,20 @@ namespace AFL.Day1
         public float shotDropDuration = 0.3f;
         public float shotKickHeight = 3f;
         public float shotKickDuration = 0.9f;
-        // How far off-centre (world X) a mistimed kick drifts — enough to
-        // clearly pass outside the posts (which span -1.3 to 1.3, see
-        // Day1BuildScript's BuildGoalPosts) rather than an ambiguous
-        // near-miss.
+        // How far off-centre (world X) a mistimed kick drifts. Named
+        // constants for the actual post positions — must match
+        // MainBuildScript's BuildGoalPosts (-1.3/-0.6/0.6/1.3), same
+        // "geometry defined once, referenced by name" convention goalZ
+        // already uses in this file (see its own comment above). Real AFL
+        // scoring, added 2026-08-23 (Shaun: "6 point for goal one for a
+        // point"): a miss landing between the inner (goal) and outer
+        // (behind) posts is a real, legitimate 1-point outcome, not just
+        // "off target" for nothing — shotMissSpread's own range (floor
+        // 0.4*2.4=0.96, already inside goalPostOuterX=1.3) already put a
+        // near-miss geometrically inside the behind posts before this
+        // fix; scoring simply never checked for it.
+        public float goalPostInnerX = 0.6f;
+        public float goalPostOuterX = 1.3f;
         public float shotMissSpread = 2.4f;
         public float shotResultHold = 1f;
 
@@ -1741,17 +1751,27 @@ namespace AFL.Day1
             _shotBarVisible = false;
 
             bool isGoal = tapped && tapValue >= shotPowerGreenMin && tapValue <= shotPowerGreenMax;
-            _message = isGoal ? "GOAL!" : "Off target!";
-            if (isGoal) AddScore(humanControlled, 6);
 
             Vector3 kickStart = ball.position;
             Vector3 goalCentre = new Vector3(0, kickStart.y, zDir * goalZ);
+            // Real AFL scoring, 2026-08-23 (Shaun: "6 point for goal one
+            // for a point"): a miss that still lands between the inner
+            // (goal) and outer (behind) posts scores 1, same as the
+            // existing rushed-behind case elsewhere in this file — only a
+            // miss wide of the OUTER posts scores nothing. Computed after
+            // goalCentre.x so isBehind checks where the kick is actually
+            // headed, not a second independently-guessed distance.
+            bool isBehind = false;
             if (!isGoal)
             {
                 float distFromGreen = tapValue < shotPowerGreenMin ? shotPowerGreenMin - tapValue : tapValue - shotPowerGreenMax;
                 float side = tapValue < shotPowerGreenMin ? -1f : 1f;
                 goalCentre.x = side * shotMissSpread * Mathf.Clamp01(0.4f + distFromGreen * 2f);
+                isBehind = Mathf.Abs(goalCentre.x) <= goalPostOuterX;
             }
+            _message = isGoal ? "GOAL!" : (isBehind ? "Behind — 1 point." : "Off target!");
+            if (isGoal) AddScore(humanControlled, 6);
+            else if (isBehind) AddScore(humanControlled, 1);
 
             // Real then, not fake — the outcome (and therefore the exact
             // target) is already decided before the ball leaves the
