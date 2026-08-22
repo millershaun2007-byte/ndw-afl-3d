@@ -869,7 +869,7 @@ namespace AFL.Day1
             bool isShortKick = kickDist < kickDistance - 0.01f;
             if (isShortKick)
             {
-                yield return ShortKickLanding(kickStart, kickEnd, isSpeccy);
+                yield return ShortKickLanding(kickStart, kickEnd, isSpeccy, forward, zDir, humanControlled);
                 yield break;
             }
 
@@ -1486,6 +1486,12 @@ namespace AFL.Day1
         // the round is allowed to reset.
         public float markHoldBeforeShot = 0.6f;
 
+        // How long the forward's run from wherever they are to the ball's
+        // actual short-landing spot takes — same time-based-not-speed-based
+        // convention every other RunToZ call in this file already uses
+        // (e.g. shotRunInDuration), not derived from the real distance.
+        public float gatherRunDuration = 0.8f;
+
         // 2026-08-23 — the short-kick scene KickAway branches into above
         // (isShortKick). Deliberately its own simple coroutine rather than
         // extra branching bolted into the existing mark/spoil loop: that
@@ -1497,7 +1503,24 @@ namespace AFL.Day1
         // ball-freeze-at-peak hack for the mark case, since a short kick
         // is supposed to visibly travel less, not travel the same amount
         // and stop early.
-        System.Collections.IEnumerator ShortKickLanding(Vector3 kickStart, Vector3 kickEnd, bool isSpeccy)
+        //
+        // 2026-08-23, Shaun: "the forward runs up picks up ball and snaps
+        // a goal" — second scene in this series, now wired on: once the
+        // ball settles, the forward runs onto it (gather) and the round
+        // hands off into a shot at goal. Deliberately calls TakeShotAtGoal
+        // directly rather than re-implementing a "snap" kick from scratch —
+        // that's the file's own proven, already-camera-correct set-shot
+        // mechanic; duplicating its drop/power-bar/kick-arc logic here
+        // would be exactly the kind of second copy of one fact that this
+        // file's own header warns drifts out of sync. The one real
+        // difference from a normal mark-then-shot: no step back is skipped
+        // here either, actually — TakeShotAtGoal always does its own
+        // step-back/run-in "lines up for goal" beat regardless of caller,
+        // which reads slightly more deliberate than a real snap, but reuses
+        // 100% proven, working code instead of a new near-duplicate with
+        // its own risk of drifting. Revisit if this specifically needs to
+        // feel snappier once actually played.
+        System.Collections.IEnumerator ShortKickLanding(Vector3 kickStart, Vector3 kickEnd, bool isSpeccy, Transform forward, float zDir, bool humanControlled)
         {
             int roundAtStart = _roundId;
             _message = "It falls short!";
@@ -1512,15 +1535,33 @@ namespace AFL.Day1
                 yield return null;
             }
             ball.position = new Vector3(kickEnd.x, groundY, kickEnd.z);
-            CutCameraToDefault();
+            // Wide shot pivoted on the ball's ACTUAL landing spot
+            // (contestZ), not the default forward-zone pivot — see
+            // CutCameraForKick's own contestZ parameter and TakeShotAtGoal's
+            // matching one below for why: a short kick can land meaningfully
+            // closer to centre than the default pivot assumes, and this is
+            // exactly the "camera aimed short of the actual action" bug
+            // class already found and fixed once for chained mark contests.
+            CutCameraForKick(zDir, kickEnd.z);
+            _message = "Loose ball!";
             yield return new WaitForSeconds(catchPause);
             if (_roundId != roundAtStart) yield break;
-            // Round ends here, same "nothing further to hand off to"
-            // pattern ContinueChainOrEnd uses at maxChainDepth — the
-            // forward gathering this loose ball and snapping at goal is
-            // real future scope (see this function's own header comment),
-            // not built yet, so there's no next beat to chain into.
-            _message = "Falls short — loose ball!";
+
+            // Gather — forward runs onto the loose ball from wherever the
+            // short kick's own run/jump left them.
+            yield return RunToZ(forward, kickEnd.z, gatherRunDuration);
+            if (_roundId != roundAtStart) yield break;
+            var gatherHand = FindDeepChild(forward, "RightHand");
+            if (gatherHand) ball.position = gatherHand.position;
+            _message = "Gathers it!";
+            yield return new WaitForSeconds(catchPause);
+            if (_roundId != roundAtStart) yield break;
+
+            // Hand off into the proven shot-at-goal mechanic, pivoted on
+            // where the forward actually gathered it (kickEnd.z), not
+            // TakeShotAtGoal's own default pivot — see its contestZ
+            // parameter's own comment.
+            yield return TakeShotAtGoal(forward, zDir, humanControlled, kickEnd.z);
         }
 
         System.Collections.IEnumerator MarkCatchRoutine(Transform forward, bool marked)
@@ -1608,7 +1649,18 @@ namespace AFL.Day1
         // shot's result and the next round's centre bounce.
         public float shotStartPause = 0.5f;
 
-        System.Collections.IEnumerator TakeShotAtGoal(Transform kicker, float zDir, bool humanControlled)
+        // contestZ: same purpose as CutCameraForKick's own parameter of the
+        // same name (see that function) — this shot's default camera pivot
+        // (zDir * (goalZ - 5)) is tuned for a kicker standing at the
+        // NORMAL full-distance mark spot. 2026-08-23's snap-kick scene
+        // (gather a short kick, then shoot from wherever it was gathered)
+        // can leave the kicker meaningfully closer to centre than that —
+        // the exact "camera aimed short of the actual action" class of bug
+        // already found and fixed once for chained mark contests (see this
+        // file's own 2026-08-21 session notes). Existing caller (the
+        // chained-mark shot) passes nothing, so it's unaffected — it was
+        // already correct at the default pivot.
+        System.Collections.IEnumerator TakeShotAtGoal(Transform kicker, float zDir, bool humanControlled, float? contestZ = null)
         {
             if (!kicker || !ball) yield break;
             int roundAtStart = _roundId;
@@ -1626,7 +1678,7 @@ namespace AFL.Day1
             // shot, not a "walking back for the kick" read. Cutting wide
             // here instead, before the step-back starts, makes the whole
             // back-then-in run visible in one continuous, stable shot.
-            CutCameraForKick(zDir);
+            CutCameraForKick(zDir, contestZ);
             float markSpotZ = kicker.position.z;
             yield return RunToZ(kicker, markSpotZ - zDir * shotStepBackDistance, shotStepBackDuration);
             if (_roundId != roundAtStart) yield break;
