@@ -31,6 +31,9 @@ echo "content stamp: $STAMP"
 
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 cp -R "$DIR"/. "$TMP/"
+# Unity emits a Burst debug folder marked DoNotShip. Without this it gets
+# uploaded to the bucket every sync and has to be cleaned out by hand.
+rm -rf "$TMP"/*_BurstDebugInformation_DoNotShip
 sed -i '' \
   -e "s|\"Build/WebGL\.loader\.js\"|\"Build/WebGL.loader.js?v=$STAMP\"|" \
   -e "s|\"Build/WebGL\.data\"|\"Build/WebGL.data?v=$STAMP\"|" \

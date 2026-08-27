@@ -65,8 +65,8 @@ namespace AFL.Day1
         Quaternion _camDefaultRot;
         // Must match Day1BuildScript's BuildGoalPosts z position.
         public float goalZ = 20f;
-        public float kickCamSide = 16f;
-        public float kickCamHeight = 8f;
+        public float kickCamSide = 9f;
+        public float kickCamHeight = 4.5f;
         // Real fix (2026-08-12, Shaun: "maybe pause them in mid air when
         // they have taken the mark" / "just brief pause"). Held once the
         // mark-jump's rise reaches its peak, only when it's a genuine
@@ -76,9 +76,37 @@ namespace AFL.Day1
         bool _markHoldSucceeded;
 
         public float throwDuration = 2.6f;
-        public float peakHeight = 2.1f;
+        public float peakHeight = 2.5f;
         public float groundY = 1.0f;
         public float hopDuration = 0.45f;
+
+        // 2026-08-28, Shaun: "is it possible for the ruck contest to be a bit
+        // more of a run in and jump", then "ruck is more than a hop its a full
+        // leap". Both true of the code as it stood: the rucks started 1.1m
+        // apart already under the ball and played a standing hop at height
+        // scale 1.65, against the speccy's real leap at 4.0 - about 40% of a
+        // leap, and no run at all.
+        //
+        // The run-in happens in Update during the throw-up (not in HopRoutine)
+        // so the leap's own timing is untouched. That timing is load-bearing:
+        // _hopFireAt is the ball's true visual peak and the whole tap contest
+        // is judged against it.
+        public float ruckRunInDistance = 2.9f;
+
+        // Leap height is DERIVED, never hand-tuned, because the previous
+        // hand-tuned value is exactly what would break here. 1.65 was measured
+        // (ArmAngleCheck.cs) to put the hands at 2.95 against a ball frozen at
+        // 3.1 - raise the throw without rescaling the leap and the rucks paw
+        // downward at a ball above them, which reads worse than the hop did.
+        // Deriving it means peakHeight can be tuned freely and the hands still
+        // meet the ball by construction.
+        public float ruckStandHandY = 1.48f;    // measured: hands, arms raised, standing
+        public float ruckRisePerScale = 0.891f; // measured: scale 1.65 -> hands 2.95
+        float RuckLeapScale =>
+            Mathf.Max(1.65f, ((groundY + peakHeight) - ruckStandHandY) / ruckRisePerScale);
+
+        Vector3 _crocRuckIn, _rooRuckIn;   // where each ruck contests
+        bool _ruckRunInReady;
         // 2026-08-19: rise time for NormalMarkHop, the mark-specific hop
         // that holds at peak until the outcome is known rather than
         // landing on a fixed clock (see NormalMarkHop's own header for
@@ -233,6 +261,18 @@ namespace AFL.Day1
                 _mainCam.transform.position = _camDefaultPos;
                 _mainCam.transform.rotation = _camDefaultRot;
             }
+            // Push the rucks out to their run-up marks. Done here rather
+            // than in the scene so their resting/contest position stays the
+            // measured one every other beat already depends on.
+            _ruckRunInReady = false;
+            if (crocVisual && rooVisual)
+            {
+                _crocRuckIn = crocVisual.localPosition;
+                _rooRuckIn = rooVisual.localPosition;
+                crocVisual.localPosition = _crocRuckIn + new Vector3(-ruckRunInDistance, 0f, 0f);
+                rooVisual.localPosition = _rooRuckIn + new Vector3(ruckRunInDistance, 0f, 0f);
+                _ruckRunInReady = true;
+            }
             _message = "Centre bounce...";
             float ideal = throwDuration * 0.5f;
             // 2026-08-19, Shaun: "too easy for the crocs" — the human
@@ -358,6 +398,23 @@ namespace AFL.Day1
                 float frac = Mathf.Clamp01(_t / throwDuration);
                 float height = Mathf.Sin(frac * Mathf.PI) * peakHeight;
                 if (ball) ball.position = new Vector3(0f, groundY + height, 0f);
+                // Run in so they arrive on the contest spot exactly as the
+                // ball reaches its peak and the leap fires. SmoothStep, not
+                // linear, so they accelerate off the mark and settle into the
+                // contest instead of sliding at a constant rate.
+                if (_ruckRunInReady && crocVisual && rooVisual)
+                {
+                    float runF = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(_t / Mathf.Max(0.01f, _hopFireAt)));
+                    crocVisual.localPosition = Vector3.Lerp(
+                        _crocRuckIn + new Vector3(-ruckRunInDistance, 0f, 0f), _crocRuckIn, runF);
+                    rooVisual.localPosition = Vector3.Lerp(
+                        _rooRuckIn + new Vector3(ruckRunInDistance, 0f, 0f), _rooRuckIn, runF);
+                    var ca = crocVisual.GetComponentInChildren<Animator>();
+                    var ra = rooVisual.GetComponentInChildren<Animator>();
+                    float spd = runF < 0.97f ? 1f : 0f;
+                    if (ca && ca.enabled) ca.SetFloat("Speed", spd);
+                    if (ra && ra.enabled) ra.SetFloat("Speed", spd);
+                }
                 if (_t >= _hopFireAt) _ballFrozen = true;
             }
 
@@ -2285,7 +2342,7 @@ namespace AFL.Day1
             // the hop's own vertical scale, not the arm — bumped 1.5 to
             // 1.65 to close that ~0.13-unit gap so the hand and ball
             // actually meet instead of falling just short.
-            float heightScale = reachesBall ? 1.65f : 0.5f;
+            float heightScale = reachesBall ? RuckLeapScale : 0.5f;
             Vector3 towardCentre = reachesBall
                 ? new Vector3(-Mathf.Sign(start.x) * 0.55f, 0, 0)
                 : Vector3.zero;

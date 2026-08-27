@@ -241,7 +241,12 @@ public static class MainBuildScript
         // visible) looked fine in a static render but was wrong in
         // actual play. Back to the position confirmed good before that.
         camGo.transform.position = new Vector3(0, 3.4f, -9.5f);
-        camGo.transform.LookAt(new Vector3(0, 1.2f, 0));
+        // 2026-08-28: aim raised 1.2 -> 1.7. The ruck throw-up now peaks at
+        // 3.5 rather than 3.1 (a real leap needs a real ball height, see
+        // Day1RuckContest's RuckLeapScale), and at the old aim the ball
+        // climbed up behind the on-screen message banner at the top of the
+        // frame - the one moment the whole tap contest is judged on.
+        camGo.transform.LookAt(new Vector3(0, 1.7f, 0));
 
         var lightGo = new GameObject("Directional Light");
         var light = lightGo.AddComponent<Light>();
