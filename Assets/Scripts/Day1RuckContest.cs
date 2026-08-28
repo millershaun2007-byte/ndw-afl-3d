@@ -87,6 +87,12 @@ namespace AFL.Day1
         public float peakHeight = 2.1f;
         public float groundY = 1.0f;
         public float hopDuration = 0.45f;
+        // 2026-08-28: ONE height for any leap that contests the ball. The
+        // defender's punch had its own hardcoded 1.4f - a third copy of a
+        // number the forward derives - so he rose a quarter of a unit BELOW
+        // the forward parked at the top and they never met. Same defect shape
+        // as the rest of today: a duplicated constant that drifted.
+        public float contestLeapHeight = 1.65f;
         // 2026-08-19: rise time for NormalMarkHop, the mark-specific hop
         // that holds at peak until the outcome is known rather than
         // landing on a fixed clock (see NormalMarkHop's own header for
@@ -1225,7 +1231,8 @@ namespace AFL.Day1
                     ball.position.z - zDir * 0.35f);
                 defender.rotation = Quaternion.Euler(0f, zDir > 0f ? 0f : 180f, 0f);
                 SpoilPunch(defender);
-                yield return new WaitForSeconds(hopDuration * 0.45f);
+                // ball leaves at the peak of the jump, not on the way up
+                yield return new WaitForSeconds(hopDuration * 0.5f);
                 if (_roundId != roundAtStart) yield break;
                 // Contest resolved at the peak - only now does the forward come down.
                 _markHoldReleased = true;
@@ -2319,11 +2326,12 @@ namespace AFL.Day1
                 el += Time.deltaTime;
                 float f = el / dur;
                 float wave = Mathf.Sin(f * Mathf.PI);          // jump: 0 -> 1 -> 0
-                t.localPosition = start + Vector3.up * wave * 1.4f;
+                t.localPosition = start + Vector3.up * wave * contestLeapHeight;
                 // Punching arm starts high and swings down through the ball,
                 // finishing its travel just past the top of the jump so contact
                 // reads as the hand driving the ball away, not scooping it up.
-                float armF = Mathf.Clamp01(f / 0.7f);
+                // fist completes its travel AT the top, not 0.115s after the ball has gone
+                float armF = Mathf.Clamp01(f / 0.5f);
                 float ang = Mathf.Lerp(150f, 10f, armF);
                 if (rightArm) rightArm.localRotation = rightStart * Quaternion.Euler(0, 0, -ang);
                 if (leftArm) leftArm.localRotation = leftStart * Quaternion.Euler(0, 0, wave * 35f);
@@ -2348,7 +2356,7 @@ namespace AFL.Day1
             // the hop's own vertical scale, not the arm — bumped 1.5 to
             // 1.65 to close that ~0.13-unit gap so the hand and ball
             // actually meet instead of falling just short.
-            float heightScale = reachesBall ? 1.65f : 0.5f;
+            float heightScale = reachesBall ? contestLeapHeight : 0.5f;
             Vector3 towardCentre = reachesBall
                 ? new Vector3(-Mathf.Sign(start.x) * 0.55f, 0, 0)
                 : Vector3.zero;
@@ -2479,7 +2487,7 @@ namespace AFL.Day1
             if (!t) yield break;
             int roundAtStart = _roundId;
             Vector3 start = t.localPosition;
-            const float heightScale = 1.65f;
+            float heightScale = contestLeapHeight;
             const float armAngle = 155f;
 
             var leftArm = FindDeepChild(t, "LeftArm");
