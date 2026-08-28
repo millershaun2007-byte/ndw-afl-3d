@@ -817,6 +817,9 @@ namespace AFL.Day1
         // know the timing, the defender is guessing), the spoil is the
         // occasional exception, not a coin flip. Both tunable in one
         // place if the balance needs adjusting after playtesting.
+        // More taps than this during one flight reads as flailing, not a
+        // timed leap, and the spoil fails.
+        public int maxSpoilTaps = 3;
         public float defenderSpoilWindow = 0.20f;
         public float defenderSpoilJitter = 0.55f;
         // 2026-08-21, Shaun: "after some spoils another character gets
@@ -893,6 +896,9 @@ namespace AFL.Day1
             bool markResolved = false;
             bool defenderSpoiled = false;
             bool defendPressed = false;
+            int spoilTaps = 0;
+            int spoilLastSerial = Day1Input.TapSerial;
+            float spoilBestErr = 999f;
             // Real fix (2026-08-12, Shaun: "the kick is now way of the
             // forward and defender for the mark scene"). Not a physics
             // change — the wide kick-cut camera just made a mismatch
@@ -1002,7 +1008,19 @@ namespace AFL.Day1
                 // in this branch (the AI-mark check above doesn't read
                 // it), so this is a genuine human spoil attempt, not a
                 // second thing fighting over the same tap.
-                if (!humanControlled && Day1Input.TapDown) defendPressed = true;
+                // 2026-08-28, Shaun: "AND EVERY TIME THEY KICK FORWARD I SPOIL".
+                // This used to be ANY tap at ANY point in the flight, with no
+                // timing test at all - and since the ruck now needs mashing, a
+                // tap was always in flight, so every AI kick forward was spoiled.
+                // A spoil is now one committed, timed leap: the closest tap has
+                // to land near the ball's arrival, and flailing at it fails.
+                if (!humanControlled && Day1Input.TapSerial != spoilLastSerial)
+                {
+                    spoilLastSerial = Day1Input.TapSerial;
+                    spoilTaps++;
+                    defendPressed = true;
+                    spoilBestErr = Mathf.Min(spoilBestErr, Mathf.Abs(el - markTargetT));
+                }
 
                 if (!markResolved && el >= markDeadline)
                 {
@@ -1016,7 +1034,7 @@ namespace AFL.Day1
                     // as marking); AI defends via the randomized roll.
                     defenderSpoiled = !isSpeccy && (humanControlled
                         ? Mathf.Abs(defenderSpoilT - markTargetT) <= defenderSpoilWindow
-                        : defendPressed);
+                        : (spoilTaps > 0 && spoilTaps <= maxSpoilTaps && spoilBestErr <= defenderSpoilWindow));
                     // 2026-08-28, Shaun: "ITS UP TO THE SPILLED BIT ONLY ... DELETE
                     // THE SPILL SECTION". A spill had no outcome branch at all - it
                     // fell straight through the if/else chain and the round simply
