@@ -437,10 +437,19 @@ namespace AFL.Day1
             // Centre clearance only - not a kick-out or a chain hop, which have
             // their own shape. kickerOverride is null exactly when this came
             // from the ruck.
-            if (chainDepth == 0 && !kickerOverride && Random.value < centreBurstChance)
+            if (chainDepth == 0 && !kickerOverride)
             {
-                yield return BurstBounceSnap(rover, runDir, crocsInPossession);
-                yield break;
+                float roll = Random.value;
+                if (roll < centreBurstChance)
+                {
+                    yield return BurstBounceSnap(rover, runDir, crocsInPossession);
+                    yield break;
+                }
+                if (roll < centreBurstChance + handballChance)
+                {
+                    yield return HandballAndRun(rover, runDir, crocsInPossession);
+                    yield break;
+                }
             }
             yield return RunStraight(rover, runDir);
             // 2026-08-21 — real bug, found by computing the actual
@@ -1799,6 +1808,52 @@ namespace AFL.Day1
         // drift out of sync exactly like every other duplicate in this file has.
         public float centreBurstChance = 0.45f;
         public float bounceDuration = 0.55f;
+
+        // 2026-08-28, Shaun: "when the palyer in the middle grabs it they handball
+        // to a player running past who keeps running and then goes in and kicks a
+        // goal".
+        //
+        // This also avoids the real pull back toward the centre: the rovers are
+        // spawned at z = +-1.8, the centre bounce itself, and TapBallAway lerps
+        // the ball to whoever is carrying it. Handballing forward to the clearer
+        // (spawned deep, at z = +-13) moves the ball AWAY from the middle instead
+        // of dragging it back there.
+        public float handballChance = 0.35f;
+        public float handballDuration = 0.4f;
+
+        System.Collections.IEnumerator HandballAndRun(Transform rover, float zDir, bool humanControlled)
+        {
+            Transform runner = zDir > 0f ? crocClearer : rooClearer;
+            if (!rover || !runner || !ball) yield break;
+            int roundAtStart = _roundId;
+
+            // The runner comes past, ahead of the rover, going the same way.
+            runner.position = new Vector3(runner.position.x, runner.position.y, rover.position.z + zDir * 3.5f);
+            runner.rotation = Quaternion.Euler(0f, zDir > 0f ? 0f : 180f, 0f);
+
+            _message = "Handballs to a runner!";
+            var fromHand = FindDeepChild(rover, "RightHand");
+            var toHand = FindDeepChild(runner, "LeftHand");
+            Vector3 from = fromHand ? fromHand.position : rover.position + Vector3.up;
+            float el = 0f;
+            while (el < handballDuration)
+            {
+                if (_roundId != roundAtStart) yield break;
+                el += Time.deltaTime;
+                float f = Mathf.Clamp01(el / handballDuration);
+                Vector3 to = toHand ? toHand.position : runner.position + Vector3.up;
+                // flat and quick, the way a handball travels
+                ball.position = Vector3.Lerp(from, to, f) + Vector3.up * Mathf.Sin(f * Mathf.PI) * 0.25f;
+                yield return null;
+            }
+
+            _message = "Runs it into the forward line!";
+            yield return RunStraight(runner, zDir);
+            if (_roundId != roundAtStart) yield break;
+            yield return RunStraight(runner, zDir);
+            if (_roundId != roundAtStart) yield break;
+            yield return PlayOnSnap(runner, zDir, humanControlled);
+        }
 
         System.Collections.IEnumerator BurstBounceSnap(Transform rover, float zDir, bool humanControlled)
         {
