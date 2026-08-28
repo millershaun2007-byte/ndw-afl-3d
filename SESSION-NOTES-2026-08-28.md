@@ -185,3 +185,30 @@ stands unrefuted. Note AFL is the SMALLEST of the three by download - 48.7MB vs
 reported "scoreboard: no" for four commits because it grepped `_crocScore`, which
 only exists in later versions. Grep for what appears ON SCREEN - "CATS", "Q1",
 "Rushed behind", "Plays on".
+
+## Known-good build, end of 28 Aug
+
+    build   v=770101368e
+    commit  392b041 (pushed to main)
+    slot    gs://ndw-game-builds/afl3d-test
+
+Shaun, having played it: "THE ONE IM PLAYING NOW IS MUCH BETTER" and
+"IT ACTUALLY IMPROVES AS THE GAME GOES ON".
+
+Checked why it improves rather than assuming: nothing in the code ramps.
+aiSkill is a fixed 1.6f and _quarter only feeds the clock and scoreboard
+- no difficulty curve, no rubber-banding. So the improvement is the
+player learning the timings, which was structurally impossible before
+today because two of the three inputs were discarded and the third did
+not exist.
+
+Three bugs of the same shape were behind "the game almost controls
+itself" - each a value computed and then never read:
+
+    ruck    _bestHumanErr   never read   -> could never win a ruck
+    spoil   no timing test at all        -> spoiled every AI kick
+    mark    markBestErr     never read   -> leap timing ignored
+
+All three now feed their outcome. Every beat reads the player's timing:
+ruck = mash the bar to green, mark = one leap inside the window, spoil =
+one committed tap (flailing fails), shot = stop the bar in the green.
