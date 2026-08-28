@@ -60,7 +60,6 @@ namespace AFL.Day1
         // and side-on only for the kick's flight, then cut back once the
         // mark resolves.
         Camera _mainCam;
-        Coroutine _defenderRunToZ;
         Vector3 _camDefaultPos;
         Quaternion _camDefaultRot;
         // Must match Day1BuildScript's BuildGoalPosts z position.
@@ -108,62 +107,6 @@ namespace AFL.Day1
         float _resolvedAt;
         string _message = "Centre bounce...";
         GUIStyle _style;
-        GUIStyle _scoreStyle;
-        GUIStyle _roundStyle;
-
-        // 2026-08-21, Shaun: "we could probably hook up a scoreboard now" —
-        // real running match score, not just narrated text. Both current
-        // scoring events (a goal in TakeShotAtGoal, a rushed behind in the
-        // spoil branch above) already exist as messages but never actually
-        // tallied anything. AddScore takes the SAME crocsInPossession/
-        // humanControlled value already threaded through every contest
-        // (they're the same boolean by identity throughout this file) —
-        // whichever team was attacking in that specific contest is who a
-        // goal or rushed behind is credited to, same as real AFL scoring
-        // (a rushed behind scores for the attacking team even though the
-        // defender is the one who touched it through).
-        int _crocScore;
-        int _rooScore;
-        void AddScore(bool crocsInPossession, int points)
-        {
-            if (crocsInPossession) _crocScore += points; else _rooScore += points;
-        }
-
-        // 2026-08-21, Shaun: "can we set up 3 minute quarters" — real match
-        // structure on top of the score above. The clock only ever advances
-        // the round-restart decision at the SAME point Update() already
-        // waited for a round to fully finish (_sequenceComplete) — never
-        // mid-contest — so time running out doesn't cut a kick or a mark
-        // off partway through, same "let the sequence complete" discipline
-        // as everything else _roundId-gated in this file.
-        public float quarterDuration = 180f; // 3 real minutes
-        public float quarterBreakPause = 3f;
-        int _quarter = 1;
-        float _quarterTimeRemaining;
-        bool _matchOver;
-        bool _handlingRoundEnd;
-
-        // 2026-08-22, Shaun: "lets have a wildcard round finals and a grand
-        // final just make up teams apart from mount dunned cats and well
-        // add all the players and map more logistics later." Scoped
-        // exactly as asked — made-up OPPONENT NAMES for a 3-round finals
-        // series, nothing else. Real rosters/new character models for
-        // these teams are explicitly deferred, not built here: Croc is
-        // always the home team (Mount Duneed Cats), Roo is always the
-        // away side, same as every contest already in this file — only
-        // the DISPLAY NAME attached to "Roo" changes each round. No new
-        // gameplay, no new characters, just relabeling the existing
-        // Croc-vs-Roo match with finals-series context.
-        const string HomeTeamLong = "Mount Duneed Cats";
-        const string HomeTeamShort = "CATS";
-        struct Fixture { public string round; public string awayLong; public string awayShort; }
-        readonly Fixture[] _fixtures = new Fixture[]
-        {
-            new Fixture { round = "Wildcard Round", awayLong = "Bannockburn Bulldogs", awayShort = "BULLDOGS" },
-            new Fixture { round = "Finals",         awayLong = "Torquay Tigers",       awayShort = "TIGERS"   },
-            new Fixture { round = "Grand Final",    awayLong = "Ocean Grove Sharks",   awayShort = "SHARKS"   },
-        };
-        int _fixtureIndex;
         // Real fix (2026-08-12) — found via a live Playwright check, not
         // guessed: the mark's 1s ball-hold loop and the round-reset timer
         // (1.2s after the full sequence) land almost exactly coincident,
@@ -201,7 +144,6 @@ namespace AFL.Day1
                 _camDefaultPos = _mainCam.transform.position;
                 _camDefaultRot = _mainCam.transform.rotation;
             }
-            _quarterTimeRemaining = quarterDuration;
             BeginThrow();
         }
 
@@ -266,63 +208,8 @@ namespace AFL.Day1
             _inputDeadline = ideal + perfectWindow;
         }
 
-        System.Collections.IEnumerator HandleRoundEnd()
-        {
-            if (_quarterTimeRemaining <= 0f)
-            {
-                if (_quarter >= 4)
-                {
-                    Fixture f = _fixtures[_fixtureIndex];
-                    bool draw = _crocScore == _rooScore;
-                    bool homeWon = _crocScore > _rooScore;
-                    bool isGrandFinal = _fixtureIndex >= _fixtures.Length - 1;
-
-                    if (draw)
-                    {
-                        // Logistics deferred per Shaun's own scoping — a
-                        // finals draw would need a real replay/extra-time
-                        // rule to resolve. Not built yet: hold here rather
-                        // than silently picking a fake winner.
-                        _matchOver = true;
-                        _message = "FULL TIME! " + f.round.ToUpper() + " — IT'S A DRAW!";
-                        _handlingRoundEnd = false;
-                        yield break;
-                    }
-
-                    string winnerName = homeWon ? HomeTeamLong : f.awayLong;
-                    if (isGrandFinal)
-                    {
-                        _matchOver = true;
-                        _message = winnerName.ToUpper() + " ARE PREMIERS!";
-                        _handlingRoundEnd = false;
-                        yield break;
-                    }
-
-                    Fixture next = _fixtures[_fixtureIndex + 1];
-                    _message = winnerName + " win the " + f.round + "! Next: " + next.round + " vs " + next.awayLong;
-                    yield return new WaitForSeconds(quarterBreakPause * 2f);
-                    _fixtureIndex++;
-                    _quarter = 1;
-                    _crocScore = 0;
-                    _rooScore = 0;
-                    _quarterTimeRemaining = quarterDuration;
-                    _handlingRoundEnd = false;
-                    BeginThrow();
-                    yield break;
-                }
-                _message = "End of Quarter " + _quarter + "!";
-                _quarter++;
-                yield return new WaitForSeconds(quarterBreakPause);
-                _quarterTimeRemaining = quarterDuration;
-            }
-            _handlingRoundEnd = false;
-            BeginThrow();
-        }
-
         void Update()
         {
-            if (!_matchOver) _quarterTimeRemaining -= Time.deltaTime;
-
             if (_resolved)
             {
                 // Real fix (2026-08-12) — adding the catch-pause-then-run
@@ -332,17 +219,7 @@ namespace AFL.Day1
                 // reset now waits on _sequenceComplete (set at the true end
                 // of TapBallAway) rather than a timer that predates the run
                 // existing at all.
-                //
-                // 2026-08-21 — this is also the ONLY point that ever
-                // starts a new round, so it's the one safe place to check
-                // whether the quarter clock has run out too: never mid-
-                // contest, only once the previous one has genuinely
-                // finished playing out.
-                if (_sequenceComplete && !_handlingRoundEnd && Time.time - _resolvedAt > 1.2f)
-                {
-                    _handlingRoundEnd = true;
-                    StartCoroutine(HandleRoundEnd());
-                }
+                if (_sequenceComplete && Time.time - _resolvedAt > 1.2f) BeginThrow();
                 return;
             }
 
@@ -452,44 +329,16 @@ namespace AFL.Day1
         // rover, instead of the ball going to a third, unrelated
         // character. Null (the centre ruck's own call) keeps the normal
         // rover behaviour exactly as it was.
-        // 2026-08-21 — real bug found by re-deriving the actual numbers,
-        // not guessing at the symptom again ("all over the shop" / "the
-        // defence... works it up towards the other goals"). A team's
-        // attacking direction is fixed for the whole game — Crocs always
-        // +Z, Roos always −Z — it's a property of the TEAM, not of
-        // possession. The old reverseDirection parameter flipped runDir
-        // a SECOND time, independently of the crocWins flip that already
-        // happens when possession changes hands — the kick-out's own
-        // chain call (crocWins: !humanControlled, reverseDirection: true)
-        // had both flips at once, which cancel: possession changes teams
-        // but the direction stays exactly what it was, so the recovering
-        // team ends up running toward the goal they were just defending
-        // instead of their own. Removed entirely — a team's direction
-        // now derives from nothing but which team it is.
-        //
-        // Renamed crocWins -> crocsInPossession in this function
-        // specifically: it stopped meaning "won the tap" the moment this
-        // became re-entrant (called again mid-round with the ball
-        // already loose) — it now means "which team currently has it,"
-        // ongoing state rather than a one-off event. The old name
-        // describing an event, tracking state that changes over a
-        // round, is exactly how the direction bug above went unnoticed.
-        //
-        // 2026-08-21 — chainDepth added for the second contest after a
-        // kick-out (see SECOND-CONTEST-BRIEF.md). This method was already
-        // re-entrant (the clearance path already reused it), so the
-        // second contest is just another call — but a spoil at that
-        // point would otherwise chain a THIRD kick-out, then a fourth
-        // contest, without limit. chainDepth stops that at the first
-        // level: only chainDepth==0 (the original centre-bounce contest)
-        // is allowed to chain into a kick-out's own second contest; any
-        // deeper spoil ends the round cleanly instead (see KickAway's
-        // defenderSpoiled branch).
-        System.Collections.IEnumerator TapBallAway(bool crocsInPossession, Transform kickerOverride = null, int chainDepth = 0)
+        // 2026-08-19, Shaun: "the defender takes the ball and goes back
+        // and kicks at the opposition goal... would need to be opposite."
+        // reverseDirection flips just the kick's runDir without touching
+        // which team/characters are used — the centre ruck's own call
+        // (reverseDirection: false, the default) is completely unaffected.
+        System.Collections.IEnumerator TapBallAway(bool crocWins, Transform kickerOverride = null, bool reverseDirection = false)
         {
             yield return new WaitForSeconds(hopDuration / 2f + 0.15f);
             Vector3 start = ball.position;
-            Transform rover = kickerOverride ? kickerOverride : (crocsInPossession ? crocRover : rooRover);
+            Transform rover = kickerOverride ? kickerOverride : (crocWins ? crocRover : rooRover);
             // Real fix (2026-08-12, Shaun: "receiving the ball in the back
             // of the head need to receive ball in chest or hands"). The old
             // point sat dead-centre above the rover's own pivot with no
@@ -532,7 +381,7 @@ namespace AFL.Day1
             // that's explicitly a later day's asset work. A clear message
             // is enough to make the handoff read as one continuous phase
             // rather than the ball just stopping.
-            _message = crocsInPossession ? "Crocs' rover gets it!" : "Roos' rover gets it!";
+            _message = crocWins ? "Crocs' rover gets it!" : "Roos' rover gets it!";
 
             // Day 3, first slice (2026-08-12, Shaun: "after they receive the
             // ball slight pause then they run... just run straight ahead").
@@ -544,47 +393,14 @@ namespace AFL.Day1
             // Real fix, same message — run direction is NOT "whichever way
             // the rover happens to be facing" (Shaun: "they face the wrong
             // way, if they run the opposite way to what's set up that's
-            // fine"). Croc always attacks +Z, Roo always -Z — fixed for
-            // the whole game, a property of the TEAM, not of possession
-            // or of how this particular call got here (see this
-            // function's own header comment on the reverseDirection bug
-            // this replaced).
-            float runDir = crocsInPossession ? 1f : -1f;
-            // 2026-08-23, Shaun: "when the rover gets the ball the other
-            // rover can chase the player with the ball if they catch them
-            // it causes the kick to fall short of the forward. then its
-            // stal now to kick to forward for normal mark." The opposing
-            // rover (still back at the ruck contest, not otherwise doing
-            // anything during this beat) chases alongside the ball-
-            // carrier's own run. Decide-then-perform (this file's own
-            // established principle, same idiom defenderSpoilT/_botPressT
-            // already use for a fair-but-beatable AI contest) — the catch
-            // outcome is rolled before the run starts, not derived from
-            // simulating two independent movements and comparing
-            // positions after the fact. Caught -> reuses the exact
-            // "falls short" scene already built and verified tonight
-            // (ShortKickLanding, via a per-round effective undershoot
-            // below); not caught -> completely unchanged normal-distance
-            // kick to a normal mark, same as before this feature existed.
-            Transform chaser = crocsInPossession ? rooRover : crocRover;
-            bool caughtByChaser = chaser && Random.value < chaseCatchChance;
-            if (chaser) StartCoroutine(RunStraight(chaser, runDir, carriesBall: false));
+            // fine"). It's defined directly from the tap: the ball travels
+            // from the ruck to the rover, who stands behind their own ruck
+            // player, so the run is the mirror of that — straight toward
+            // their own goalposts, which is also "opposite the direction
+            // the ball was just tapped", per Shaun's own read of it. Croc's
+            // rover taps in from -Z, so runs +Z; Roo's is the reverse.
+            float runDir = (crocWins ? 1f : -1f) * (reverseDirection ? -1f : 1f);
             yield return RunStraight(rover, runDir);
-            // 2026-08-21 — real bug, found by computing the actual
-            // numbers rather than guessing again: every chain hop
-            // (kick-out's second contest, an out-of-range mark, a spoil
-            // past the first contest) advances the rover by runDistance
-            // (6) here, then peakZ below adds another kickDistance*0.5
-            // (8) — 14 units further downfield per hop, with no bounds
-            // check. The kick-out itself already starts the chain
-            // partway to a goal (kickOutTargetZ), so after just 1-2 hops
-            // this can already exceed the field's own real half-length
-            // (goalZ=20) — confirmed as the actual cause of the camera
-            // ending up pointed at the sky in live testing (the pivot
-            // landed outside the field entirely, not a ball-height or
-            // stale-camera issue as first guessed). Clamp to stay on the
-            // actual ground regardless of chain depth.
-            rover.position = new Vector3(rover.position.x, rover.position.y, Mathf.Clamp(rover.position.z, -(goalZ - 2f), goalZ - 2f));
 
             // Day 3, second slice (2026-08-12, Shaun: "either player takes
             // these few steps then does a kick", "quick pause or just do
@@ -593,9 +409,7 @@ namespace AFL.Day1
             // "kangaroo could just drop the ball on its foot and kick it
             // same as the croc" — one shared mechanic for both, not a
             // per-species animation).
-            _message = caughtByChaser
-                ? (crocsInPossession ? "Caught by the Roo!" : "Caught by the Croc!")
-                : (crocsInPossession ? "Crocs run it out!" : "Roos run it out!");
+            _message = crocWins ? "Crocs run it out!" : "Roos run it out!";
 
             // Real fix (2026-08-12, Shaun: "youve kind of gone a bit
             // rouge with this one" — the automatic run-to-landing-spot
@@ -615,45 +429,9 @@ namespace AFL.Day1
             // into position (visual presence, matches "one contest zone
             // per end" already built), just no role in grading the catch
             // yet. That's real, separate scope for later.
-            Transform forward = crocsInPossession ? crocForward : rooForward;
-            Transform defender = crocsInPossession ? rooDefender : crocDefender;
-            // 2026-08-21 — chained contest only (chainDepth > 0, see
-            // SECOND-CONTEST-BRIEF.md point 3). forward/defender are
-            // wherever the FIRST contest (and the kick-out's own
-            // defender-slide) left them — their original forward-line
-            // spawn positions, which have nothing to do with where this
-            // new contest is actually happening (anchored on rover's own
-            // position, set by the caller to the kick-out's landing
-            // spot). Without this they'd run at the new contest zone
-            // from an arbitrary leftover position instead of a real
-            // start line.
-            if (chainDepth > 0)
-            {
-                forward.position = new Vector3(forward.position.x, forward.position.y, rover.position.z);
-                defender.position = new Vector3(defender.position.x, defender.position.y, rover.position.z);
-            }
-            // Single source of truth for this kick's real distance — see
-            // shortKickUndershoot's own comment above. Computed once here,
-            // used for peakZ (the forward/defender run target) below, and
-            // passed explicitly into KickAway so the ball's own flight
-            // can't drift out of sync with where the forward actually is.
-            // 2026-08-23 — the chase's own catch outcome (caughtByChaser,
-            // above) now feeds this too: shortKickUndershoot alone stays 0
-            // (the "no change from normal" default, see its own comment),
-            // real per-round undershoot instead comes from getting
-            // physically caught by the chasing rover, via
-            // chaseTackleUndershoot below.
-            float effectiveKickDistance = Mathf.Max(2f, kickDistance - shortKickUndershoot - (caughtByChaser ? chaseTackleUndershoot : 0f));
-            // Clamped for the same reason rover.position.z was clamped
-            // above — this adds another effectiveKickDistance*0.5 (8
-            // units at full distance) beyond rover's already-clamped
-            // position, which alone can still land outside the field on a
-            // deep chain hop.
-            float peakZ = Mathf.Clamp(rover.position.z + runDir * effectiveKickDistance * 0.5f, -(goalZ - 2f), goalZ - 2f);
-            // TEMPORARY diagnostic — Shaun: "it always seems to go back
-            // to the defensive team's goals... this is where you are
-            // confused." Print the actual numbers instead of reasoning
-            // through the geometry a fourth time.
+            Transform forward = crocWins ? crocForward : rooForward;
+            Transform defender = crocWins ? rooDefender : crocDefender;
+            float peakZ = rover.position.z + runDir * kickDistance * 0.5f;
             float arriveByPeak = kickDropDuration + kickPause + kickDuration * 0.5f;
             // Real fix (2026-08-12, Shaun: "the speccy... forward now
             // starts behind runs up jumps really high on the opponents
@@ -671,20 +449,7 @@ namespace AFL.Day1
             // ~0.65s of the run (the old cut point), the forward loomed
             // huge/clipped at the bottom of frame. Cutting wide right as
             // the run begins avoids that window entirely.
-            // 2026-08-21 — chained contest passes its own anchor instead
-            // of the default goalZ-pinned pivot, which would point at
-            // the wrong end of the ground for a contest happening
-            // mid-field. Original (chainDepth==0) call is unaffected —
-            // contestZ stays null.
-            //
-            // Real bug, found by re-deriving the actual numbers: this
-            // passed rover.position.z (peakZ's own INPUT) instead of
-            // peakZ itself — the contest happens at peakZ, which is
-            // rover.position.z + runDir*kickDistance*0.5, a full 8 units
-            // further out. The camera was aimed 8 units short of the
-            // actual action on every chained contest. peakZ is already
-            // computed above, use it directly.
-            CutCameraForKick(runDir, chainDepth > 0 ? (float?)peakZ : null);
+            CutCameraForKick(runDir);
             _markHoldReleased = false;
             // 2026-08-19, Shaun: bring back the normal (non-leaping) mark
             // as the common case, speccy as the rarer highlight — real
@@ -699,21 +464,8 @@ namespace AFL.Day1
             bool isSpeccy = Random.value < speccyChance;
             if (isSpeccy) StartCoroutine(SpeccyLeap(forward, defender, peakZ, arriveByPeak));
             else StartCoroutine(RunToZ(forward, peakZ, arriveByPeak));
-            // 2026-08-19, Shaun: "the kickout person's ability — looks
-            // like they may not be able to move." Real bug, found by
-            // checking the actual timing, not guessing: arriveByPeak
-            // (~1.2s) starts counting from HERE, partway through
-            // KickAway's own el timeline (jumpFireAt onward), so this
-            // run doesn't actually finish until AFTER KickAway's loop
-            // (kickDuration=1.1) has already exited into mark resolution
-            // — meaning the later kick-out RunToZ(defender, ...) call
-            // starts while this ORIGINAL one is still running, both
-            // writing defender.position/.rotation at once. Exactly this
-            // project's own documented recurring failure (one fact
-            // written in two places). Stored so the kick-out step can
-            // explicitly stop it first.
-            _defenderRunToZ = StartCoroutine(RunToZ(defender, peakZ, arriveByPeak));
-            yield return KickAway(rover, runDir, forward, defender, isSpeccy, crocsInPossession, chainDepth, effectiveKickDistance);
+            StartCoroutine(RunToZ(defender, peakZ, arriveByPeak));
+            yield return KickAway(rover, runDir, forward, defender, isSpeccy, crocWins);
             // Reset countdown starts from here, not from when the contest
             // first resolved — Update()'s existing reset logic now waits
             // the right amount after the FULL sequence (tap, catch, run,
@@ -761,38 +513,6 @@ namespace AFL.Day1
         // leaving room for Day 5's shot at goal rather than standing
         // half the ground away from it.
         public float kickDistance = 16f;
-        // 2026-08-23, Shaun: "set a scene up... where the kick into the
-        // forward line falls short of the forward." kickDistance alone
-        // can't do this safely — it already feeds BOTH the forward/
-        // defender's run target (peakZ, TapBallAway below) AND the ball's
-        // own flight/freeze point (KickAway), computed independently in
-        // two separate places from the same constant. They've only ever
-        // stayed in sync because kickDistance never varied — exactly the
-        // "one fact written in two places" trap this file's own header
-        // warns about, just not yet triggered. shortKickUndershoot is
-        // read ONCE in TapBallAway to build effectiveKickDistance, which
-        // is then passed explicitly into KickAway as a parameter — a
-        // single source of truth, not two formulas that happen to agree
-        // today. 0 = no change from normal. Was set to 5 for the short-
-        // kick scene's own build/test session so it fired deterministically
-        // every round instead of being a rare thing to wait for — now that
-        // BOTH that scene and the follow-on play-on-a-mark scene are built
-        // and need testing, a permanently-forced short kick makes the
-        // NORMAL full-distance mark (which play-on hangs off) unreachable.
-        // Back to 0 (real normal-distance kicks, mark/play-on reachable
-        // again) until Shaun decides how often a kick should actually fall
-        // short in real play — that's a genuine game-balance call, not
-        // something to silently pick a probability for here.
-        public float shortKickUndershoot = 0f;
-        // 2026-08-23 — the chase mechanic's own tunables (see
-        // caughtByChaser in TapBallAway). chaseCatchChance is deliberately
-        // NOT near-certain either way: "if they catch them" implies a real
-        // contest, not a coin flip most rounds ignore or a near-guaranteed
-        // disruption every time. chaseTackleUndershoot reuses the exact
-        // magnitude (5) already tuned and verified for the "falls short"
-        // scene earlier tonight, not a newly-guessed value.
-        public float chaseCatchChance = 0.35f;
-        public float chaseTackleUndershoot = 5f;
         public float kickDuration = 1.1f;
         public float kickDropDuration = 0.35f;
 
@@ -814,25 +534,6 @@ namespace AFL.Day1
         // place if the balance needs adjusting after playtesting.
         public float defenderSpoilWindow = 0.20f;
         public float defenderSpoilJitter = 0.55f;
-        // 2026-08-21, Shaun: "after some spoils another character gets
-        // the ball goes for a run and kicks the ball into the forward
-        // line exactly the same as what would happen in the centre" —
-        // and "if they take the mark same thing as the start they kick
-        // the ball towards the forward." Both outcomes (mark out of
-        // range, and a spoil after the first kick-out) chain into
-        // another TapBallAway instead of ending the round — real
-        // football, but contest->spoil->clearer->contest has no natural
-        // terminus, so it's capped.
-        //
-        // 2026-08-21, Shaun (live playtest — "all over the shop"): 3 let
-        // the chain work the ball the FULL length of the ground in one
-        // round (kick-out, mark, clearance, mark, clearance...), which
-        // read as too sprawling/chaotic to actually follow. Capped to 1:
-        // the kick-out's own first contest still gets its full mark-or-
-        // spoiled-clearance treatment, but if THAT needs to chain again
-        // (a spoil on it, or an out-of-range mark), it stops there and
-        // resets instead of working further up the ground.
-        public int maxChainDepth = 1;
 
         // Drop the ball to the foot, brief beat, then kick it away in an
         // arc continuing the same direction as the run. Now interleaved
@@ -844,14 +545,8 @@ namespace AFL.Day1
         // rejected sub-100ms analytic-physics system — just relocated to
         // the kick's flight. "Dont worry about the defender yet" — this
         // grades the forward's own timing only, no opponent comparison.
-        // effectiveDistance defaults to kickDistance (the old behaviour)
-        // only so this signature isn't a silent breaking change for any
-        // future caller that doesn't know about shortKickUndershoot yet —
-        // the one real call site (TapBallAway) always passes its own
-        // effectiveKickDistance explicitly, never relies on this default.
-        System.Collections.IEnumerator KickAway(Transform t, float zDir, Transform forward, Transform defender, bool isSpeccy, bool humanControlled, int chainDepth = 0, float? effectiveDistance = null)
+        System.Collections.IEnumerator KickAway(Transform t, float zDir, Transform forward, Transform defender, bool isSpeccy, bool humanControlled)
         {
-            float kickDist = effectiveDistance ?? kickDistance;
             if (!t || !ball) yield break;
             int roundAtStart = _roundId;
             var rightHand = FindDeepChild(t, "RightHand");
@@ -879,43 +574,7 @@ namespace AFL.Day1
             // * 0.5, the same instant the Sin curve below actually peaks)
             // — the cue IS the ball's height, same principle as day 1.
             Vector3 kickStart = ball.position;
-            // Same field-bounds clamp as TapBallAway's peakZ, applied
-            // here too — this kick's own full kickDist (not halved) can
-            // independently push the ball's landing spot outside the
-            // field on a deep chain hop, one level below where the
-            // TapBallAway-level clamps already catch it. Uses kickDist
-            // (the passed-in effective distance), NOT the public
-            // kickDistance field directly — see this function's own
-            // signature comment for why.
-            float kickEndZ = Mathf.Clamp(kickStart.z + zDir * kickDist, -(goalZ - 2f), goalZ - 2f);
-            Vector3 kickEnd = new Vector3(kickStart.x, kickStart.y, kickEndZ);
-
-            // 2026-08-23, Shaun: "set a scene up... where the kick...
-            // falls short of the forward" — first of a planned series of
-            // distinct football scenarios ("this is one scene... finish
-            // this first part first" before building the next one, the
-            // forward gathering a short kick and snapping at goal).
-            // A short kick isn't a markable contest at all — there's no
-            // ball in the air near the forward to jump for — so this
-            // deliberately does NOT reuse the mark/spoil timing window
-            // below (jumpFireAt, NormalMarkHop, "Go up for the mark!").
-            // That window is built entirely around a ball arriving AT the
-            // forward's position at a fixed time; a short kick lands
-            // somewhere else on the ground first, so grading a timed tap
-            // against it would be grading a contest that isn't actually
-            // happening on screen. Ends the round cleanly here (same
-            // "Time's up" no-further-action pattern ContinueChainOrEnd
-            // already uses at maxChainDepth) rather than chaining into a
-            // new contest — the gather+snap-kick mechanic is explicit
-            // future scope, not built yet, so this round has nothing
-            // further to hand off to.
-            bool isShortKick = kickDist < kickDistance - 0.01f;
-            if (isShortKick)
-            {
-                yield return ShortKickLanding(kickStart, kickEnd, isSpeccy, forward, zDir, humanControlled);
-                yield break;
-            }
-
+            Vector3 kickEnd = kickStart + new Vector3(0, 0, zDir * kickDistance);
             float peakT = kickDuration * 0.5f;
             float markTargetT = peakT + markReactionCompensation;
             float markDeadline = Mathf.Min(peakT + markPerfectWindow, kickDuration);
@@ -1047,16 +706,12 @@ namespace AFL.Day1
                         : defendPressed);
                     bool marked = markPressed && !defenderSpoiled;
                     _message = marked ? "MARK!" : (defenderSpoiled ? "Spoiled by the defender!" : "Spilled!");
-                    // 2026-08-21 — real bug: this called the unmirrored
-                    // CutCameraToMarkCloseup(forward) (fixed +7 X
-                    // offset). Rarely showed at the centre bounce since
-                    // the forward starts near the middle, but chained
-                    // contests put players out at ±1.6/±2.6 — on the -X
-                    // side this puts the camera INSIDE the post cluster's
-                    // sightline, the exact occlusion the mirrored
-                    // overload (already used for the kick-out) exists to
-                    // avoid.
-                    if (marked) CutCameraToMarkCloseup(forward, Mathf.Sign(forward.position.x == 0f ? 1f : forward.position.x));
+                    // 2026-08-19, TEMPORARY diagnostic — hard to pin down
+                    // from description alone across several live tests
+                    // tonight. Remove once the spoil/rushed-behind chain
+                    // is confirmed reliably working.
+                    _message += $" [speccy={isSpeccy} humanCtrl={humanControlled} markPressed={markPressed} defendPressed={defendPressed}]";
+                    if (marked) CutCameraToMarkCloseup(forward);
                     _markHoldSucceeded = marked;
                     _markHoldReleased = true;
                 }
@@ -1078,146 +733,21 @@ namespace AFL.Day1
             // of the position-writing level.
             bool markedResult = markPressed && markResolved && !defenderSpoiled;
             yield return MarkCatchRoutine(forward, markedResult);
-            if (markedResult)
-            {
-                // 2026-08-23, Shaun: "when the forward marks they can play
-                // on and kick a snap" — real AFL: after a mark, a player
-                // can choose to play on immediately (a spontaneous, lower-
-                // ceremony snap) instead of the normal set-shot routine.
-                // Deliberately checked BEFORE the shotRangeZ range check
-                // below, not gated by it — playing on is a real, if risky,
-                // choice even from outside normal shooting range (a genuine
-                // "have a crack from here anyway" decision), not just an
-                // alternate path once already in range. Same "the human
-                // decides for themself, AI gets a real randomized attempt
-                // too" fairness principle this file already uses for the
-                // mark/spoil/tap-at-goal decisions above.
-                bool playOn = false;
-                bool aiWantsPlayOn = !humanControlled && Random.value < aiPlayOnChance;
-                _message = humanControlled ? "Tap to play on!" : (aiWantsPlayOn ? "Thinking about playing on..." : "Sizing up the shot...");
-                float aiPlayOnAt = aiWantsPlayOn ? Random.Range(0.15f, playOnWindow) : 0f;
-                float pw = 0f;
-                while (pw < playOnWindow)
-                {
-                    if (_roundId != roundAtStart) yield break;
-                    pw += Time.deltaTime;
-                    if (humanControlled)
-                    {
-                        if (Day1Input.TapDown) { playOn = true; break; }
-                    }
-                    else if (aiWantsPlayOn && pw >= aiPlayOnAt)
-                    {
-                        playOn = true; break;
-                    }
-                    yield return null;
-                }
-
-                if (playOn)
-                {
-                    yield return PlayOnSnap(forward, zDir, humanControlled);
-                    yield break;
-                }
-
-                // 2026-08-21, Shaun: previously scoped the chained contest
-                // (chainDepth > 0, after a kick-out) to stop dead right at
-                // a confirmed mark — deliberate, so the mark itself
-                // (positioning, camera) could be verified in isolation
-                // first (see git history for that intermediate state).
-                // Confirmed working; Shaun then asked for the natural next
-                // step: "getting up to the forward down the other end
-                // they just need to go back and kick the goal down the
-                // other end" — a mark at chainDepth > 0 now uses the exact
-                // same shot-at-goal / continue-chain logic as the original
-                // centre-bounce contest (chainDepth == 0), below. No
-                // special-casing needed — TakeShotAtGoal and
-                // ContinueChainOrEnd already take kicker/zDir/chainDepth
-                // as arguments, not an assumption about which contest this
-                // is.
-                // 2026-08-21, Shaun: "if they take the mark same thing as
-                // the start they kick the ball towards the forward" — a
-                // mark taken mid-ground shouldn't jump straight to a set
-                // shot from 60 metres out, only one taken within real
-                // shooting range does. shotRangeZ is DERIVED from
-                // kickDistance (how far a kick actually travels) rather
-                // than picked by eye — if kick power is ever re-tuned,
-                // this follows automatically instead of silently drifting
-                // out of sync with it (the exact trap CLAUDE.md warns
-                // about at its own top).
-                float shotRangeZ = goalZ - kickDistance;
-                if (Mathf.Abs(ball.position.z) >= shotRangeZ)
-                {
-                    yield return TakeShotAtGoal(forward, zDir, humanControlled);
-                }
-                else
-                {
-                    // Out of range — the marker plays on, same team,
-                    // same direction (no reverse), continuing toward
-                    // their own forward line via the same TapBallAway
-                    // chain as everything else.
-                    //
-                    // 2026-08-21, Shaun: "the ball going in the air until
-                    // ground level like the kickout just pause then bring
-                    // it down" — same class of bug as the spoil branch
-                    // below and the kick-out's own original defect: the
-                    // ball is still wherever MarkCatchRoutine left it
-                    // (elevated, mid-catch height), and nothing resets
-                    // the camera before chaining into the next contest.
-                    ball.position = new Vector3(ball.position.x, groundY, ball.position.z);
-                    CutCameraToDefault();
-                    yield return new WaitForSeconds(catchPause);
-                    if (_roundId != roundAtStart) yield break;
-                    yield return ContinueChainOrEnd(humanControlled, forward, chainDepth);
-                }
-            }
+            if (markedResult) yield return TakeShotAtGoal(forward, zDir, humanControlled);
             else if (defenderSpoiled)
             {
-                // 2026-08-21, Shaun (correcting SECOND-CONTEST-BRIEF.md,
-                // via CLEARANCE-CHAIN-BRIEF.md): a rushed behind + literal
-                // kick-out only makes real football sense at the very
-                // first contest — the only one that happens right at a
-                // goal line, where a spoil can actually produce a score.
-                // Every later spoil (chainDepth > 0) happens mid-ground,
-                // same as any other loose ball — it gets the same simple
-                // clearance handoff as an uncontested drop, not another
-                // goal-line sequence.
-                if (chainDepth == 0)
-                {
                 // 2026-08-19, Shaun: "the defender spoiled the ball
                 // through the points, no second play, just a straight
                 // spoil through the points if they spoil it." A real,
                 // authentic AFL moment — spoiling it hard under pressure
                 // can knock it straight through the defender's own behind
                 // posts for a rushed point, rather than a clean clearance.
+                // Deliberately minimal: one direct kick-arc through the
+                // outer posts, then the round resets — no clearance chain
+                // layered on top of this yet.
                 _message = "Rushed behind — one point!";
-                AddScore(humanControlled, 1);
-                // 2026-08-21, Shaun (live playtest): "the ball randomly
-                // goes to the top of the goal posts" — the REAL root
-                // cause, found by tracing actual numbers, not the camera
-                // at all (that was a real but secondary issue, already
-                // fixed above). The ball was still frozen at the mark
-                // contest's peak jump height (groundY + kickHeightNormal
-                // = 1.0 + 2.7 = 3.7) from before the spoil — ALREADY
-                // taller than the goal posts themselves (3.2) — and
-                // nothing ever brought it back down to a sensible resting
-                // height before this whole rushed-behind + kick-out
-                // sequence, so it visibly hovered near/above the post the
-                // entire time. Reset to ground level here, once, before
-                // either kick arc starts.
-                ball.position = new Vector3(ball.position.x, groundY, ball.position.z);
-                // 2026-08-21 — real fix, found by tracing coordinates
-                // rather than guessing at symptoms again (see
-                // KICKOUT-BRIEF.md). Ball and kicker must end up on the
-                // SAME side. behindTarget used to hardcode +1.6 while
-                // clearX (below) followed the defender's spawn sign — so
-                // half the time they finished 4.2 units apart on
-                // OPPOSITE sides of the goal, which is why "can't see the
-                // player near the ball" survived three earlier fix
-                // attempts that each addressed a real but secondary
-                // issue. Captured once here, before the slide, while
-                // defender.position.x still holds the spawn value.
-                float side = Mathf.Sign(defender.position.x == 0f ? 1f : defender.position.x);
                 Vector3 behindKickStart = ball.position;
-                Vector3 behindTarget = new Vector3(side * 1.6f, behindKickStart.y, zDir * goalZ);
+                Vector3 behindTarget = new Vector3(1.6f, behindKickStart.y, zDir * goalZ);
                 float behindEl = 0f;
                 while (behindEl < shotKickDuration)
                 {
@@ -1237,33 +767,8 @@ namespace AFL.Day1
                 // already right there for the spoil. Deliberately
                 // minimal again: run to the goal square, kick it back
                 // toward centre, stop — no new contest chained on yet.
-                // Stop the original mark-contest run before starting a
-                // new one for the same character — see the field's own
-                // comment for the confirmed race this was causing.
-                if (_defenderRunToZ != null) StopCoroutine(_defenderRunToZ);
                 Vector3 goalSquare = new Vector3(0f, defender.position.y, zDir * goalZ);
                 yield return RunToZ(defender, goalSquare.z, 0.6f);
-                if (_roundId != roundAtStart) yield break;
-                // 2026-08-21, Shaun (live playtest): still couldn't
-                // actually see the player even after the ball-height and
-                // camera fixes above — RunToZ only ever moves Z, so the
-                // defender's X stayed wherever the mark contest left them
-                // (~±0.9, the defender-zone spawn X from MainBuildScript)
-                // — almost exactly between the two inner goal posts
-                // (±0.6). The close-up camera's fixed (7,3,0) world-space
-                // offset then looked straight through a post to reach
-                // them. Slide clear of the post cluster (posts span
-                // -1.3..1.3) before the close-up cuts in — same `side` as
-                // the ball above now, not a separately-derived sign.
-                float clearX = side * 2.6f;
-                float slideEl = 0f;
-                Vector3 slideStart = defender.position;
-                while (slideEl < 0.3f)
-                {
-                    slideEl += Time.deltaTime;
-                    defender.position = Vector3.Lerp(slideStart, new Vector3(clearX, slideStart.y, slideStart.z), Mathf.Clamp01(slideEl / 0.3f));
-                    yield return null;
-                }
                 if (_roundId != roundAtStart) yield break;
 
                 // 2026-08-19, Shaun: "pause, zoom in on the player, then
@@ -1285,57 +790,13 @@ namespace AFL.Day1
                 // the kick-out facing explicitly instead of trusting
                 // RunToZ's rotation for what's practically a non-move.
                 defender.rotation = Quaternion.Euler(0, zDir > 0 ? 180 : 0, 0);
-                // 2026-08-21 — mirrored variant, not the shared
-                // CutCameraToMarkCloseup(Transform) the mark beat uses
-                // (that framing is already signed off, left untouched).
-                // The original's fixed +X offset means when the subject
-                // ends up on -X (half the spawn sides), the camera sits
-                // INSIDE the post cluster's sightline — the exact
-                // occlusion the slide above exists to avoid.
-                CutCameraToMarkCloseup(defender, side);
-                yield return new WaitForSeconds(kickOutPause);
+                CutCameraToMarkCloseup(defender);
+                yield return new WaitForSeconds(catchPause);
                 if (_roundId != roundAtStart) yield break;
-                // 2026-08-21, Shaun: "you need to zoom right in make sure
-                // you have the camera on the player then make sure you
-                // see them kick the ball out." Stay on the zoomed-in
-                // close-up through the WHOLE kick motion (yielded, not
-                // fired-and-forgotten) — the wide kick-arc camera only
-                // cuts in once the leg has actually snapped forward, so
-                // the kick itself is genuinely visible before the ball
-                // starts flying, not hidden behind a camera cut.
-                //
-                // 2026-08-21 — the actual defect this whole beat had:
-                // the ball was landing at behindTarget and never moving
-                // again until the kick-out arc itself, while the leg
-                // snapped at the defender's own position — a metre-plus
-                // away even on the correctly-signed side. Kicker and
-                // ball were two unrelated objects that happened to
-                // animate at the same time. Put it on the boot and keep
-                // it there through the motion, same idiom
-                // MarkCatchRoutine already uses for the hand (track the
-                // real bone, don't guess a nearby point).
-                var boot = FindDeepChild(defender, "RightFoot");
-                if (ball) ball.position = boot ? boot.position : defender.position + Vector3.up * (groundY * 0.5f);
-                yield return StartCoroutine(KickMotionWithBall(defender, boot, kickMotionDuration));
-                if (_roundId != roundAtStart) yield break;
-                // 2026-08-21, Shaun (live playtest): "camera nowhere near
-                // the person" — first attempted fix (flipping this to
-                // plain zDir) was still wrong. Real problem: this whole
-                // kick travels the full ground length (goal square to
-                // centre, ~20 units), far more than the static, non-
-                // panning CutCameraForKick was ever built to cover (see
-                // CutCameraForKickOut's own comment) — so no single sign
-                // choice on the OLD camera call would have fixed it, a
-                // dedicated wide shot was the actual fix needed.
-                // 2026-08-21, Shaun: "does not have to go all the way to
-                // the centre" — a real fullback kick-out doesn't need to
-                // reach dead centre, and a shorter traverse is also
-                // easier to frame cleanly in one static shot.
-                float kickOutTargetZ = zDir * goalZ - zDir * kickOutDistance;
-                CutCameraForKickOut(zDir * goalZ, kickOutTargetZ);
+                CutCameraForKick(-zDir);
 
                 Vector3 kickOutStart = ball.position;
-                Vector3 kickOutTarget = new Vector3(0f, kickOutStart.y, kickOutTargetZ);
+                Vector3 kickOutTarget = new Vector3(0f, kickOutStart.y, 0f);
                 float kickOutEl = 0f;
                 while (kickOutEl < shotKickDuration)
                 {
@@ -1347,60 +808,6 @@ namespace AFL.Day1
                     yield return null;
                 }
                 ball.position = kickOutTarget;
-
-                // 2026-08-21 — second contest chain (see
-                // SECOND-CONTEST-BRIEF.md, and note this whole block only
-                // runs at chainDepth==0 per the outer check above, so the
-                // chain is always allowed here — the earlier depth guard
-                // that lived on this specific call was removed, the real
-                // bound now lives in ContinueChainOrEnd/maxChainDepth for
-                // every OTHER spoil in the chain). Reposition defender
-                // (the kick-out kicker, now acting as this new contest's
-                // "rover") onto the ball's actual landing spot —
-                // TapBallAway's own peakZ and camera pivot both derive
-                // from rover.position.z, so this is what anchors the
-                // whole chained contest on where the ball really is
-                // instead of where the kicker used to stand
-                // (SECOND-CONTEST-BRIEF.md point 1).
-                defender.position = kickOutTarget;
-                // Possession flips to the team that just kicked out —
-                // TapBallAway derives their run direction from nothing
-                // but which team that is (see its own header comment on
-                // the reverseDirection bug this replaced); no separate
-                // direction override needed or correct here.
-                yield return TapBallAway(crocsInPossession: !humanControlled, kickerOverride: defender, chainDepth: chainDepth + 1);
-                }
-                else
-                {
-                    // 2026-08-21 — a spoil past the first contest is just
-                    // a mid-ground loose ball, same treatment as an
-                    // uncontested drop below (no goal-line/behind
-                    // mechanic — that only makes sense right at a goal).
-                    _message = "Spoiled — cleared away!";
-                    // 2026-08-21, Shaun: "the ball going in the air until
-                    // ground level like the kickout just pause then bring
-                    // it down" — same real bug as the kick-out's original
-                    // "floats near the goal post" defect: the ball is
-                    // still frozen at this contest's own peak jump height
-                    // from before the spoil, never reset to a sensible
-                    // resting height. Also reset the camera to the known-
-                    // safe default here — this branch didn't cut to
-                    // anything of its own, so it was inheriting whatever
-                    // pivot the PREVIOUS chain hop's wide kick-shot left
-                    // behind, which is exactly the kind of drift that
-                    // produced a camera pointed at the sky in testing.
-                    ball.position = new Vector3(ball.position.x, groundY, ball.position.z);
-                    CutCameraToDefault();
-                    yield return new WaitForSeconds(catchPause);
-                    if (_roundId != roundAtStart) yield break;
-                    Transform spoilClearer = humanControlled ? rooClearer : crocClearer;
-                    spoilClearer.position = new Vector3(spoilClearer.position.x, spoilClearer.position.y, ball.position.z);
-                    yield return RunToZ(spoilClearer, ball.position.z, 0.4f);
-                    if (_roundId != roundAtStart) yield break;
-                    yield return MarkCatchRoutine(spoilClearer, true);
-                    if (_roundId != roundAtStart) yield break;
-                    yield return ContinueChainOrEnd(!humanControlled, spoilClearer, chainDepth);
-                }
             }
             else
             {
@@ -1416,62 +823,17 @@ namespace AFL.Day1
                 yield return RunToZ(clearer, forward.position.z, 0.6f);
                 if (_roundId != roundAtStart) yield break;
                 yield return MarkCatchRoutine(clearer, true);
-                if (_roundId != roundAtStart) yield break;
-                // 2026-08-21, Shaun: "the ball going in the air until
-                // ground level like the kickout just pause then bring it
-                // down" — same class of bug as the other two chain
-                // continuations: MarkCatchRoutine leaves the ball at the
-                // clearer's hand (elevated), and nothing resets the
-                // camera before the next contest. Ground it and cut to
-                // the known-safe default before chaining on.
-                ball.position = new Vector3(ball.position.x, groundY, ball.position.z);
-                CutCameraToDefault();
-                yield return new WaitForSeconds(catchPause);
-                if (_roundId != roundAtStart) yield break;
-                // 2026-08-21, Shaun: "after some spoils another character
-                // gets the ball goes for a run and kicks the ball into
-                // the forward line exactly the same as what would happen
-                // in the centre" — the clearer doesn't just receive it
-                // and stop, they continue the chain the same way
-                // everything else in this game does.
-                yield return ContinueChainOrEnd(!humanControlled, clearer, chainDepth);
             }
             CutCameraToDefault();
         }
 
-        // 2026-08-21 — shared by "Cleared away!" (an uncontested drop)
-        // and a spoil on any contest past the first (see below — only
-        // the very first, goal-line contest gets the rushed-behind/
-        // kick-out treatment; every later spoil is just a clearance,
-        // same as this). Continues via the same TapBallAway everything
-        // else in this game reuses, bounded by maxChainDepth so
-        // contest->spoil->clearer->contest can't recurse forever. At the
-        // cap, end honestly (CLAUDE.md's placeholder-ending rule)
-        // instead of stalling into not-yet-built work.
-        System.Collections.IEnumerator ContinueChainOrEnd(bool crocsInPossession, Transform newRover, int chainDepth)
-        {
-            if (chainDepth >= maxChainDepth)
-            {
-                _message = "Time's up — turnover!";
-                yield break;
-            }
-            yield return TapBallAway(crocsInPossession: crocsInPossession, kickerOverride: newRover, chainDepth: chainDepth + 1);
-        }
-
-        // 2026-08-21 — contestZ lets a chained contest (e.g. the second
-        // mark after a kick-out) override the pivot instead of always
-        // pinning to goalZ. pivotZ = zDir * (goalZ - 5f) is only correct
-        // when the contest is heading INTO the goal (the centre bounce's
-        // own rover kick) — a contest happening mid-ground, moving away
-        // from the goal, needs the pivot to follow it instead. Existing
-        // callers pass one argument and are unaffected.
-        void CutCameraForKick(float zDir, float? contestZ = null)
+        void CutCameraForKick(float zDir)
         {
             if (!_mainCam) return;
             // Pivot sits between the forward's zone (~z=10) and the goal
             // (goalZ) so both the ball's landing and the posts are framed
             // together, not just one or the other.
-            float pivotZ = contestZ ?? (zDir * (goalZ - 5f));
+            float pivotZ = zDir * (goalZ - 5f);
             _mainCam.transform.position = new Vector3(kickCamSide, kickCamHeight, pivotZ);
             // Real fix (2026-08-12, same pass as the speccy). LookAt
             // height raised from 1.5 to 3 — with the leap now reaching
@@ -1479,27 +841,6 @@ namespace AFL.Day1
             // the OLD ground-level lookAt pushed the peak of the jump up
             // near/above the top of frame. Centering higher keeps the
             // whole leap comfortably in view.
-            _mainCam.transform.LookAt(new Vector3(0, 3f, pivotZ));
-        }
-
-        // 2026-08-21, Shaun (live playtest, second pass — the sign fix
-        // alone didn't actually fix it): CutCameraForKick is a static,
-        // non-tracking side-on shot tuned for the FORWARD's own kick
-        // (~kickDistance=16 units, pivoted 5 units short of the goal).
-        // The kick-out travels the ENTIRE ground length instead — goal
-        // square (z=goalZ) all the way to centre (z=0), a full ~20-unit
-        // traverse — so reusing that same fixed, un-panning camera meant
-        // most of the flight happened off-frame regardless of which end
-        // it pivoted toward; only the very start (near the post) was
-        // ever actually in shot. Dedicated wide shot instead: pivots at
-        // the true midpoint of this specific kick's path, pulled back
-        // further (1.6x the normal side/height) so the whole traverse
-        // fits in one static frame instead of just a slice of it.
-        void CutCameraForKickOut(float startZ, float endZ)
-        {
-            if (!_mainCam) return;
-            float pivotZ = (startZ + endZ) * 0.5f;
-            _mainCam.transform.position = new Vector3(kickCamSide * 1.6f, kickCamHeight * 1.6f, pivotZ);
             _mainCam.transform.LookAt(new Vector3(0, 3f, pivotZ));
         }
 
@@ -1530,24 +871,6 @@ namespace AFL.Day1
             _mainCam.transform.LookAt(forward.position + Vector3.up * 1.2f);
         }
 
-        // 2026-08-21 — mirrored variant for the kick-out beat only. Do
-        // not fold `side` into the original above: the mark beat uses
-        // that one as-is and Shaun has already signed off on its framing
-        // ("really being able to see the person grabbing the mark") —
-        // changing shared behaviour here would silently alter a beat
-        // that's currently accepted. The fixed +X offset above means
-        // that when the subject is actually on -X (half of the kick-out's
-        // two spawn sides), the camera ends up INSIDE the post cluster's
-        // sightline — the exact occlusion the kick-out's defender-slide
-        // exists to avoid. Kick-out uses this; the mark keeps the
-        // original.
-        void CutCameraToMarkCloseup(Transform subject, float side)
-        {
-            if (!_mainCam || !subject) return;
-            _mainCam.transform.position = subject.position + new Vector3(side * 7f, 3f, 0f);
-            _mainCam.transform.LookAt(subject.position + Vector3.up * 1.2f);
-        }
-
         // Real fix (2026-08-12, Shaun: "with a mark the forward catches
         // the ball") — a marked ball ends up genuinely held in the
         // forward's hand, tracked live the same way the run/catch
@@ -1566,94 +889,6 @@ namespace AFL.Day1
         // whole chain (catch hold, then a shot if marked) finishes before
         // the round is allowed to reset.
         public float markHoldBeforeShot = 0.6f;
-
-        // 2026-08-23 — the play-on decision window, checked right after a
-        // confirmed mark (see TapBallAway/KickAway's own markedResult
-        // block). Long enough to be a real, comfortable decision (not a
-        // twitch-timing window like markPerfectWindow/defenderSpoilWindow,
-        // which grade precision — this just grades whether you tapped at
-        // all) but short enough that not deciding reads as a real choice
-        // ("play it safe") rather than a stall.
-        public float playOnWindow = 1.2f;
-        public float aiPlayOnChance = 0.3f;
-
-        // How long the forward's run from wherever they are to the ball's
-        // actual short-landing spot takes — same time-based-not-speed-based
-        // convention every other RunToZ call in this file already uses
-        // (e.g. shotRunInDuration), not derived from the real distance.
-        public float gatherRunDuration = 0.8f;
-
-        // 2026-08-23 — the short-kick scene KickAway branches into above
-        // (isShortKick). Deliberately its own simple coroutine rather than
-        // extra branching bolted into the existing mark/spoil loop: that
-        // loop's whole shape (jumpFireAt, markDeadline, defenderSpoilT) is
-        // built around timing a catch against a ball that arrives AT a
-        // fixed point at a fixed instant, which a short kick genuinely
-        // doesn't do. Flies the ball its own real (shorter) distance —
-        // no artificial freeze needed here, unlike KickAway's own
-        // ball-freeze-at-peak hack for the mark case, since a short kick
-        // is supposed to visibly travel less, not travel the same amount
-        // and stop early.
-        //
-        // 2026-08-23, Shaun: "the forward runs up picks up ball and snaps
-        // a goal" — second scene in this series, now wired on: once the
-        // ball settles, the forward runs onto it (gather) and the round
-        // hands off into a shot at goal. Deliberately calls TakeShotAtGoal
-        // directly rather than re-implementing a "snap" kick from scratch —
-        // that's the file's own proven, already-camera-correct set-shot
-        // mechanic; duplicating its drop/power-bar/kick-arc logic here
-        // would be exactly the kind of second copy of one fact that this
-        // file's own header warns drifts out of sync. The one real
-        // difference from a normal mark-then-shot: no step back is skipped
-        // here either, actually — TakeShotAtGoal always does its own
-        // step-back/run-in "lines up for goal" beat regardless of caller,
-        // which reads slightly more deliberate than a real snap, but reuses
-        // 100% proven, working code instead of a new near-duplicate with
-        // its own risk of drifting. Revisit if this specifically needs to
-        // feel snappier once actually played.
-        System.Collections.IEnumerator ShortKickLanding(Vector3 kickStart, Vector3 kickEnd, bool isSpeccy, Transform forward, float zDir, bool humanControlled)
-        {
-            int roundAtStart = _roundId;
-            _message = "It falls short!";
-            float el = 0f;
-            while (el < kickDuration)
-            {
-                if (_roundId != roundAtStart) yield break;
-                el += Time.deltaTime;
-                float f = Mathf.Clamp01(el / kickDuration);
-                float arc = Mathf.Sin(f * Mathf.PI) * (isSpeccy ? kickHeight : kickHeightNormal);
-                ball.position = Vector3.Lerp(kickStart, kickEnd, f) + Vector3.up * arc;
-                yield return null;
-            }
-            ball.position = new Vector3(kickEnd.x, groundY, kickEnd.z);
-            // Wide shot pivoted on the ball's ACTUAL landing spot
-            // (contestZ), not the default forward-zone pivot — see
-            // CutCameraForKick's own contestZ parameter and TakeShotAtGoal's
-            // matching one below for why: a short kick can land meaningfully
-            // closer to centre than the default pivot assumes, and this is
-            // exactly the "camera aimed short of the actual action" bug
-            // class already found and fixed once for chained mark contests.
-            CutCameraForKick(zDir, kickEnd.z);
-            _message = "Loose ball!";
-            yield return new WaitForSeconds(catchPause);
-            if (_roundId != roundAtStart) yield break;
-
-            // Gather — forward runs onto the loose ball from wherever the
-            // short kick's own run/jump left them.
-            yield return RunToZ(forward, kickEnd.z, gatherRunDuration);
-            if (_roundId != roundAtStart) yield break;
-            var gatherHand = FindDeepChild(forward, "RightHand");
-            if (gatherHand) ball.position = gatherHand.position;
-            _message = "Gathers it!";
-            yield return new WaitForSeconds(catchPause);
-            if (_roundId != roundAtStart) yield break;
-
-            // Hand off into the proven shot-at-goal mechanic, pivoted on
-            // where the forward actually gathered it (kickEnd.z), not
-            // TakeShotAtGoal's own default pivot — see its contestZ
-            // parameter's own comment.
-            yield return TakeShotAtGoal(forward, zDir, humanControlled, kickEnd.z);
-        }
 
         System.Collections.IEnumerator MarkCatchRoutine(Transform forward, bool marked)
         {
@@ -1692,20 +927,10 @@ namespace AFL.Day1
         public float shotDropDuration = 0.3f;
         public float shotKickHeight = 3f;
         public float shotKickDuration = 0.9f;
-        // How far off-centre (world X) a mistimed kick drifts. Named
-        // constants for the actual post positions — must match
-        // MainBuildScript's BuildGoalPosts (-1.3/-0.6/0.6/1.3), same
-        // "geometry defined once, referenced by name" convention goalZ
-        // already uses in this file (see its own comment above). Real AFL
-        // scoring, added 2026-08-23 (Shaun: "6 point for goal one for a
-        // point"): a miss landing between the inner (goal) and outer
-        // (behind) posts is a real, legitimate 1-point outcome, not just
-        // "off target" for nothing — shotMissSpread's own range (floor
-        // 0.4*2.4=0.96, already inside goalPostOuterX=1.3) already put a
-        // near-miss geometrically inside the behind posts before this
-        // fix; scoring simply never checked for it.
-        public float goalPostInnerX = 0.6f;
-        public float goalPostOuterX = 1.3f;
+        // How far off-centre (world X) a mistimed kick drifts — enough to
+        // clearly pass outside the posts (which span -1.3 to 1.3, see
+        // Day1BuildScript's BuildGoalPosts) rather than an ambiguous
+        // near-miss.
         public float shotMissSpread = 2.4f;
         public float shotResultHold = 1f;
 
@@ -1750,18 +975,7 @@ namespace AFL.Day1
         // shot's result and the next round's centre bounce.
         public float shotStartPause = 0.5f;
 
-        // contestZ: same purpose as CutCameraForKick's own parameter of the
-        // same name (see that function) — this shot's default camera pivot
-        // (zDir * (goalZ - 5)) is tuned for a kicker standing at the
-        // NORMAL full-distance mark spot. 2026-08-23's snap-kick scene
-        // (gather a short kick, then shoot from wherever it was gathered)
-        // can leave the kicker meaningfully closer to centre than that —
-        // the exact "camera aimed short of the actual action" class of bug
-        // already found and fixed once for chained mark contests (see this
-        // file's own 2026-08-21 session notes). Existing caller (the
-        // chained-mark shot) passes nothing, so it's unaffected — it was
-        // already correct at the default pivot.
-        System.Collections.IEnumerator TakeShotAtGoal(Transform kicker, float zDir, bool humanControlled, float? contestZ = null)
+        System.Collections.IEnumerator TakeShotAtGoal(Transform kicker, float zDir, bool humanControlled)
         {
             if (!kicker || !ball) yield break;
             int roundAtStart = _roundId;
@@ -1779,7 +993,7 @@ namespace AFL.Day1
             // shot, not a "walking back for the kick" read. Cutting wide
             // here instead, before the step-back starts, makes the whole
             // back-then-in run visible in one continuous, stable shot.
-            CutCameraForKick(zDir, contestZ);
+            CutCameraForKick(zDir);
             float markSpotZ = kicker.position.z;
             yield return RunToZ(kicker, markSpotZ - zDir * shotStepBackDistance, shotStepBackDuration);
             if (_roundId != roundAtStart) yield break;
@@ -1788,19 +1002,6 @@ namespace AFL.Day1
             yield return RunToZ(kicker, markSpotZ, shotRunInDuration);
             if (_roundId != roundAtStart) yield break;
 
-            yield return ShootAtGoalCore(kicker, zDir, humanControlled);
-        }
-
-        // The actual drop/power-bar/kick-arc/scoring — extracted
-        // 2026-08-23 so the full set shot (TakeShotAtGoal, after its own
-        // step-back/run-in above) and the immediate play-on snap
-        // (PlayOnSnap, below — no step-back/run-in at all, that's the
-        // whole point of playing on) share one real implementation instead
-        // of two copies of the same mechanic that could drift apart, this
-        // file's own recurring "one fact in two places" trap.
-        System.Collections.IEnumerator ShootAtGoalCore(Transform kicker, float zDir, bool humanControlled)
-        {
-            int roundAtStart = _roundId;
             var rightHand = FindDeepChild(kicker, "RightHand");
             var rightFoot = FindDeepChild(kicker, "RightFoot");
             Vector3 handPos = rightHand ? rightHand.position : ball.position;
@@ -1855,27 +1056,16 @@ namespace AFL.Day1
             _shotBarVisible = false;
 
             bool isGoal = tapped && tapValue >= shotPowerGreenMin && tapValue <= shotPowerGreenMax;
+            _message = isGoal ? "GOAL!" : "Off target!";
 
             Vector3 kickStart = ball.position;
             Vector3 goalCentre = new Vector3(0, kickStart.y, zDir * goalZ);
-            // Real AFL scoring, 2026-08-23 (Shaun: "6 point for goal one
-            // for a point"): a miss that still lands between the inner
-            // (goal) and outer (behind) posts scores 1, same as the
-            // existing rushed-behind case elsewhere in this file — only a
-            // miss wide of the OUTER posts scores nothing. Computed after
-            // goalCentre.x so isBehind checks where the kick is actually
-            // headed, not a second independently-guessed distance.
-            bool isBehind = false;
             if (!isGoal)
             {
                 float distFromGreen = tapValue < shotPowerGreenMin ? shotPowerGreenMin - tapValue : tapValue - shotPowerGreenMax;
                 float side = tapValue < shotPowerGreenMin ? -1f : 1f;
                 goalCentre.x = side * shotMissSpread * Mathf.Clamp01(0.4f + distFromGreen * 2f);
-                isBehind = Mathf.Abs(goalCentre.x) <= goalPostOuterX;
             }
-            _message = isGoal ? "GOAL!" : (isBehind ? "Behind — 1 point." : "Off target!");
-            if (isGoal) AddScore(humanControlled, 6);
-            else if (isBehind) AddScore(humanControlled, 1);
 
             // Real then, not fake — the outcome (and therefore the exact
             // target) is already decided before the ball leaves the
@@ -1900,27 +1090,6 @@ namespace AFL.Day1
                 holdEl += Time.deltaTime;
                 yield return null;
             }
-        }
-
-        // 2026-08-23, Shaun: "when the forward marks they can play on and
-        // kick a snap." No step-back/run-in ritual at all — that deliberate
-        // ceremony IS what a normal set shot has and a snap doesn't, real
-        // football. Still cuts to the correct wide kick camera first
-        // (pivoted on the kicker's own real current position via contestZ,
-        // same "aim it at where the action actually is" fix TakeShotAtGoal
-        // itself needed — see that function's own contestZ comment) and
-        // still gives a real beat before the power bar starts so the cut
-        // doesn't feel instant/jarring, just a much shorter one
-        // (shotSetupPause, not the full step-back+pause+run-in sequence).
-        System.Collections.IEnumerator PlayOnSnap(Transform kicker, float zDir, bool humanControlled)
-        {
-            if (!kicker || !ball) yield break;
-            int roundAtStart = _roundId;
-            _message = "Plays on — snaps for goal!";
-            CutCameraForKick(zDir, kicker.position.z);
-            yield return new WaitForSeconds(shotSetupPause);
-            if (_roundId != roundAtStart) yield break;
-            yield return ShootAtGoalCore(kicker, zDir, humanControlled);
         }
 
         public float speccyLeapRiseDuration = 0.5f;
@@ -2064,26 +1233,6 @@ namespace AFL.Day1
         }
 
         public float catchPause = 0.5f;
-        // 2026-08-21, Shaun: kick-out from fullback felt broken — "the
-        // ball randomly goes to the top of the goal posts and then goes
-        // to middle... we need to pause at the player kicking in, can
-        // really have a decent pause to get it right." The camera was
-        // already zooming to the kicker (CutCameraToMarkCloseup) before
-        // this beat, but only held for the shared catchPause (0.5s) —
-        // nowhere near long enough to actually read a static close-up
-        // before the wide kick-arc camera cuts in and the ball moves. A
-        // dedicated, much longer pause for this one beat specifically
-        // (not touching catchPause's other, faster uses elsewhere in
-        // this file) so the kick-out reads as a real, deliberate moment.
-        public float kickOutPause = 1.6f;
-        // How long the zoomed-in kick motion itself takes (backswing +
-        // forward snap) before the camera cuts wide and the ball starts
-        // flying — see KickMotion below and its call site.
-        public float kickMotionDuration = 0.6f;
-        // How far the kick-out actually travels back from the goal
-        // square — deliberately short of dead centre (goalZ=20 would be
-        // the full traverse), see the call site's own comment.
-        public float kickOutDistance = 12f;
         // Real fix (2026-08-12, Shaun: "run of a bit far", then "can be a
         // slower like 4 step run"). 14 units / 1.8s was a full sprint pace
         // with no acceleration — cut down to a short, deliberate few-step
@@ -2131,14 +1280,7 @@ namespace AFL.Day1
         // lane so a straight run is always correct. No kick yet (that's
         // the next slice); this ends on an honest placeholder message, not
         // a stall into not-yet-built work.
-        // carriesBall: 2026-08-23, added for the chasing rover (see the
-        // catch-causes-a-short-kick mechanic in TapBallAway) — this
-        // function unconditionally moved the single global `ball` to the
-        // runner's own hand every frame, correct for the ball-carrying
-        // rover but would hijack the ball onto the CHASER's hand instead
-        // if reused as-is. Existing callers all pass nothing, so they keep
-        // carrying the ball exactly as before.
-        System.Collections.IEnumerator RunStraight(Transform t, float zDir, bool carriesBall = true)
+        System.Collections.IEnumerator RunStraight(Transform t, float zDir)
         {
             if (!t) yield break;
             var animator = t.GetComponentInChildren<Animator>();
@@ -2186,7 +1328,7 @@ namespace AFL.Day1
                 // decelerate arc for the physical movement instead.
                 float smoothF = Mathf.SmoothStep(0f, 1f, f);
                 t.position = Vector3.Lerp(start, end, smoothF);
-                if (carriesBall && ball)
+                if (ball)
                 {
                     // Real fix (2026-08-12, Shaun: "arms moving when it
                     // runs just ball in middle of its chest still"). The
@@ -2214,7 +1356,7 @@ namespace AFL.Day1
                 yield return null;
             }
             t.position = end;
-            if (carriesBall && ball)
+            if (ball)
             {
                 if (rightHand) ball.position = rightHand.position;
                 else if (leftHand) ball.position = leftHand.position;
@@ -2325,80 +1467,6 @@ namespace AFL.Day1
             if (animator) animator.enabled = true;
         }
 
-        // 2026-08-21, Shaun (live playtest): "the ball randomly goes to
-        // the top of the goal posts and then goes to middle... make sure
-        // you see them kick the ball out." Real root cause — there was
-        // never any kicking MOTION anywhere in this file, only jump/hop
-        // animations (HopRoutine, NormalMarkHop, SpeccyLeap). The ball
-        // just moved on its own while the character stood static, which
-        // is exactly why a kick read as "random" rather than caused by
-        // the player. Same technique as HopRoutine (direct bone
-        // rotation, Animator disabled for the duration, no clip needed)
-        // but driving RightUpLeg instead of the arms — a real backswing
-        // then forward snap, timed so the foot is at full forward
-        // extension right when the ball actually starts moving (see the
-        // call site — this is started slightly before the ball's own
-        // kickOutEl loop, not at the same instant).
-        public float kickMotionBackswingFrac = 0.35f;
-        public float kickMotionLegAngle = 65f;
-        System.Collections.IEnumerator KickMotion(Transform t, float duration)
-        {
-            if (!t) yield break;
-            var upLeg = FindDeepChild(t, "RightUpLeg");
-            if (!upLeg) yield break;
-            Quaternion legStart = upLeg.localRotation;
-            var animator = t.GetComponentInChildren<Animator>();
-            if (animator) animator.enabled = false;
-
-            float el = 0f;
-            while (el < duration)
-            {
-                el += Time.deltaTime;
-                float f = Mathf.Clamp01(el / duration);
-                // Backswing (leg draws back) for the first fraction, then
-                // a fast forward snap through the rest — a real kick
-                // isn't a symmetric wave like the hop's reach gesture,
-                // the forward snap is the sharp, fast part.
-                float angle;
-                if (f < kickMotionBackswingFrac)
-                {
-                    angle = Mathf.Lerp(0f, -25f, f / kickMotionBackswingFrac);
-                }
-                else
-                {
-                    float snapF = (f - kickMotionBackswingFrac) / (1f - kickMotionBackswingFrac);
-                    angle = Mathf.Lerp(-25f, kickMotionLegAngle, Mathf.Sin(snapF * Mathf.PI * 0.5f));
-                }
-                upLeg.localRotation = legStart * Quaternion.Euler(angle, 0, 0);
-                yield return null;
-            }
-            upLeg.localRotation = legStart;
-            if (animator) animator.enabled = true;
-        }
-
-        // 2026-08-21 — KickMotion, but the ball rides the boot for the
-        // duration instead of sitting wherever it landed after the
-        // previous kick. Split out rather than folded into KickMotion
-        // itself because the centre-clearance kick calls that one with
-        // the ball already in flight and must not have it yanked back to
-        // the kicker's foot mid-arc. Same idiom as MarkCatchRoutine
-        // tracking the forward's real hand bone rather than a guessed
-        // nearby point.
-        System.Collections.IEnumerator KickMotionWithBall(Transform t, Transform boot, float duration)
-        {
-            int roundAtStart = _roundId;
-            var inner = StartCoroutine(KickMotion(t, duration));
-            float el = 0f;
-            while (el < duration)
-            {
-                if (_roundId != roundAtStart) yield break;
-                el += Time.deltaTime;
-                if (ball && boot) ball.position = boot.position;
-                yield return null;
-            }
-            yield return inner;
-        }
-
         // 2026-08-19: the normal (non-speccy) mark's jump — used for both
         // forward and defender. Reuses HopRoutine's own reach numbers
         // (heightScale 1.65, armAngle 155 — the same math kickHeightNormal
@@ -2482,48 +1550,8 @@ namespace AFL.Day1
                     normal = { textColor = Color.white }
                 };
             }
-            if (_scoreStyle == null)
-            {
-                _scoreStyle = new GUIStyle(GUI.skin.label)
-                {
-                    fontSize = Mathf.RoundToInt(Screen.height * 0.045f),
-                    fontStyle = FontStyle.Bold,
-                    alignment = TextAnchor.MiddleCenter,
-                    normal = { textColor = Color.white }
-                };
-            }
-            if (_roundStyle == null)
-            {
-                _roundStyle = new GUIStyle(GUI.skin.label)
-                {
-                    fontSize = Mathf.RoundToInt(Screen.height * 0.028f),
-                    fontStyle = FontStyle.Bold,
-                    alignment = TextAnchor.MiddleCenter,
-                    normal = { textColor = new Color(1f, 0.85f, 0.3f) }
-                };
-            }
-            // Small persistent round-name strip (Wildcard Round / Finals /
-            // Grand Final) above the score itself — the finals series is
-            // otherwise invisible outside the transition messages.
-            int roundH = Mathf.RoundToInt(Screen.height * 0.04f);
-            GUI.color = new Color(0f, 0f, 0f, 0.65f);
-            GUI.DrawTexture(new Rect(0, 0, Screen.width, roundH), Texture2D.whiteTexture);
-            GUI.color = Color.white;
-            GUI.Label(new Rect(0, 0, Screen.width, roundH), _fixtures[_fixtureIndex].round.ToUpper(), _roundStyle);
-
-            // Persistent scoreboard, always visible — separate strip above
-            // the transient message bar below so a score change doesn't
-            // fight for the same space as "GOAL!"/"Centre bounce..." etc.
-            int scoreH = Mathf.RoundToInt(Screen.height * 0.065f);
-            GUI.color = new Color(0f, 0f, 0f, 0.65f);
-            GUI.DrawTexture(new Rect(0, roundH, Screen.width, scoreH), Texture2D.whiteTexture);
-            GUI.color = Color.white;
-            float clockSecs = Mathf.Max(0f, _quarterTimeRemaining);
-            string clock = _matchOver ? "FULL TIME" : "Q" + _quarter + "  " + Mathf.FloorToInt(clockSecs / 60f) + ":" + Mathf.FloorToInt(clockSecs % 60f).ToString("00");
-            GUI.Label(new Rect(0, roundH, Screen.width, scoreH), HomeTeamShort + " " + _crocScore + "   " + clock + "   " + _rooScore + " " + _fixtures[_fixtureIndex].awayShort, _scoreStyle);
-
             int panelH = Mathf.RoundToInt(Screen.height * 0.14f);
-            int y = Mathf.RoundToInt(Screen.height * 0.08f) + scoreH + roundH;
+            int y = Mathf.RoundToInt(Screen.height * 0.08f);
             GUI.color = new Color(0f, 0f, 0f, 0.65f);
             GUI.DrawTexture(new Rect(0, y, Screen.width, panelH), Texture2D.whiteTexture);
             GUI.color = Color.white;
