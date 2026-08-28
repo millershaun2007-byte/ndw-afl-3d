@@ -1209,7 +1209,28 @@ namespace AFL.Day1
                 // in the centre" — the clearer doesn't just receive it
                 // and stop, they continue the chain the same way
                 // everything else in this game does.
-                yield return ContinueChainOrEnd(!humanControlled, clearer, chainDepth);
+                // 2026-08-28, Shaun: "easier way out of defence could be for when
+                // it says clear it away the defender runs with the ball and kicks
+                // it forwards to aoid it going back to middle". ContinueChainOrEnd
+                // hands off through TapBallAway, which brings the ball to the
+                // team's rover in the middle - the ball went backwards. The
+                // clearer now runs it out himself and kicks forward, and it lands
+                // in a contest because that is what KickAway stages.
+                if (chainDepth < maxChainDepth)
+                {
+                    bool clearCrocs = !humanControlled;
+                    float clearDir = clearCrocs ? 1f : -1f;
+                    yield return RunStraight(clearer, clearDir);
+                    if (_roundId != roundAtStart) yield break;
+                    yield return KickAway(clearer, clearDir,
+                        clearCrocs ? crocForward : rooForward,
+                        clearCrocs ? rooDefender : crocDefender,
+                        false, clearCrocs, chainDepth + 1);
+                }
+                else
+                {
+                    _message = "Time's up — turnover!";
+                }
             }
             CutCameraToDefault();
         }
@@ -1399,6 +1420,10 @@ namespace AFL.Day1
         // again if it runs all the way out — tap once, whenever you
         // choose, ideally while it's green.
         public float shotPowerRiseDuration = 2.5f;
+        // 2026-08-28, Shaun: "probaly have a really quick power button to get the
+        // snap goal". A snap is taken at pace - the bar sweeps in well under half
+        // the time a set shot gets, so it has to be hit sharply.
+        public float snapPowerRiseDuration = 1.0f;
         public float shotPowerGreenMin = 0.62f;
         public float shotPowerGreenMax = 0.85f;
         bool _shotBarVisible;
@@ -1501,11 +1526,12 @@ namespace AFL.Day1
             // rather than either an auto-goal or a required human tap.
             float aiTapAt = humanControlled ? 0f
                 : Mathf.Clamp01(((shotPowerGreenMin + shotPowerGreenMax) / 2f) + Random.Range(-0.18f, 0.18f)) * shotPowerRiseDuration;
-            while (riseEl < shotPowerRiseDuration)
+            float powerRise = onTheRun ? snapPowerRiseDuration : shotPowerRiseDuration;
+            while (riseEl < powerRise)
             {
                 if (_roundId != roundAtStart) { _shotBarVisible = false; yield break; }
                 riseEl += Time.deltaTime;
-                _shotBarValue = Mathf.Clamp01(riseEl / shotPowerRiseDuration);
+                _shotBarValue = Mathf.Clamp01(riseEl / powerRise);
                 if (humanControlled)
                 {
                     if (Day1Input.TapDown) { tapped = true; tapValue = _shotBarValue; break; }
