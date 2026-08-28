@@ -271,7 +271,10 @@ public static class MainBuildScript
         // pullback tried right after this (both ends + forward/defender
         // visible) looked fine in a static render but was wrong in
         // actual play. Back to the position confirmed good before that.
-        camGo.transform.position = new Vector3(0, 3.4f, -9.5f);
+        // 2026-08-28, Shaun: "camer probaly needs to be zoomed in even more to
+        // the game". Pulled in from -9.5 to -7.4 and lowered slightly, so the
+        // centre bounce fills more of the frame.
+        camGo.transform.position = new Vector3(0, 3.0f, -7.4f);
         // 2026-08-28: aim raised 1.2 -> 1.7. The ruck throw-up now peaks at
         // 3.5 rather than 3.1 (a real leap needs a real ball height, see
         // Day1RuckContest's RuckLeapScale), and at the old aim the ball

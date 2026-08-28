@@ -121,8 +121,8 @@ namespace AFL.Day1
         Quaternion _camDefaultRot;
         // Must match Day1BuildScript's BuildGoalPosts z position.
         public float goalZ = 20f;
-        public float kickCamSide = 9f;
-        public float kickCamHeight = 4.5f;
+        public float kickCamSide = 6.5f;   // 2026-08-28: closer again, Shaun
+        public float kickCamHeight = 3.2f;
         // Real fix (2026-08-12, Shaun: "maybe pause them in mid air when
         // they have taken the mark" / "just brief pause"). Held once the
         // mark-jump's rise reaches its peak, only when it's a genuine
@@ -691,42 +691,6 @@ namespace AFL.Day1
             if (chaser) StartCoroutine(RunStraight(chaser, runDir, carriesBall: false));
             yield return RunStraight(rover, runDir);
 
-            // Handball off to a teammate running past, who carries it on from
-            // here. Only out of the centre (chainDepth 0) and only when the
-            // chase has not already run this player down - a player being
-            // tackled does not get a clean handball away, and letting them
-            // would quietly undo the chase that just succeeded.
-            if (chainDepth == 0 && !caughtByChaser && Random.value < handballChance)
-            {
-                Transform receiver = crocsInPossession ? crocClearer : rooClearer;
-                if (receiver)
-                {
-                    // TapBallAway has no round guard of its own, so capture one
-                    // here: this yields for most of a second and a reset in the
-                    // middle of it would otherwise carry on into a dead round.
-                    int hbRound = _roundId;
-                    yield return HandballToRunner(rover, receiver, runDir);
-                    if (_roundId != hbRound) yield break;
-                    // Everything downstream takes the carrier as an argument,
-                    // so the receiver simply becomes the player who runs in and
-                    // kicks. No other branch needs to know this happened.
-                    rover = receiver;
-                }
-            }
-            // 2026-08-21 — real bug, found by computing the actual
-            // numbers rather than guessing again: every chain hop
-            // (kick-out's second contest, an out-of-range mark, a spoil
-            // past the first contest) advances the rover by runDistance
-            // (6) here, then peakZ below adds another kickDistance*0.5
-            // (8) — 14 units further downfield per hop, with no bounds
-            // check. The kick-out itself already starts the chain
-            // partway to a goal (kickOutTargetZ), so after just 1-2 hops
-            // this can already exceed the field's own real half-length
-            // (goalZ=20) — confirmed as the actual cause of the camera
-            // ending up pointed at the sky in live testing (the pivot
-            // landed outside the field entirely, not a ball-height or
-            // stale-camera issue as first guessed). Clamp to stay on the
-            // actual ground regardless of chain depth.
             rover.position = new Vector3(rover.position.x, rover.position.y, Mathf.Clamp(rover.position.z, -(goalZ - 2f), goalZ - 2f));
 
             // Day 3, second slice (2026-08-12, Shaun: "either player takes
@@ -1548,28 +1512,20 @@ namespace AFL.Day1
                 // but which team that is (see its own header comment on
                 // the reverseDirection bug this replaced); no separate
                 // direction override needed or correct here.
-                // 2026-08-28, Shaun: "also the kick out from points needs to be
-                // consistent", read alongside "ditch tackling brings to many
-                // moving parts" and "it just leads to this being like a
-                // standalone game not part of a bigger app".
+                // 2026-08-28, Shaun: "nope to inconssitent keep going back to
+                // the middle after point".
                 //
-                // The inconsistency was not wording, it was structure. There
-                // are two behind paths and they ended differently:
+                // An hour earlier I made BOTH behind paths return to the
+                // centre, on the grounds that they ended differently and that
+                // was the inconsistency. Half right: they DID end differently
+                // and that was wrong. But I unified them the wrong way round.
                 //
-                //     rushed behind  -> kick-in -> a whole second contest
-                //     shot behind    -> kick-in -> centre bounce
-                //
-                // So a point sometimes bought another full passage of play and
-                // sometimes did not, with nothing on screen to say why. Both
-                // now return to the centre.
-                //
-                // This deletes the chained second contest documented in
-                // SECOND-CONTEST-BRIEF.md. That was real work and it worked -
-                // it is removed because it makes the game longer and less
-                // predictable, not because it was broken. Restoring it means
-                // putting this TapBallAway call back and giving the OTHER
-                // behind path an equivalent, not just reverting this line.
-                yield break;
+                // In football a GOAL restarts at the centre and a POINT does
+                // not - the defending side kicks in and play continues. So the
+                // consistent version is both paths CONTINUING, not both
+                // bouncing back. chainDepth still bounds it so a kick-in
+                // cannot chain forever.
+                yield return TapBallAway(crocsInPossession: !humanControlled, kickerOverride: defender, chainDepth: chainDepth + 1);
                 }
                 else
                 {
@@ -2200,7 +2156,15 @@ namespace AFL.Day1
             // and firing at random. In football the ball has crossed the goal
             // line either way, so both are a kick-in. Only an actual goal
             // returns to the centre.
-            if (!isGoal) yield return KickInAfterBehind(zDir, humanControlled);
+            if (!isGoal)
+            {
+                yield return KickInAfterBehind(zDir, humanControlled);
+                // Same continuation the rushed behind gets, so the two paths
+                // now match by BOTH playing on rather than both restarting.
+                if (_roundId != roundAtStart) yield break;
+                Transform kicker2 = humanControlled ? rooDefender : crocDefender;
+                yield return TapBallAway(crocsInPossession: !humanControlled, kickerOverride: kicker2, chainDepth: 1);
+            }
         }
 
         // Deliberately its OWN routine rather than a shared extraction of the
@@ -2770,86 +2734,8 @@ namespace AFL.Day1
         }
 
 
-        // 2026-08-28, Shaun: "maybe also ad a scene where out of the centre the
-        // rover gives a handball to the player running past who can run in and
-        // kick a goal".
-        //
-        // A variant on the clearance rather than a replacement - it fires about
-        // half the time so the centre bounce does not always resolve the same
-        // way. Everything downstream (kick to the forward, mark contest, shot)
-        // already takes the ball carrier as an argument, so handing the ball to
-        // a different player is genuinely just a reassignment; none of it needs
-        // to know a handball happened.
-        public float handballChance = 0.45f;
-        public float handballFlightDuration = 0.4f;
-        public float handballPunchAngle = 70f;
-        public float handballPunchDuration = 0.3f;
 
-        // A handball is a fist punched under the ball - mechanically the same
-        // forearm snap as a spoil, just shorter and flatter.
-        System.Collections.IEnumerator HandballMotion(Transform t)
-        {
-            if (!t) yield break;
-            var foreArm = FindDeepChild(t, "RightForeArm");
-            if (!foreArm) yield break;
-            Quaternion start = foreArm.localRotation;
-            var animator = t.GetComponentInChildren<Animator>();
-            bool wasEnabled = animator && animator.enabled;
-            if (animator) animator.enabled = false;
-            float el = 0f;
-            while (el < handballPunchDuration)
-            {
-                el += Time.deltaTime;
-                float f = Mathf.Clamp01(el / handballPunchDuration);
-                float angle = f < 0.35f
-                    ? Mathf.Lerp(0f, -handballPunchAngle, Mathf.Sin((f / 0.35f) * Mathf.PI * 0.5f))
-                    : Mathf.Lerp(-handballPunchAngle, 0f, (f - 0.35f) / 0.65f);
-                foreArm.localRotation = start * Quaternion.Euler(0f, 0f, angle);
-                yield return null;
-            }
-            foreArm.localRotation = start;
-            if (animator && wasEnabled) animator.enabled = true;
-        }
 
-        System.Collections.IEnumerator HandballToRunner(Transform giver, Transform receiver, float runDir)
-        {
-            if (!giver || !receiver || !ball) yield break;
-            int roundAtStart = _roundId;
-
-            // Put the receiver wide and slightly behind, so they genuinely run
-            // PAST the giver rather than appearing already in front of them.
-            receiver.position = new Vector3(
-                giver.position.x + 2.4f, giver.position.y, giver.position.z - runDir * 1.6f);
-            receiver.rotation = giver.rotation;
-
-            _message = "Handballs it off!";
-            CutCameraToMarkCloseup(giver, Mathf.Sign(giver.position.x == 0f ? 1f : giver.position.x));
-            StartCoroutine(RunStraight(receiver, runDir, carriesBall: false));
-            StartCoroutine(HandballMotion(giver));
-
-            // Flat and fast. A handball is a pass, not a kick - no arc, or it
-            // reads as a little chipped kick instead.
-            var giverHand = FindDeepChild(giver, "RightHand");
-            Vector3 from = giverHand ? giverHand.position : giver.position + Vector3.up * 1.2f;
-            float el = 0f;
-            while (el < handballFlightDuration)
-            {
-                if (_roundId != roundAtStart) yield break;
-                el += Time.deltaTime;
-                float f = Mathf.Clamp01(el / handballFlightDuration);
-                var rHand = FindDeepChild(receiver, "RightHand");
-                Vector3 to = rHand ? rHand.position : receiver.position + Vector3.up * 1.2f;
-                ball.position = Vector3.Lerp(from, to, f);
-                yield return null;
-            }
-
-            _message = "Takes it on the run!";
-            // Per "lots of pauses and one thing at a time" - let the take land
-            // before the run-in starts.
-            yield return new WaitForSeconds(contactHoldPause);
-            if (_roundId != roundAtStart) yield break;
-            CutCameraToDefault();
-        }
 
         // 2026-08-28, Shaun: "remember lots of pauses and also one thing at
         // atime". This is a sensory-friendly app for neurodivergent kids, so
