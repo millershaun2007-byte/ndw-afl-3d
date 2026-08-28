@@ -2673,33 +2673,49 @@ namespace AFL.Day1
         // no motion at all - the same "two unrelated objects animating at the
         // same time" failure the kick-out beat already had once.
         public float spoilPunchDuration = 0.42f;
-        public float spoilPunchAngle = 170f;
+        public float spoilPunchAngle = 95f;   // forearm snap, not a whole-arm swing
         System.Collections.IEnumerator SpoilPunch(Transform t)
         {
             if (!t) yield break;
-            var rightArm = FindDeepChild(t, "RightArm");
-            if (!rightArm) yield break;
-            Quaternion start = rightArm.localRotation;
-            var animator = t.GetComponentInChildren<Animator>();
-            bool wasEnabled = animator && animator.enabled;
-            if (animator) animator.enabled = false;
+            // 2026-08-28 - REWRITTEN. The first version drove RightArm and
+            // toggled the Animator, which was a real bug: NormalMarkHop is
+            // ALREADY running on this same defender (started at the mark
+            // contest), already has the Animator disabled, and already poses
+            // BOTH arms to +-155 and holds them there. So this fought it for
+            // the same bone every frame and then, on finishing, restored the
+            // arm and re-enabled the Animator mid-jump - undoing the pose it
+            // had been fighting. That is why the spoil never read.
+            //
+            // Reference for the correct pose: a real photo Shaun sent of a
+            // local match, one player at full stretch above the pack. What
+            // separates a SPOIL from a mark attempt in that photo is not both
+            // arms up - it is ONE arm punching through past full extension
+            // while the other stays tucked. NormalMarkHop already provides the
+            // leap and the raised arm; this adds only the punch on top.
+            //
+            // Drives RightForeArm, which NormalMarkHop does not touch, so the
+            // two compose instead of competing. Deliberately does NOT touch
+            // the Animator - NormalMarkHop owns that for the duration of the
+            // jump, and re-enabling it here is precisely what broke the pose.
+            var foreArm = FindDeepChild(t, "RightForeArm");
+            if (!foreArm) yield break;
+            Quaternion start = foreArm.localRotation;
 
             float el = 0f;
             while (el < spoilPunchDuration)
             {
                 el += Time.deltaTime;
                 float f = Mathf.Clamp01(el / spoilPunchDuration);
-                // A spoil is a strike, not a wave: punch out fast over the
-                // first third, drop back slower. Same asymmetry KickMotion
-                // uses for the boot, and for the same reason.
+                // A spoil is a strike: snap out fast over the first third,
+                // settle back slower. Same asymmetry KickMotion uses for the
+                // boot, and for the same reason.
                 float angle = f < 0.3f
                     ? Mathf.Lerp(0f, -spoilPunchAngle, Mathf.Sin((f / 0.3f) * Mathf.PI * 0.5f))
                     : Mathf.Lerp(-spoilPunchAngle, 0f, (f - 0.3f) / 0.7f);
-                rightArm.localRotation = start * Quaternion.Euler(0f, 0f, angle);
+                foreArm.localRotation = start * Quaternion.Euler(0f, 0f, angle);
                 yield return null;
             }
-            rightArm.localRotation = start;
-            if (animator && wasEnabled) animator.enabled = true;
+            foreArm.localRotation = start;
         }
 
         public float tackleDuration = 0.55f;
