@@ -121,8 +121,8 @@ namespace AFL.Day1
         Quaternion _camDefaultRot;
         // Must match Day1BuildScript's BuildGoalPosts z position.
         public float goalZ = 20f;
-        public float kickCamSide = 6.5f;   // 2026-08-28: closer again, Shaun
-        public float kickCamHeight = 3.2f;
+        public float kickCamSide = 9.5f;   // 2026-08-28: closer again, Shaun
+        public float kickCamHeight = 4.7f;
         // Real fix (2026-08-12, Shaun: "maybe pause them in mid air when
         // they have taken the mark" / "just brief pause"). Held once the
         // mark-jump's rise reaches its peak, only when it's a genuine
@@ -1570,6 +1570,25 @@ namespace AFL.Day1
                 // defending team's clearer takes it.
                 _message = "Cleared away!";
                 Transform clearer = humanControlled ? rooClearer : crocClearer;
+                // 2026-08-28, Shaun: "the players look likke they are having sex
+                // in the one i was just playing". Blunt, and correct - this is
+                // a children's app and it genuinely read that way.
+                //
+                // Cause: rooClearer and rooForward are BOTH spawned at x = 0.9
+                // (same for the croc pair at -0.9), and this line then ran the
+                // clearer to the forward's exact Z. Same lane, same depth, so
+                // the two models ended up inside one another. It was invisible
+                // until the camera was pulled in close today, which is why it
+                // surfaced now rather than weeks ago.
+                //
+                // Put the clearer in its own lane, always clear of the forward
+                // and always on the outside so it cannot be hidden behind them.
+                if (clearer && forward)
+                {
+                    float lane = forward.position.x >= 0f ? forward.position.x + 1.9f
+                                                          : forward.position.x - 1.9f;
+                    clearer.position = new Vector3(lane, clearer.position.y, clearer.position.z);
+                }
                 yield return RunToZ(clearer, forward.position.z, 0.6f);
                 if (_roundId != roundAtStart) yield break;
                 yield return MarkCatchRoutine(clearer, true);
