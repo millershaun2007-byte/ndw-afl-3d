@@ -7,6 +7,39 @@ will continue having bugs."
 He is right that it will. He is right about why. But a from-scratch rewrite is
 the wrong shape of fix, and this file argues for a different one.
 
+## Read this first: the committed scene is decorative
+
+Found from the Mac side on 28 Aug, verified here, and it is the most important
+structural fact in the project. `MainBuildScript.PerformWebGLBuild` calls
+`BuildSceneContents(saveToDisk: true)`, and that method opens with:
+
+```csharp
+var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+...
+EditorSceneManager.SaveScene(scene, "Assets/Scenes/AflMatch.unity");
+```
+
+Every build **throws the committed `AflMatch.unity` away**, rebuilds the scene
+from code against whatever assets happen to be present, and overwrites the file
+in git. Three consequences, all of which bit someone today:
+
+1. **Rebuilding a commit does not reproduce that commit's build.** Measured: the
+   archived 22 Aug build has `WebGL.data` = 31,102,400; rebuilt from the same
+   commit it is 31,120,864. Different artefact, same source.
+2. **The builds in GCS are the real record, not the commits.** Source-level
+   archaeology — including a lot of mine on 28 Aug, comparing scene object and
+   component censuses across commits — was chasing a file that has no bearing
+   on what ships.
+3. **The endless `AflMatch.unity` YAML churn in every commit is the build
+   rewriting it**, not anyone editing it. It is noise, and it has been hiding
+   real diffs in it for weeks.
+
+This is also the largest instance of the pattern the next section is about: the
+scene exists in two places — committed, and regenerated at build — and only one
+of them is real. Any rebuild should either make the scene genuinely
+source-of-truth (stop regenerating it) or stop committing it at all. Keeping
+both is what produces this.
+
 ## Every bug this project has had is the same bug
 
 Not a figure of speech. Going through the real history, here is the actual list:
