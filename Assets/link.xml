@@ -1,0 +1,22 @@
+<!--
+  Protects the methods reached ONLY via SendMessage from the Day1 WebGL
+  template: unityInstance.SendMessage('TouchBridge', 'TapPressed', '').
+
+  SendMessage resolves by name at runtime, so these have no static C# caller
+  and High IL2CPP stripping deletes them. That is exactly what happened on
+  2026-08-28: the tap button went dead while the beats kept running on bot
+  rolls, and it survived two reverts because both restored only Assets/ while
+  the setting lives in ProjectSettings.asset.
+
+  This file is the PRECONDITION for raising stripping again — which step 7 of
+  REBUILD-PLAN.md needs, because Cinemachine costs ~13.7MB unstripped. Do not
+  delete it.
+-->
+<linker>
+  <assembly fullname="Assembly-CSharp">
+    <type fullname="AFL.Day1.Day1RuckContest" preserve="all" />
+    <type fullname="AFL.Day1.Day1Input" preserve="all" />
+    <type fullname="AFLTouchBridge" preserve="all" />
+    <type fullname="AFL.AFLTouchBridge" preserve="all" />
+  </assembly>
+</linker>
