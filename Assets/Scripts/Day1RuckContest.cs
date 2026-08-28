@@ -65,8 +65,12 @@ namespace AFL.Day1
         Quaternion _camDefaultRot;
         // Must match Day1BuildScript's BuildGoalPosts z position.
         public float goalZ = 20f;
-        public float kickCamSide = 16f;
-        public float kickCamHeight = 8f;
+        // 2026-08-28, Shaun: "players are seeming a little small on the
+        // screen might need to zoom in slightly." Deliberately ONE modest step
+        // (about 20% closer), not the four increasingly-close jumps tried this
+        // morning that ended at "its now a bit to close".
+        public float kickCamSide = 13f;
+        public float kickCamHeight = 6.5f;
         // Real fix (2026-08-12, Shaun: "maybe pause them in mid air when
         // they have taken the mark" / "just brief pause"). Held once the
         // mark-jump's rise reaches its peak, only when it's a genuine
@@ -272,8 +276,12 @@ namespace AFL.Day1
             // of pure noise.
             // Derived, not a constant: the bot's spread scales with the same
             // window the human is judged against.
-            float botSpread = perfectWindow * 0.5f * aiSkill;
-            _botPressT = ideal + Random.Range(-botSpread, botSpread);
+            // Back to its tuned +-0.15. aiSkill widened this to +-0.40, which
+            // made the ruck WORSE - the imbalance there was the human's
+            // best-of-many, fixed above, not a bot that was too good. aiSkill
+            // still governs the mark and the spoil, where the AI genuinely
+            // could not miss.
+            _botPressT = ideal + Random.Range(-0.15f, 0.15f);
             // hopFireAt: when the ball freezes at its true visual peak —
             // fixed already (2026-08-11), see git history.
             _hopFireAt = ideal;
@@ -404,7 +412,22 @@ namespace AFL.Day1
             {
                 _humanPressed = true;
                 float err = Mathf.Abs(_t - _targetT);
-                if (err < _bestHumanErr) _bestHumanErr = err;
+                // 2026-08-28, Shaun: "5 minutes into the second quater i was
+                // up 51 to 8 probaly a bit easy" - roughly ten scoring shots to
+                // one, in a game of 3-minute quarters.
+                //
+                // This line was the cause, and it was not an AI problem. It
+                // kept the BEST of however many taps the human made, while the
+                // bot commits to exactly one. Mashing therefore won nearly
+                // every ruck, which handed over possession nearly every time,
+                // and the scoreline followed from that alone.
+                //
+                // Now the FIRST tap is the one that counts, so both sides
+                // commit once and the contest is symmetric. Deliberately fixed
+                // on the HUMAN side rather than by making the bot sharper -
+                // making the bot better would not have removed the mashing
+                // advantage, it would just have raised the bar for it.
+                if (!_humanPressed) _bestHumanErr = err;
             }
 
             // Always resolve at the deadline, using whichever tap was best
@@ -1306,6 +1329,25 @@ namespace AFL.Day1
                 // defending team's clearer takes it.
                 _message = "Cleared away!";
                 Transform clearer = humanControlled ? rooClearer : crocClearer;
+                // 2026-08-28, Shaun: "the players look likke they are having
+                // sex in the one i was just playing". A children's app, and it
+                // genuinely read that way.
+                //
+                // rooClearer and rooForward are BOTH spawned at x = 0.9 (the
+                // croc pair likewise at -0.9), and this line ran the clearer to
+                // the forward's exact Z. Same lane, same depth, so the two
+                // models ended up inside one another - worst with MiaRiggedAI,
+                // a photoreal human, intersecting a cartoon roo.
+                //
+                // Not new: it predates today by weeks and was simply invisible
+                // until the camera came in close, which is why it ships in the
+                // same change as the zoom rather than after it.
+                if (clearer && forward)
+                {
+                    float lane = forward.position.x >= 0f ? forward.position.x + 1.9f
+                                                          : forward.position.x - 1.9f;
+                    clearer.position = new Vector3(lane, clearer.position.y, clearer.position.z);
+                }
                 yield return RunToZ(clearer, forward.position.z, 0.6f);
                 if (_roundId != roundAtStart) yield break;
                 yield return MarkCatchRoutine(clearer, true);
@@ -1517,8 +1559,11 @@ namespace AFL.Day1
         // again if it runs all the way out — tap once, whenever you
         // choose, ideally while it's green.
         public float shotPowerRiseDuration = 2.5f;
-        public float shotPowerGreenMin = 0.62f;
-        public float shotPowerGreenMax = 0.85f;
+        // 2026-08-28, Shaun: "goal kicking also needs to be slightly harder."
+        // Band narrowed ~20% about its own centre (0.735), so WHERE you tap is
+        // unchanged and only the margin shrinks. 0.230 wide -> 0.184.
+        public float shotPowerGreenMin = 0.643f;
+        public float shotPowerGreenMax = 0.827f;
         bool _shotBarVisible;
         float _shotBarValue;
 

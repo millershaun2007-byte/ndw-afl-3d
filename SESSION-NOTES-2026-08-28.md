@@ -136,3 +136,52 @@ Identify a build by grepping its `.data` for on-screen strings ("Q1", "CATS",
 
 Fair, and the evidence is in this file. Start fresh, change one thing, let him
 play it, then change the next thing.
+
+## THE KNOWN-GOOD BUILD — restore this if anything goes wrong
+
+    https://storage.googleapis.com/ndw-game-builds/afl-known-good-2026-08-22/index.html
+
+    wasm 17636723    data 31102400    (22 Aug 00:07 archive)
+
+Shaun confirmed this one. Restore it with:
+
+    for f in WebGL.wasm WebGL.data WebGL.framework.js WebGL.loader.js index.html; do
+      gsutil cp gs://ndw-game-builds/afl-known-good-2026-08-22/$f \
+                gs://ndw-game-builds/afl3d/$f
+    done
+
+## Rebuilding a commit does NOT reproduce its build
+
+The single most important thing learned today, and it invalidates a whole day of
+source-level archaeology.
+
+    archived 22 Aug build      data 31,102,400
+    rebuilt from that commit   data 31,120,864
+
+`BuildSceneContents` regenerates `AflMatch.unity` at build time from whatever
+assets are present, so a rebuild is a NEW build of the same source. Shaun spotted
+this: "seems like the version live has fresh data from when the working version
+was not."
+
+**The builds in GCS are the record, not the commits.** To restore a version that
+worked, restore the archived OBJECTS by generation. Do not check out the commit
+and rebuild - you will get something subtly different, and then spend hours
+wondering why the version that used to work does not.
+
+Object versioning is Enabled on gs://ndw-game-builds, so every build back to
+17 Aug is recoverable. List them with:
+
+    gsutil ls -la gs://ndw-game-builds/afl3d/Build/WebGL.data
+
+## Two measurements I got wrong today, so nobody repeats them
+
+**Load time cannot be measured headlessly here.** One attempt detected only that
+a canvas existed (0.4s - meaningless); a second using readPixels failed on all
+three games, i.e. it measured the harness. Shaun's "AFL takes way longer to load"
+stands unrefuted. Note AFL is the SMALLEST of the three by download - 48.7MB vs
+146MB for dunkcontest3d - so it is not download size.
+
+**Do not identify a build by grepping for a variable name.** A feature comparison
+reported "scoreboard: no" for four commits because it grepped `_crocScore`, which
+only exists in later versions. Grep for what appears ON SCREEN - "CATS", "Q1",
+"Rushed behind", "Plays on".
