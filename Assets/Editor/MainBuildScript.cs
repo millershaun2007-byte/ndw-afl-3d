@@ -145,6 +145,28 @@ public static class MainBuildScript
         // which was already confirmed good.
         EnsureAnimatorController("Dragon", "Assets/Models/DragonRiggedAI");
         EnsureAnimatorController("Lion", "Assets/Models/LionRiggedAI");
+        // 2026-08-28, Shaun: "maybe have people with same skills as the rucks
+        // doing that job."
+        //
+        // Football-correct and free. A spoil is a tall player leaping at the
+        // ball, which is a ruck's job, so the defenders are now the ruck
+        // models - and because those are already loaded for the centre bounce,
+        // this costs ZERO extra download.
+        //
+        // This replaces Shaun's own rigged character, tried here first at his
+        // suggestion ("just use my one for now if that ok in defence") and
+        // measured rather than guessed. Two problems, both real:
+        //
+        //   SIZE  ShaunRigged.glb is 8.1MB against 2.4MB for every animal -
+        //         they are compressed copies, his is raw. WebGL.data went
+        //         31MB -> 48.7MB, a ~35% bigger download for one character.
+        //   LOOK  It renders as a grey slab at game scale. Nothing is broken -
+        //         same 1 image / 1 material / 1 mesh / 80 accessors as Dragon
+        //         and Lion - a photo-derived human simply does not stylise
+        //         next to cartoon animals at ~100px.
+        //
+        // Getting him in properly means compressing to ~2.4MB and giving it a
+        // stylised treatment, not swapping the raw model in.
         // Real fix (2026-08-12, Shaun: "the characters inserted are much
         // smaller"). Measured directly (Renderer bounds), not guessed:
         // Croc=2.098 high, Roo=2.317, Dragon=1.937 (92% of Croc), Lion=
@@ -180,9 +202,9 @@ public static class MainBuildScript
         // zone — so SpeccyLeap (Day1RuckContest.cs) has real ground to
         // cover before the leap instead of starting almost on top of it.
         var crocForwardGo = BuildStaticCharacter("CrocForward", "Assets/Models/DragonRiggedAI", new Vector3(-0.9f, 0, 5f), Quaternion.identity, dragonScale);
-        var rooDefenderGo = BuildStaticCharacter("RooDefender", "Assets/Models/LionRiggedAI", new Vector3(0.9f, 0, 10f), Quaternion.Euler(0, 180, 0), lionScale);
+        var rooDefenderGo = BuildStaticCharacter("RooDefender", "Assets/Models/RooRiggedAI", new Vector3(0.9f, 0, 10f), Quaternion.Euler(0, 180, 0), lionScale);
         var rooForwardGo = BuildStaticCharacter("RooForward", "Assets/Models/LionRiggedAI", new Vector3(0.9f, 0, -5f), Quaternion.Euler(0, 180, 0), lionScale);
-        var crocDefenderGo = BuildStaticCharacter("CrocDefender", "Assets/Models/DragonRiggedAI", new Vector3(-0.9f, 0, -10f), Quaternion.identity, dragonScale);
+        var crocDefenderGo = BuildStaticCharacter("CrocDefender", "Assets/Models/CrocRiggedAI", new Vector3(-0.9f, 0, -10f), Quaternion.identity, dragonScale);
 
         // 2026-08-19, Shaun: "add 2 more characters so it does work like
         // the centre" — the forward line had no equivalent of
