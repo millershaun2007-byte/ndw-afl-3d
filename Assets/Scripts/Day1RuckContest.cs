@@ -79,6 +79,12 @@ namespace AFL.Day1
         public float peakHeight = 2.1f;
         public float groundY = 1.0f;
         public float hopDuration = 0.45f;
+        // 2026-08-28: ONE height and ONE arm angle for any leap that contests
+        // the ball, so the forward and the defender actually meet.
+        public float contestLeapHeight = 1.65f;
+        public float contestArmAngle = 155f;
+        public float spoilPunchHeight = 0.8f;     // a deflection, not a kick
+        public float spoilPunchDuration = 0.45f;  // sharp, roughly the hop
         // 2026-08-19: rise time for NormalMarkHop, the mark-specific hop
         // that holds at peak until the outcome is known rather than
         // landing on a fixed clock (see NormalMarkHop's own header for
@@ -940,7 +946,17 @@ namespace AFL.Day1
                 // sequence, so it visibly hovered near/above the post the
                 // entire time. Reset to ground level here, once, before
                 // either kick arc starts.
-                ball.position = new Vector3(ball.position.x, groundY, ball.position.z);
+                // 2026-08-28: the defender punches it through at the top of the leap.
+                // The ball used to be dropped to ground here and then simply fly, so a
+                // rushed behind was indistinguishable from a stray ball. He is placed
+                // under it so the hand genuinely reaches it, rather than the ball being
+                // teleported into his fist.
+                defender.position = new Vector3(ball.position.x, defender.position.y,
+                    ball.position.z - zDir * 0.35f);
+                defender.rotation = Quaternion.Euler(0f, zDir > 0f ? 0f : 180f, 0f);
+                SpoilPunch(defender);
+                yield return new WaitForSeconds(hopDuration * 0.5f);
+                if (_roundId != roundAtStart) yield break;
                 // 2026-08-21 — real fix, found by tracing coordinates
                 // rather than guessing at symptoms again (see
                 // KICKOUT-BRIEF.md). Ball and kicker must end up on the
@@ -954,14 +970,15 @@ namespace AFL.Day1
                 // defender.position.x still holds the spawn value.
                 float side = Mathf.Sign(defender.position.x == 0f ? 1f : defender.position.x);
                 Vector3 behindKickStart = ball.position;
-                Vector3 behindTarget = new Vector3(side * 1.6f, behindKickStart.y, zDir * goalZ);
+                // target the ground, not the punch height - a punched ball falls
+                Vector3 behindTarget = new Vector3(side * 1.6f, groundY, zDir * goalZ);
                 float behindEl = 0f;
-                while (behindEl < shotKickDuration)
+                while (behindEl < spoilPunchDuration)
                 {
                     if (_roundId != roundAtStart) yield break;
                     behindEl += Time.deltaTime;
-                    float f = Mathf.Clamp01(behindEl / shotKickDuration);
-                    float arc = Mathf.Sin(f * Mathf.PI) * shotKickHeight;
+                    float f = Mathf.Clamp01(behindEl / spoilPunchDuration);
+                    float arc = Mathf.Sin(f * Mathf.PI) * spoilPunchHeight;
                     ball.position = Vector3.Lerp(behindKickStart, behindTarget, f) + Vector3.up * arc;
                     yield return null;
                 }
@@ -1848,6 +1865,46 @@ namespace AFL.Day1
         // visible jump attempt (0.5x height, 60° arms — about a third of
         // the winner's height) that's unambiguous either way: clearly a
         // genuine try, clearly not as high as the winner's.
+        // 2026-08-28: a spoil is a REACH that ends in a short jab. Reusing the
+        // ruck's HopRoutine here reads as an uppercut, because that one sweeps
+        // BOTH arms up through 155 degrees to tap a ball from underneath.
+        void SpoilPunch(Transform t)
+        {
+            if (t) StartCoroutine(SpoilPunchRoutine(t));
+        }
+
+        System.Collections.IEnumerator SpoilPunchRoutine(Transform t)
+        {
+            Vector3 start = t.localPosition;
+            var leftArm = FindDeepChild(t, "LeftArm");
+            var rightArm = FindDeepChild(t, "RightArm");
+            Quaternion leftStart = leftArm ? leftArm.localRotation : Quaternion.identity;
+            Quaternion rightStart = rightArm ? rightArm.localRotation : Quaternion.identity;
+            var animator = t.GetComponentInChildren<Animator>();
+            if (animator) animator.enabled = false;
+
+            float dur = hopDuration;
+            float el = 0f;
+            while (el < dur)
+            {
+                el += Time.deltaTime;
+                float f = el / dur;
+                float wave = Mathf.Sin(f * Mathf.PI);
+                t.localPosition = start + Vector3.up * wave * contestLeapHeight;
+                // both arms reach up with the leap - same idiom as the forward's mark
+                float reach = wave * 145f;   // just under his 155: spoiling, not marking
+                // a short jab at the top, not a wind-up
+                float jab = Mathf.Sin(Mathf.Clamp01((f - 0.35f) / 0.3f) * Mathf.PI) * 30f;
+                if (rightArm) rightArm.localRotation = rightStart * Quaternion.Euler(0, 0, -(reach + jab));
+                if (leftArm)  leftArm.localRotation  = leftStart  * Quaternion.Euler(0, 0,   reach);
+                yield return null;
+            }
+            t.localPosition = start;
+            if (leftArm) leftArm.localRotation = leftStart;
+            if (rightArm) rightArm.localRotation = rightStart;
+            if (animator) animator.enabled = true;
+        }
+
         System.Collections.IEnumerator HopRoutine(Transform t, bool reachesBall)
         {
             Vector3 start = t.localPosition;
@@ -1861,11 +1918,11 @@ namespace AFL.Day1
             // the hop's own vertical scale, not the arm — bumped 1.5 to
             // 1.65 to close that ~0.13-unit gap so the hand and ball
             // actually meet instead of falling just short.
-            float heightScale = reachesBall ? 1.65f : 0.5f;
+            float heightScale = reachesBall ? contestLeapHeight : 0.5f;
             Vector3 towardCentre = reachesBall
                 ? new Vector3(-Mathf.Sign(start.x) * 0.55f, 0, 0)
                 : Vector3.zero;
-            float armAngle = reachesBall ? 155f : 60f;
+            float armAngle = reachesBall ? contestArmAngle : 60f;
 
             var leftArm = FindDeepChild(t, "LeftArm");
             var rightArm = FindDeepChild(t, "RightArm");
@@ -1992,7 +2049,7 @@ namespace AFL.Day1
             if (!t) yield break;
             int roundAtStart = _roundId;
             Vector3 start = t.localPosition;
-            const float heightScale = 1.65f;
+            float heightScale = contestLeapHeight;
             const float armAngle = 155f;
 
             var leftArm = FindDeepChild(t, "LeftArm");
