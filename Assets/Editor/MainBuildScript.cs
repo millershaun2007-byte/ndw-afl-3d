@@ -240,7 +240,7 @@ public static class MainBuildScript
         // pullback tried right after this (both ends + forward/defender
         // visible) looked fine in a static render but was wrong in
         // actual play. Back to the position confirmed good before that.
-        camGo.transform.position = new Vector3(0, 3.4f, -9.5f);
+        camGo.transform.position = new Vector3(0, 3.3f, -8.6f);   // 2026-08-28: one modest step closer
         camGo.transform.LookAt(new Vector3(0, 1.2f, 0));
 
         var lightGo = new GameObject("Directional Light");
