@@ -128,6 +128,14 @@ namespace AFL.Day1
         float _t;
         bool _humanPressed;
         float _bestHumanErr;
+        // 2026-08-28 ruck power bar (Shaun: "YOU TAP A CERTAIN AMOUNT OF TIMES
+        // TO WIN RUCK"). Replaces the single timed press.
+        public float ruckTapGain = 0.10f;
+        public float ruckDecayPerSec = 0.06f;
+        float _ruckPower;
+        float _botRuckTarget;
+        int _lastTapSerial;
+        bool _ruckBarVisible;
         float _targetT;
         float _botPressT;
         float _hopFireAt;
@@ -242,6 +250,15 @@ namespace AFL.Day1
             _t = 0f;
             _humanPressed = false;
             _bestHumanErr = float.MaxValue;
+            _ruckPower = 0f;
+            _lastTapSerial = Day1Input.TapSerial;
+            // 2026-08-28, Shaun: "just played 54 to 6 our way maybe to onesided".
+            // A mash filled the bar to full green on every single bounce, so the
+            // human won every centre clearance. The bot's effort now spans a
+            // range a lazy mash cannot clear, while a hard, sustained one still
+            // can - green still always wins, the bar is just harder to get green.
+            _botRuckTarget = Random.Range(0.60f, 0.95f);
+            _ruckBarVisible = true;
             _ballFrozen = false;
             _hopFired = false;
             _resolved = false;
@@ -408,27 +425,26 @@ namespace AFL.Day1
             // one. Now every tap is compared against the target instant
             // and only the closest one so far is kept — mashing helps
             // instead of hurting, matching how a kid actually plays.
-            if (Day1Input.TapDown)
+            // 2026-08-28, Shaun: "THE TAPS NEED TO BE TIMED AND PURCHASE
+            // LIKE YOU TAP A CERTAIN AMOUNT OF TIMES TO WIN RUCK".
+            //
+            // This also removes a real bug introduced earlier the same session:
+            // the old code set _humanPressed = true and THEN asked
+            // if (!_humanPressed) before recording the tap's error, so the error
+            // was never recorded, stayed at float.MaxValue, and the winner test
+            // (humanErr <= botErr) was false every round. The human could not
+            // win the ruck at all, in any game.
+            //
+            // Power now accumulates per distinct tap and bleeds away between
+            // them, so the bar has to be actively driven past the bot's effort
+            // before the ball comes down.
+            if (Day1Input.TapSerial != _lastTapSerial)
             {
+                _lastTapSerial = Day1Input.TapSerial;
                 _humanPressed = true;
-                float err = Mathf.Abs(_t - _targetT);
-                // 2026-08-28, Shaun: "5 minutes into the second quater i was
-                // up 51 to 8 probaly a bit easy" - roughly ten scoring shots to
-                // one, in a game of 3-minute quarters.
-                //
-                // This line was the cause, and it was not an AI problem. It
-                // kept the BEST of however many taps the human made, while the
-                // bot commits to exactly one. Mashing therefore won nearly
-                // every ruck, which handed over possession nearly every time,
-                // and the scoreline followed from that alone.
-                //
-                // Now the FIRST tap is the one that counts, so both sides
-                // commit once and the contest is symmetric. Deliberately fixed
-                // on the HUMAN side rather than by making the bot sharper -
-                // making the bot better would not have removed the mashing
-                // advantage, it would just have raised the bar for it.
-                if (!_humanPressed) _bestHumanErr = err;
+                _ruckPower = Mathf.Clamp01(_ruckPower + ruckTapGain);
             }
+            _ruckPower = Mathf.Max(0f, _ruckPower - ruckDecayPerSec * Time.deltaTime);
 
             // Always resolve at the deadline, using whichever tap was best
             // — no more resolving on the first post-peak press, since that
@@ -467,9 +483,11 @@ namespace AFL.Day1
         void ResolveAndContest()
         {
             float ideal = throwDuration * 0.5f;
-            float humanErr = _humanPressed ? _bestHumanErr : 999f;
-            float botErr = Mathf.Abs(_botPressT - ideal);
-            bool crocWins = _humanPressed && humanErr <= botErr;
+            // Won on the bar, not on a timing comparison. Green on the
+            // traffic light means _ruckPower is already past the bot's target,
+            // so a bar driven into green wins the ruck - by construction.
+            bool crocWins = _humanPressed && _ruckPower >= _botRuckTarget;
+            _ruckBarVisible = false;
 
             _message = _humanPressed
                 ? (crocWins ? "Crocs win the tap!" : "Roos win the tap!")
@@ -1737,14 +1755,13 @@ namespace AFL.Day1
             if (!isGoal)
             {
                 yield return KickInAfterBehind(zDir, humanControlled);
-                // Same continuation the rushed behind gets, so the two
-                // paths now match by BOTH playing on rather than both
-                // restarting. chainDepth: 1 means maxChainDepth (1) stops
-                // this at its own contest — one more passage, then the
-                // round ends honestly, no open-ended chaining.
-                if (_roundId != roundAtStart) yield break;
-                Transform kicker2 = humanControlled ? rooDefender : crocDefender;
-                yield return TapBallAway(crocsInPossession: !humanControlled, kickerOverride: kicker2, chainDepth: 1);
+                // 2026-08-28, Shaun: "when the kick out happens the player just
+                // randomly kicks it back in completly differnt to initial game".
+                // Correct - the kick-in body is unchanged from the original, but
+                // a chained TapBallAway was added here today that flung the ball
+                // off to a rover afterwards. The original had no such step: the
+                // fullback kicks in down the middle and the round resets. That
+                // second flight was the invented part, so it is gone.
             }
         }
 
@@ -2441,6 +2458,33 @@ namespace AFL.Day1
 
                 GUI.color = Color.white;
             }
+
+            // Ruck traffic light (Shaun, 2026-08-28: "or even a traffic light
+            // system" / "traffic lights and bars have worked well in this app
+            // before"). Red = behind the bot, amber = closing, green = winning
+            // the ruck right now. The white line is the bot's effort, so the
+            // bar is a live, honest readout of whether taps are registering.
+            if (_ruckBarVisible)
+            {
+                int rW = Mathf.RoundToInt(Screen.width * 0.6f);
+                int rH = Mathf.RoundToInt(Screen.height * 0.055f);
+                int rX = (Screen.width - rW) / 2;
+                int rY = Mathf.RoundToInt(Screen.height * 0.72f);
+
+                GUI.color = new Color(0f, 0f, 0f, 0.55f);
+                GUI.DrawTexture(new Rect(rX - 6, rY - 6, rW + 12, rH + 12), Texture2D.whiteTexture);
+                GUI.color = new Color(0.14f, 0.14f, 0.18f, 0.92f);
+                GUI.DrawTexture(new Rect(rX, rY, rW, rH), Texture2D.whiteTexture);
+
+                float ratio = _botRuckTarget > 0f ? _ruckPower / _botRuckTarget : 0f;
+                GUI.color = ratio >= 1f    ? new Color(0.25f, 0.85f, 0.30f, 0.95f)
+                          : ratio >= 0.60f ? new Color(0.95f, 0.75f, 0.15f, 0.95f)
+                                           : new Color(0.85f, 0.25f, 0.25f, 0.95f);
+                GUI.DrawTexture(new Rect(rX, rY, rW * Mathf.Clamp01(_ruckPower), rH), Texture2D.whiteTexture);
+
+                GUI.color = Color.white;
+                GUI.DrawTexture(new Rect(rX + rW * Mathf.Clamp01(_botRuckTarget) - 2, rY - 8, 4, rH + 16), Texture2D.whiteTexture);
+            }
         }
     }
 
@@ -2449,18 +2493,62 @@ namespace AFL.Day1
     public static class Day1Input
     {
         public static bool TouchTapDown;
+
+        // 2026-08-28, Shaun: "ITS COMPLETLY AUTOMATED DOES NOT MATTER IF I TAP",
+        // then "I STRUGGLED TO GET THE BALL THEN WAS VERY HARD" - the same
+        // symptom seen twice: taps that silently do nothing.
+        //
+        // TouchTapDown is set by SendMessage from the template's JavaScript,
+        // which lands at an ARBITRARY point in the frame, but it was cleared
+        // unconditionally in LateUpdate. A tap arriving after the game had
+        // already read input that frame was wiped before anything could see
+        // it. Roughly half of them vanished, so the ruck felt unwinnable and
+        // the game looked like it was playing itself.
+        //
+        // Now the tap survives until something actually CONSUMES it, with a
+        // short expiry so a stale tap cannot win a later contest.
+        static int _tapFrame = -999;
+        public static int TapSerial;
+    public static void RegisterTap() { TouchTapDown = true; _tapFrame = Time.frameCount; TapSerial++; }
+
+        // CORRECTION, same session: the first attempt made TapDown CONSUME the
+        // tap. That was worse, because Update() evaluates TapDown every single
+        // frame for the ruck contest - so Update ate every tap before the mark,
+        // shot and spoil coroutines could ever see one. No marks, therefore no
+        // shots, no points and no kick-ins. Shaun: "CANT GET THE BALL AT ALL IN
+        // THAT ONE NO KICK OUTS."
+        //
+        // TapDown is a PEEK again. The original race is fixed differently: the
+        // tap is cleared only once it is at least a frame old, so one arriving
+        // late in a frame still survives to be read on the next one, and cannot
+        // linger long enough to win a later contest.
+        public static bool TapAlive => TouchTapDown && (Time.frameCount - _tapFrame) <= 2;
+        internal static void ExpireStaleTap()
+        {
+            if (TouchTapDown && Time.frameCount - _tapFrame >= 1) TouchTapDown = false;
+        }
         // 2026-08-19, Shaun: relying on "remember to press spacebar, not
         // click" was fragile for real testing — a direct mouse/touch
         // click on the canvas is the natural interaction and should just
         // work, not only the external app-bridge (TapPressed) or the
         // spacebar fallback.
-        public static bool TapDown => Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0) || TouchTapDown;
+        public static bool TapDown => Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0) || TapAlive;
         internal static void ClearOneShot() { TouchTapDown = false; }
     }
 
     public class Day1TouchBridge : MonoBehaviour
     {
-        void LateUpdate() { Day1Input.ClearOneShot(); }
-        public void TapPressed(string _) { Day1Input.TouchTapDown = true; }
+        // Clears only a tap that is already at least one frame old, so a tap
+        // arriving late in a frame survives to the next one instead of being
+        // wiped unread - which is the original bug - while still not carrying
+        // over into a later contest.
+        // Keyboard/mouse has to bump the same serial the on-screen button does,
+    // or the ruck bar cannot be driven on desktop at all.
+    void Update()
+    {
+        if (Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0)) Day1Input.RegisterTap();
+    }
+    void LateUpdate() { Day1Input.ExpireStaleTap(); }
+        public void TapPressed(string _) { Day1Input.RegisterTap(); }
     }
 }
