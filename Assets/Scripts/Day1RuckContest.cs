@@ -1092,31 +1092,17 @@ namespace AFL.Day1
                 // decides for themself, AI gets a real randomized attempt
                 // too" fairness principle this file already uses for the
                 // mark/spoil/tap-at-goal decisions above.
-                bool playOn = false;
-                bool aiWantsPlayOn = !humanControlled && Random.value < aiPlayOnChance;
-                _message = humanControlled ? "Tap to play on!" : (aiWantsPlayOn ? "Thinking about playing on..." : "Sizing up the shot...");
-                float aiPlayOnAt = aiWantsPlayOn ? Random.Range(0.15f, playOnWindow) : 0f;
-                float pw = 0f;
-                while (pw < playOnWindow)
-                {
-                    if (_roundId != roundAtStart) yield break;
-                    pw += Time.deltaTime;
-                    if (humanControlled)
-                    {
-                        if (Day1Input.TapDown) { playOn = true; break; }
-                    }
-                    else if (aiWantsPlayOn && pw >= aiPlayOnAt)
-                    {
-                        playOn = true; break;
-                    }
-                    yield return null;
-                }
-
-                if (playOn)
-                {
-                    yield return PlayOnSnap(forward, zDir, humanControlled);
-                    yield break;
-                }
+                // 2026-08-28, Shaun: "take the snap stuff out of the game also".
+                //
+                // The whole play-on window is gone: the "Tap to play on!"
+                // prompt, the AI's own decision to play on, and the snap it led
+                // to. A mark now always leads to the set shot, which is the
+                // one shot the game had before any of this.
+                //
+                // Removed at source rather than by restoring an older build.
+                // Every archived build back to 22 Aug still contains the snap,
+                // so rolling back far enough to lose it would have cost a lot
+                // of other work at the same time.
 
                 // 2026-08-21, Shaun: previously scoped the chained contest
                 // (chainDepth > 0, after a kick-out) to stop dead right at
@@ -1574,8 +1560,6 @@ namespace AFL.Day1
         // which grade precision — this just grades whether you tapped at
         // all) but short enough that not deciding reads as a real choice
         // ("play it safe") rather than a stall.
-        public float playOnWindow = 1.2f;
-        public float aiPlayOnChance = 0.3f;
 
         // How long the forward's run from wherever they are to the ball's
         // actual short-landing spot takes — same time-based-not-speed-based
@@ -1912,16 +1896,6 @@ namespace AFL.Day1
         // still gives a real beat before the power bar starts so the cut
         // doesn't feel instant/jarring, just a much shorter one
         // (shotSetupPause, not the full step-back+pause+run-in sequence).
-        System.Collections.IEnumerator PlayOnSnap(Transform kicker, float zDir, bool humanControlled)
-        {
-            if (!kicker || !ball) yield break;
-            int roundAtStart = _roundId;
-            _message = "Plays on — snaps for goal!";
-            CutCameraForKick(zDir, kicker.position.z);
-            yield return new WaitForSeconds(shotSetupPause);
-            if (_roundId != roundAtStart) yield break;
-            yield return ShootAtGoalCore(kicker, zDir, humanControlled);
-        }
 
         public float speccyLeapRiseDuration = 0.5f;
         public float speccyLeapHeightScale = 4f;
