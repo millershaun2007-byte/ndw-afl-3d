@@ -1076,8 +1076,8 @@ namespace AFL.Day1
                 // teleported into his fist.
                 // Captured BEFORE the defender is moved - the comment below is explicit
                 // that this must read his spawn x, not a value set from the ball.
-                defender.position = new Vector3(ball.position.x, defender.position.y,
                 float side = Mathf.Sign(defender.position.x == 0f ? 1f : defender.position.x);
+                defender.position = new Vector3(ball.position.x, defender.position.y,
                     ball.position.z - zDir * 0.35f);
                 defender.rotation = Quaternion.Euler(0f, zDir > 0f ? 0f : 180f, 0f);
                 SpoilPunch(defender);
