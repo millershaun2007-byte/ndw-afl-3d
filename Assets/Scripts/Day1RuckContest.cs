@@ -76,7 +76,7 @@ namespace AFL.Day1
         bool _markHoldSucceeded;
 
         public float throwDuration = 2.6f;
-        public float peakHeight = 2.5f;
+        public float peakHeight = 2.8f;
         public float groundY = 1.0f;
         public float hopDuration = 0.45f;
 
@@ -117,7 +117,7 @@ namespace AFL.Day1
         // can't collapse the hold to ~0 duration and drop straight into
         // the fall before the peak was ever visibly held.
         public float minMarkHoldDuration = 0.2f;
-        public float perfectWindow = 0.5f;
+        public float perfectWindow = 0.55f;   // 10% easier, 2026-08-28
         // Real human reaction time to a reactive tap, compensated for in
         // grading — see the comment on ResolveAndContest below.
         public float reactionCompensation = 0.17f;
@@ -848,7 +848,7 @@ namespace AFL.Day1
         // disruption every time. chaseTackleUndershoot reuses the exact
         // magnitude (5) already tuned and verified for the "falls short"
         // scene earlier tonight, not a newly-guessed value.
-        public float chaseCatchChance = 0.35f;
+        public float chaseCatchChance = 0.5f;
         public float chaseTackleUndershoot = 5f;
         public float kickDuration = 1.1f;
         public float kickDropDuration = 0.35f;
@@ -1705,11 +1705,22 @@ namespace AFL.Day1
             yield return new WaitForSeconds(catchPause);
             if (_roundId != roundAtStart) yield break;
 
-            // Hand off into the proven shot-at-goal mechanic, pivoted on
-            // where the forward actually gathered it (kickEnd.z), not
-            // TakeShotAtGoal's own default pivot — see its contestZ
-            // parameter's own comment.
-            yield return TakeShotAtGoal(forward, zDir, humanControlled, kickEnd.z);
+            // 2026-08-28, Shaun: "when the ball falls short the player can
+            // gather the ball and kick the snap", then "the snap one will need
+            // to be having to just tap and kick i reckon".
+            //
+            // This used to hand off to TakeShotAtGoal — the full set-shot
+            // ritual, a 6m step-back over a second before the power bar even
+            // appears. That is football-wrong as well as slow: a set shot is
+            // what you get for a MARK. A player who gathers a loose ball has
+            // not marked it, so there is no set shot to take — they play on
+            // and snap.
+            //
+            // PlayOnSnap is the same single-tap power bar with the ceremony
+            // removed, and it pivots its camera on the kicker's own current
+            // position, which after the gather run IS where they gathered it —
+            // so the contestZ argument this call used to need is now implicit.
+            yield return PlayOnSnap(forward, zDir, humanControlled);
         }
 
         System.Collections.IEnumerator MarkCatchRoutine(Transform forward, bool marked)
@@ -1745,6 +1756,12 @@ namespace AFL.Day1
         public float shotStepBackDistance = 6f;
         public float shotStepBackDuration = 1f;
         public float shotSetupPause = 0.4f;
+
+        // 2026-08-28, Shaun: "the snap kick probaly needs to be a little more
+        // instant like the grab it tap staright away to snap". A set shot's
+        // pause is ceremony and belongs there; on a snap it is just lag
+        // between gathering the ball and being allowed to kick it.
+        public float snapSetupPause = 0.12f;
         public float shotRunInDuration = 0.9f;
         public float shotDropDuration = 0.3f;
         public float shotKickHeight = 3f;
@@ -1779,8 +1796,12 @@ namespace AFL.Day1
         // again if it runs all the way out — tap once, whenever you
         // choose, ideally while it's green.
         public float shotPowerRiseDuration = 2.5f;
-        public float shotPowerGreenMin = 0.62f;
-        public float shotPowerGreenMax = 0.85f;
+        // 2026-08-28, Shaun: "maybe also 10 percent easier for the kid."
+        // Band widened 10% about its own centre (0.735) rather than by moving
+        // one edge, which would shift WHERE you have to tap as well as how
+        // hard it is.
+        public float shotPowerGreenMin = 0.608f;
+        public float shotPowerGreenMax = 0.862f;
         bool _shotBarVisible;
         float _shotBarValue;
 
@@ -1957,6 +1978,75 @@ namespace AFL.Day1
                 holdEl += Time.deltaTime;
                 yield return null;
             }
+
+            // 2026-08-28, Shaun: "it goes straight back to the cntre after a
+            // behind on this one", then "after point the kick in not always
+            // working". Both describe the same real gap, and "not always" is
+            // the clue that identifies it: there are TWO behind paths and only
+            // one of them ever kicked in. A rushed behind runs a full kick-out
+            // inline; a behind from an actual shot at goal just held the
+            // result and fell through to BeginThrow - the centre bounce.
+            if (isBehind) yield return KickInAfterBehind(zDir, humanControlled);
+        }
+
+        // Deliberately its OWN routine rather than a shared extraction of the
+        // rushed-behind kick-out above. That block is the most heavily tuned
+        // code in this file - ball-tracked-to-boot, camera cut timed to the
+        // leg snap, and a documented defect where "kicker and ball were two
+        // unrelated objects that happened to animate at the same time". It
+        // works. Refactoring it to serve a second caller risks the beat that
+        // is already right in order to fix the one that never existed, so this
+        // reuses the same helpers (RunToZ / CutCameraForKickOut / KickMotion)
+        // without touching it.
+        System.Collections.IEnumerator KickInAfterBehind(float zDir, bool crocsInPossession)
+        {
+            // The team that was SCORED ON kicks in - same rule as the
+            // rushed-behind path's own defender pick.
+            Transform defender = crocsInPossession ? rooDefender : crocDefender;
+            if (!defender || !ball) yield break;
+            int roundAtStart = _roundId;
+
+            _message = "Kick in...";
+            Vector3 goalSquare = new Vector3(0f, defender.position.y, zDir * goalZ);
+            defender.position = goalSquare;
+            defender.rotation = Quaternion.Euler(0f, zDir > 0f ? 180f : 0f, 0f);
+
+            float targetZ = zDir * goalZ - zDir * kickOutDistance;
+            CutCameraForKickOut(zDir * goalZ, targetZ);
+
+            // Ball onto the boot and kept there through the motion, so the
+            // kick reads as caused by the player rather than the ball simply
+            // moving on its own - the exact defect the kick-out beat had.
+            var boot = FindDeepChild(defender, "RightFoot");
+            if (ball) ball.position = boot ? boot.position : defender.position + Vector3.up * 0.5f;
+            yield return new WaitForSeconds(kickOutPause * 0.5f);
+            if (_roundId != roundAtStart) yield break;
+
+            StartCoroutine(KickMotion(defender, shotKickDuration * 0.6f));
+            float settle = 0f;
+            while (settle < shotKickDuration * 0.25f)
+            {
+                if (_roundId != roundAtStart) yield break;
+                if (ball && boot) ball.position = boot.position;
+                settle += Time.deltaTime;
+                yield return null;
+            }
+
+            _message = "Kicks in from fullback!";
+            Vector3 from = ball.position;
+            Vector3 to = new Vector3(0f, from.y, targetZ);
+            float el2 = 0f;
+            while (el2 < shotKickDuration)
+            {
+                if (_roundId != roundAtStart) yield break;
+                el2 += Time.deltaTime;
+                float f = Mathf.Clamp01(el2 / shotKickDuration);
+                float arc = Mathf.Sin(f * Mathf.PI) * shotKickHeight;
+                ball.position = Vector3.Lerp(from, to, f) + Vector3.up * arc;
+                yield return null;
+            }
+            ball.position = to;
+            yield return new WaitForSeconds(shotResultHold * 0.5f);
         }
 
         // 2026-08-23, Shaun: "when the forward marks they can play on and
@@ -1975,7 +2065,7 @@ namespace AFL.Day1
             int roundAtStart = _roundId;
             _message = "Plays on — snaps for goal!";
             CutCameraForKick(zDir, kicker.position.z);
-            yield return new WaitForSeconds(shotSetupPause);
+            yield return new WaitForSeconds(snapSetupPause);
             if (_roundId != roundAtStart) yield break;
             yield return ShootAtGoalCore(kicker, zDir, humanControlled);
         }
