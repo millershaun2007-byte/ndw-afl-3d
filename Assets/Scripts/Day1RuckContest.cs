@@ -688,6 +688,25 @@ namespace AFL.Day1
             // kick to a normal mark, same as before this feature existed.
             Transform chaser = crocsInPossession ? rooRover : crocRover;
             bool caughtByChaser = chaser && Random.value < chaseCatchChance;
+            // 2026-08-28, Shaun: "the run and tackle just needs to be a bit
+            // more natural". The chaser used to set off from wherever it was
+            // standing and run its own parallel lane, so at the moment of the
+            // catch the two were merely near each other - the arms read as a
+            // tackle but the contact never did. Start it on the carrier's own
+            // line and a couple of metres back, so it is genuinely running
+            // them down from behind and finishes on top of them.
+            //
+            // Only when the catch is actually going to happen: an uncaught
+            // chase should still look like a chase that was beaten, not like
+            // one that teleported onto the carrier and then let them go.
+            if (chaser && rover && caughtByChaser)
+            {
+                chaser.position = new Vector3(
+                    rover.position.x + 0.7f,
+                    chaser.position.y,
+                    rover.position.z - runDir * 2.4f);
+                chaser.rotation = rover.rotation;
+            }
             if (chaser) StartCoroutine(RunStraight(chaser, runDir, carriesBall: false));
             yield return RunStraight(rover, runDir);
             // 2026-08-21 — real bug, found by computing the actual
@@ -1169,9 +1188,7 @@ namespace AFL.Day1
                     if (defenderSpoiled)
                     {
                         StartCoroutine(SpoilPunch(defender));
-                        // Same reasoning as the tackle's hold: let the punch
-                        // actually be seen before the outcome moves on.
-                        yield return new WaitForSeconds(contactHoldPause);
+                        yield return new WaitForSeconds(spoilContactBeat);
                     }
                     bool marked = markPressed && !defenderSpoiled;
                     _message = marked ? "MARK!" : (defenderSpoiled ? "Spoiled by the defender!" : "Spilled!");
@@ -1331,7 +1348,31 @@ namespace AFL.Day1
                 // sequence, so it visibly hovered near/above the post the
                 // entire time. Reset to ground level here, once, before
                 // either kick arc starts.
-                ball.position = new Vector3(ball.position.x, groundY, ball.position.z);
+                // The ball was previously TELEPORTED from the contest height
+                // straight to the ground, then glided off at a constant rate -
+                // exactly why a spoil read as the ball being "randomly flwon
+                // through for a point" rather than punched through it. The
+                // height reset itself is still required (see the block above:
+                // frozen at 3.7, taller than the 3.2 posts), so this does not
+                // remove it - it ANIMATES it, fast, as the punch knocking the
+                // ball down and away.
+                {
+                    float knockSide = Mathf.Sign(defender && defender.position.x != 0f ? defender.position.x : 1f);
+                    Vector3 knockFrom = ball.position;
+                    Vector3 knockTo = new Vector3(ball.position.x + knockSide * 0.9f, groundY, ball.position.z);
+                    float knockEl = 0f;
+                    while (knockEl < spoilKnockDuration)
+                    {
+                        if (_roundId != roundAtStart) yield break;
+                        knockEl += Time.deltaTime;
+                        float kf = Mathf.Clamp01(knockEl / spoilKnockDuration);
+                        // Fast off the fist, decelerating. A punched ball
+                        // leaves hard and slows; it does not glide linearly.
+                        ball.position = Vector3.Lerp(knockFrom, knockTo, 1f - Mathf.Pow(1f - kf, 3f));
+                        yield return null;
+                    }
+                    ball.position = knockTo;
+                }
                 // 2026-08-21 — real fix, found by tracing coordinates
                 // rather than guessing at symptoms again (see
                 // KICKOUT-BRIEF.md). Ball and kicker must end up on the
@@ -1403,7 +1444,7 @@ namespace AFL.Day1
                 // own rover kick uses) — direction is -zDir here since
                 // the fullback kicks back toward centre, not further
                 // into the attacking end.
-                _message = "Kicks out from fullback!";
+                _message = "Kicks in from fullback!";   // matched to the other behind path, 2026-08-28
                 // 2026-08-19, Shaun: "the issue is turning around and
                 // kicking the other way." Real bug — RunToZ sets facing
                 // from net movement direction, but the defender is
@@ -1896,6 +1937,13 @@ namespace AFL.Day1
         // again if it runs all the way out — tap once, whenever you
         // choose, ideally while it's green.
         public float shotPowerRiseDuration = 2.5f;
+
+        // 2026-08-28, Shaun: "the snaps need to be a quick tap snap not like a
+        // set shot", "same as a play on snap". Cutting the setup pause was not
+        // enough - the ceremony that actually made it feel like a set shot was
+        // this 2.5s power bar, which the snap was still using. A snap is taken
+        // under pressure, in about a second.
+        public float snapPowerRiseDuration = 0.9f;
         // 2026-08-28, Shaun: "maybe also 10 percent easier for the kid."
         // Band widened 10% about its own centre (0.735) rather than by moving
         // one edge, which would shift WHERE you have to tap as well as how
@@ -1976,7 +2024,7 @@ namespace AFL.Day1
         // whole point of playing on) share one real implementation instead
         // of two copies of the same mechanic that could drift apart, this
         // file's own recurring "one fact in two places" trap.
-        System.Collections.IEnumerator ShootAtGoalCore(Transform kicker, float zDir, bool humanControlled)
+        System.Collections.IEnumerator ShootAtGoalCore(Transform kicker, float zDir, bool humanControlled, bool isSnap = false)
         {
             int roundAtStart = _roundId;
             var rightHand = FindDeepChild(kicker, "RightHand");
@@ -2014,11 +2062,12 @@ namespace AFL.Day1
             // rather than either an auto-goal or a required human tap.
             float aiTapAt = humanControlled ? 0f
                 : Mathf.Clamp01(((shotPowerGreenMin + shotPowerGreenMax) / 2f) + Random.Range(-0.18f, 0.18f)) * shotPowerRiseDuration;
-            while (riseEl < shotPowerRiseDuration)
+            float riseDuration = isSnap ? snapPowerRiseDuration : shotPowerRiseDuration;
+            while (riseEl < riseDuration)
             {
                 if (_roundId != roundAtStart) { _shotBarVisible = false; yield break; }
                 riseEl += Time.deltaTime;
-                _shotBarValue = Mathf.Clamp01(riseEl / shotPowerRiseDuration);
+                _shotBarValue = Mathf.Clamp01(riseEl / riseDuration);
                 if (humanControlled)
                 {
                     if (Day1Input.TapDown) { tapped = true; tapValue = _shotBarValue; break; }
@@ -2087,7 +2136,20 @@ namespace AFL.Day1
             // one of them ever kicked in. A rushed behind runs a full kick-out
             // inline; a behind from an actual shot at goal just held the
             // result and fell through to BeginThrow - the centre bounce.
-            if (isBehind) yield return KickInAfterBehind(zDir, humanControlled);
+            // 2026-08-28, Shaun: "its inconsistent after points when there is
+            // a kick in at this stage". Found by reading a live message trace:
+            // there are THREE shot outcomes, not two, and only one of the two
+            // misses restarted correctly.
+            //
+            //   Behind - 1 point.  ->  kick in   ->  centre bounce
+            //   Off target!        ->  nothing   ->  centre bounce
+            //
+            // To a child those are the same event - the shot missed - so
+            // restarting them differently reads as the kick-in being broken
+            // and firing at random. In football the ball has crossed the goal
+            // line either way, so both are a kick-in. Only an actual goal
+            // returns to the centre.
+            if (!isGoal) yield return KickInAfterBehind(zDir, humanControlled);
         }
 
         // Deliberately its OWN routine rather than a shared extraction of the
@@ -2168,7 +2230,7 @@ namespace AFL.Day1
             CutCameraForKick(zDir, kicker.position.z);
             yield return new WaitForSeconds(snapSetupPause);
             if (_roundId != roundAtStart) yield break;
-            yield return ShootAtGoalCore(kicker, zDir, humanControlled);
+            yield return ShootAtGoalCore(kicker, zDir, humanControlled, isSnap: true);
         }
 
         public float speccyLeapRiseDuration = 0.5f;
@@ -2654,6 +2716,15 @@ namespace AFL.Day1
         // action rather than two. What was missing was the beat AFTER, so the
         // camera holds on the result before play moves on.
         public float contactHoldPause = 0.7f;
+
+        // 2026-08-28, Shaun: "the rushed point still is being randomly flwon
+        // through for a point". A full contactHoldPause on the spoil was
+        // actively wrong - it put 0.7s between the fist and the ball moving,
+        // so the two read as unrelated events rather than cause and effect.
+        // This is just long enough to see contact; the ball leaves on the
+        // punch. The knock itself is what makes it look struck.
+        public float spoilContactBeat = 0.22f;
+        public float spoilKnockDuration = 0.26f;
         System.Collections.IEnumerator TackleGrab(Transform chaser, Transform carrier)
         {
             var cl = chaser ? FindDeepChild(chaser, "LeftArm") : null;
