@@ -1427,13 +1427,22 @@ namespace AFL.Day1
         // shot's result and the next round's centre bounce.
         public float shotStartPause = 0.5f;
 
-        System.Collections.IEnumerator TakeShotAtGoal(Transform kicker, float zDir, bool humanControlled)
+        System.Collections.IEnumerator TakeShotAtGoal(Transform kicker, float zDir, bool humanControlled, bool onTheRun = false)
         {
             if (!kicker || !ball) yield break;
             int roundAtStart = _roundId;
-            _message = "Lines up for goal...";
-            yield return new WaitForSeconds(shotStartPause);
-            if (_roundId != roundAtStart) yield break;
+            // 2026-08-28, Shaun: "no they dont go back and have a shot after
+            // bouncing it they need to kick it on the run". onTheRun skips the
+            // whole set-shot ritual below - the walk back, the pause, the run-in
+            // - and goes straight to the kick. Everything after it (ball to the
+            // boot, the power bar, the flight, the scoring) is shared, so a snap
+            // is graded exactly like any other kick.
+            if (!onTheRun)
+            {
+                _message = "Lines up for goal...";
+                yield return new WaitForSeconds(shotStartPause);
+                if (_roundId != roundAtStart) yield break;
+            }
 
             // Real fix (2026-08-12, Shaun: "it not really evident that the
             // player is able to go back and take there kick"). This used
@@ -1446,13 +1455,16 @@ namespace AFL.Day1
             // here instead, before the step-back starts, makes the whole
             // back-then-in run visible in one continuous, stable shot.
             CutCameraForKick(zDir);
-            float markSpotZ = kicker.position.z;
-            yield return RunToZ(kicker, markSpotZ - zDir * shotStepBackDistance, shotStepBackDuration);
-            if (_roundId != roundAtStart) yield break;
-            yield return new WaitForSeconds(shotSetupPause);
-            if (_roundId != roundAtStart) yield break;
-            yield return RunToZ(kicker, markSpotZ, shotRunInDuration);
-            if (_roundId != roundAtStart) yield break;
+            if (!onTheRun)
+            {
+                float markSpotZ = kicker.position.z;
+                yield return RunToZ(kicker, markSpotZ - zDir * shotStepBackDistance, shotStepBackDuration);
+                if (_roundId != roundAtStart) yield break;
+                yield return new WaitForSeconds(shotSetupPause);
+                if (_roundId != roundAtStart) yield break;
+                yield return RunToZ(kicker, markSpotZ, shotRunInDuration);
+                if (_roundId != roundAtStart) yield break;
+            }
 
             var rightHand = FindDeepChild(kicker, "RightHand");
             var rightFoot = FindDeepChild(kicker, "RightFoot");
@@ -1800,9 +1812,7 @@ namespace AFL.Day1
             int roundAtStart = _roundId;
             _message = "Snaps for goal on the run!";
             CutCameraForKick(zDir, kicker.position.z);
-            yield return new WaitForSeconds(shotSetupPause);
-            if (_roundId != roundAtStart) yield break;
-            yield return TakeShotAtGoal(kicker, zDir, humanControlled);
+            yield return TakeShotAtGoal(kicker, zDir, humanControlled, onTheRun: true);
         }
 
         System.Collections.IEnumerator RunStraight(Transform t, float zDir)
