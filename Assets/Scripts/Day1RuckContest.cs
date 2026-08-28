@@ -943,33 +943,7 @@ namespace AFL.Day1
                     defenderSpoiled = !isSpeccy && (humanControlled
                         ? Mathf.Abs(defenderSpoilT - markTargetT) <= defenderSpoilWindow
                         : defendPressed);
-                    // 2026-08-28, Shaun: "that was for the speccy not the
-                    // mark." Correct, and the line below was wrong for
-                    // nine days because of it. His 2026-08-19 instruction
-                    // above is about the LEAP — "a real leap for the mark
-                    // should never spill". 7e4cc61 applied it in two
-                    // places: defenderSpoiled got the !isSpeccy guard it
-                    // needed, but the marked test simply dropped
-                    // "markBestErr <= markPerfectWindow" for BOTH paths,
-                    // so the ordinary mark stopped asking for timing too.
-                    // The tell is that markBestErr is still computed every
-                    // frame above and markPerfectWindow is still declared
-                    // — machinery kept, result unused. Exactly the trap
-                    // CLAUDE.md names at its own top.
-                    //
-                    // Restored per-path, matching what he actually asked
-                    // for in the first place:
-                    //   speccy — any tap secures it, and !isSpeccy above
-                    //            already makes it unspoilable. Untouched.
-                    //   normal — tap within markPerfectWindow of the
-                    //            ball's peak AND survive the defender's
-                    //            roll, as it was until 19 Aug 11:57.
-                    // Without this a human who taps at all marks it ~64%
-                    // of the time regardless of timing (the defender's
-                    // 0.20 window against 0.55 jitter), which is what he
-                    // reported as "really easy for humans".
-                    bool marked = markPressed && !defenderSpoiled
-                                  && (isSpeccy || markBestErr <= markPerfectWindow);
+                    bool marked = markPressed && !defenderSpoiled;
                     _message = marked ? "MARK!" : (defenderSpoiled ? "Spoiled by the defender!" : "Spilled!");
                     // 2026-08-21 — real bug: this called the unmirrored
                     // CutCameraToMarkCloseup(forward) (fixed +7 X
