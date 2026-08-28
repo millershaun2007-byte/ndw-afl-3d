@@ -93,6 +93,10 @@ namespace AFL.Day1
         // the forward parked at the top and they never met. Same defect shape
         // as the rest of today: a duplicated constant that drifted.
         public float contestLeapHeight = 1.65f;
+        // ...and ONE arm angle for that reach, for the same reason. The
+        // defender's arm used to come from an independent lerp instead of the
+        // jump, which is why he wound up and hurled rather than reaching.
+        public float contestArmAngle = 155f;
         // 2026-08-19: rise time for NormalMarkHop, the mark-specific hop
         // that holds at peak until the outcome is known rather than
         // landing on a fixed clock (see NormalMarkHop's own header for
@@ -2327,14 +2331,24 @@ namespace AFL.Day1
                 float f = el / dur;
                 float wave = Mathf.Sin(f * Mathf.PI);          // jump: 0 -> 1 -> 0
                 t.localPosition = start + Vector3.up * wave * contestLeapHeight;
-                // Punching arm starts high and swings down through the ball,
-                // finishing its travel just past the top of the jump so contact
-                // reads as the hand driving the ball away, not scooping it up.
-                // fist completes its travel AT the top, not 0.115s after the ball has gone
-                float armF = Mathf.Clamp01(f / 0.5f);
-                float ang = Mathf.Lerp(150f, 10f, armF);
-                if (rightArm) rightArm.localRotation = rightStart * Quaternion.Euler(0, 0, -ang);
-                if (leftArm) leftArm.localRotation = leftStart * Quaternion.Euler(0, 0, wave * 35f);
+                // 2026-08-28: this was a shotput. The arm came from its own lerp
+                // starting at -150 degrees - flung back over his head before he
+                // had even left the ground - so the defender wound up and hurled
+                // while the forward reached with both arms off `wave`. Two
+                // different actions in the same airspace never read as a contest,
+                // which is why matching their heights and timings did not fix it.
+                //
+                // A spoil is a REACH that ends in a short punch. Both arms now
+                // rise and fall with the jump exactly as the forward's do, off
+                // the same wave and the same contestArmAngle; the punch is the
+                // last part of that reach, a short flick of the near arm driving
+                // through the ball just past the top.
+                // both arms reach up with the leap — same idiom as the forward's mark
+                float reach = wave * 145f;   // just under his 155: spoiling, not marking
+                // a short jab at the top, not a wind-up
+                float jab = Mathf.Sin(Mathf.Clamp01((f - 0.35f) / 0.3f) * Mathf.PI) * 30f;
+                if (rightArm) rightArm.localRotation = rightStart * Quaternion.Euler(0, 0, -(reach + jab));
+                if (leftArm)  leftArm.localRotation  = leftStart  * Quaternion.Euler(0, 0,   reach);
                 yield return null;
             }
             t.localPosition = start;
@@ -2360,7 +2374,7 @@ namespace AFL.Day1
             Vector3 towardCentre = reachesBall
                 ? new Vector3(-Mathf.Sign(start.x) * 0.55f, 0, 0)
                 : Vector3.zero;
-            float armAngle = reachesBall ? 155f : 60f;
+            float armAngle = reachesBall ? contestArmAngle : 60f;
 
             var leftArm = FindDeepChild(t, "LeftArm");
             var rightArm = FindDeepChild(t, "RightArm");
