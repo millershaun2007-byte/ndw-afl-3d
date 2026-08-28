@@ -87,6 +87,11 @@ namespace AFL.Day1
         public float peakHeight = 2.1f;
         public float groundY = 1.0f;
         public float hopDuration = 0.45f;
+        // 2026-08-28, Shaun: "after the defender kicks if its not a mark we need
+        // a pause". The ball dropping and being gathered ran straight on from
+        // the contest with only catchPause between, so a spilled kick read as
+        // continuous motion rather than a break in play.
+        public float looseBallPause = 0.8f;
         // 2026-08-28: ONE height for any leap that contests the ball. The
         // defender's punch had its own hardcoded 1.4f - a third copy of a
         // number the forward derives - so he rose a quarter of a unit BELOW
@@ -1171,6 +1176,8 @@ namespace AFL.Day1
                     ball.position = new Vector3(ball.position.x, groundY, ball.position.z);
                     CutCameraToDefault();
                     yield return new WaitForSeconds(catchPause);
+                    yield return new WaitForSeconds(looseBallPause);
+                    if (_roundId != roundAtStart) yield break;
                     if (_roundId != roundAtStart) yield break;
                     yield return ContinueChainOrEnd(humanControlled, forward, chainDepth);
                 }
@@ -1439,6 +1446,19 @@ namespace AFL.Day1
                     CutCameraToDefault();
                     yield return new WaitForSeconds(catchPause);
                     if (_roundId != roundAtStart) yield break;
+                    // 2026-08-28, Shaun: "IF THE FORWARD GATHERS THEY KICK A SNAP".
+                    // A loose ball still inside the attacking side's forward line is
+                    // gathered by their forward, who snaps at goal - not walked back
+                    // out by the defence. Outside that, the defence clears as before.
+                    if (zDir * ball.position.z >= goalZ - kickDistance)
+                    {
+                        yield return RunToZ(forward, ball.position.z, 0.35f);
+                        if (_roundId != roundAtStart) yield break;
+                        yield return MarkCatchRoutine(forward, true);
+                        if (_roundId != roundAtStart) yield break;
+                        yield return PlayOnSnap(forward, zDir, humanControlled);
+                        yield break;
+                    }
                     Transform spoilClearer = humanControlled ? rooClearer : crocClearer;
                     spoilClearer.position = new Vector3(spoilClearer.position.x, spoilClearer.position.y, ball.position.z);
                     yield return RunToZ(spoilClearer, ball.position.z, 0.4f);
@@ -1964,6 +1984,20 @@ namespace AFL.Day1
         // second caller risks the beat that is already right in order to
         // fix the one that never existed, so this reuses the same helpers
         // (RunToZ / CutCameraForKickOut / KickMotion) without touching it.
+        // 2026-08-28, Shaun: "IF THE FORWARD GATHERS THEY KICK A SNAP".
+        // Restored verbatim from 6f5439d - it was added then removed in 28f014d
+        // during the revert, not because it was wrong.
+        System.Collections.IEnumerator PlayOnSnap(Transform kicker, float zDir, bool humanControlled)
+        {
+            if (!kicker || !ball) yield break;
+            int roundAtStart = _roundId;
+            _message = "Plays on — snaps for goal!";
+            CutCameraForKick(zDir, kicker.position.z);
+            yield return new WaitForSeconds(shotSetupPause);
+            if (_roundId != roundAtStart) yield break;
+            yield return TakeShotAtGoal(kicker, zDir, humanControlled);
+        }
+
         System.Collections.IEnumerator KickInAfterBehind(float zDir, bool crocsInPossession)
         {
             // The team that was SCORED ON kicks in — same rule as the
