@@ -434,6 +434,14 @@ namespace AFL.Day1
             // function's own header comment on the reverseDirection bug
             // this replaced).
             float runDir = crocsInPossession ? 1f : -1f;
+            // Centre clearance only - not a kick-out or a chain hop, which have
+            // their own shape. kickerOverride is null exactly when this came
+            // from the ruck.
+            if (chainDepth == 0 && !kickerOverride && Random.value < centreBurstChance)
+            {
+                yield return BurstBounceSnap(rover, runDir, crocsInPossession);
+                yield break;
+            }
             yield return RunStraight(rover, runDir);
             // 2026-08-21 — real bug, found by computing the actual
             // numbers rather than guessing again: every chain hop
@@ -1744,6 +1752,59 @@ namespace AFL.Day1
         // lane so a straight run is always correct. No kick yet (that's
         // the next slice); this ends on an honest placeholder message, not
         // a stall into not-yet-built work.
+        // 2026-08-28, Shaun: "add a scene in the centre were the rover sprints
+        // out of the centre has a bounce and kicks a snap on the run."
+        //
+        // Reuses RunStraight for both legs rather than duplicating its animator
+        // and hand-tracking work - it already drives the Speed parameter and
+        // pins the ball to the real hand bones, and a second copy of that would
+        // drift out of sync exactly like every other duplicate in this file has.
+        public float centreBurstChance = 0.45f;
+        public float bounceDuration = 0.55f;
+
+        System.Collections.IEnumerator BurstBounceSnap(Transform rover, float zDir, bool humanControlled)
+        {
+            if (!rover || !ball) yield break;
+            int roundAtStart = _roundId;
+
+            _message = "Breaks out of the centre!";
+            yield return RunStraight(rover, zDir);
+            if (_roundId != roundAtStart) yield break;
+
+            // The bounce: ball out of the hands, down to ground, back up.
+            _message = "Bounces it...";
+            var hand = FindDeepChild(rover, "RightHand");
+            Vector3 from = hand ? hand.position : rover.position + Vector3.up;
+            float el = 0f;
+            while (el < bounceDuration)
+            {
+                if (_roundId != roundAtStart) yield break;
+                el += Time.deltaTime;
+                float f = Mathf.Clamp01(el / bounceDuration);
+                Vector3 h = hand ? hand.position : rover.position + Vector3.up;
+                // down to the turf and back to the hand, travelling with the run
+                float dip = Mathf.Sin(f * Mathf.PI);
+                Vector3 at = Vector3.Lerp(from, h, f);
+                ball.position = new Vector3(at.x, Mathf.Lerp(at.y, groundY, dip), at.z + zDir * dip * 0.8f);
+                yield return null;
+            }
+
+            yield return RunStraight(rover, zDir);
+            if (_roundId != roundAtStart) yield break;
+            yield return PlayOnSnap(rover, zDir, humanControlled);
+        }
+
+        System.Collections.IEnumerator PlayOnSnap(Transform kicker, float zDir, bool humanControlled)
+        {
+            if (!kicker || !ball) yield break;
+            int roundAtStart = _roundId;
+            _message = "Snaps for goal on the run!";
+            CutCameraForKick(zDir, kicker.position.z);
+            yield return new WaitForSeconds(shotSetupPause);
+            if (_roundId != roundAtStart) yield break;
+            yield return TakeShotAtGoal(kicker, zDir, humanControlled);
+        }
+
         System.Collections.IEnumerator RunStraight(Transform t, float zDir)
         {
             if (!t) yield break;
