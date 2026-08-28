@@ -1209,12 +1209,11 @@ namespace AFL.Day1
                 // built for exactly this - "need them showing it clearly being
                 // tapped"), and the flight starts from the punching hand rather
                 // than from wherever the ball happened to be sitting.
-                Hop(defender, true);
-                yield return new WaitForSeconds(hopDuration * 0.5f);
-                if (_roundId != roundAtStart) yield break;
-                var spoilHand = FindDeepChild(defender, "RightHand");
-                ball.position = spoilHand ? spoilHand.position
-                    : new Vector3(ball.position.x, groundY + peakHeight, ball.position.z);
+                // 2026-08-28, Shaun: "spoil looks fucking ridiulous now". The
+                // defender leaping and swiping at the ball read badly, so the
+                // punch is removed and the ball simply drops and is kicked
+                // through, as it was before. Everything else from today stays.
+                ball.position = new Vector3(ball.position.x, groundY, ball.position.z);
                 Vector3 behindKickStart = ball.position;
                 Vector3 behindTarget = new Vector3(side * 1.6f, behindKickStart.y, zDir * goalZ);
                 float behindEl = 0f;
