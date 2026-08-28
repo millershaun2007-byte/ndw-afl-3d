@@ -4,6 +4,7 @@ using UnityEditor.Animations;
 using UnityEditor.SceneManagement;
 using System.Linq;
 using AFL.Day1;
+using Unity.Cinemachine;
 
 // Day 1/2 — issue #6 and the canonical rebuild plan (issue #1 pinned
 // comment). One persistent scene, not per-day scenes — "each day adds a
@@ -22,6 +23,14 @@ public static class MainBuildScript
         PlayerSettings.productName = "Mount Duneed Footy";
         PlayerSettings.WebGL.template = "PROJECT:Day1";
         PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Disabled;
+        // 2026-08-28: adding Cinemachine took the wasm from 17.6MB to 31.4MB,
+        // a 78% bigger code download for a kid on a phone. managedStrippingLevel
+        // had never been set (ProjectSettings shows "{}"), so the build was
+        // shipping every unused type the new package dragged in. High is safe
+        // for this project specifically - nothing here resolves types by
+        // reflection or name, the one risk that stripping actually breaks.
+        PlayerSettings.SetManagedStrippingLevel(
+            UnityEditor.Build.NamedBuildTarget.WebGL, ManagedStrippingLevel.High);
 
         var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
         {
@@ -248,6 +257,38 @@ public static class MainBuildScript
         // frame - the one moment the whole tap contest is judged on.
         camGo.transform.LookAt(new Vector3(0, 1.7f, 0));
 
+        // 2026-08-28, Shaun: "lets do it with cinemashine." A CinemachineBrain
+        // takes over the Main Camera transform, so every shot becomes a
+        // virtual camera the brain BLENDS between rather than a hard transform
+        // write. The blend is short (0.35s) on purpose: this game's camera was
+        // rewritten on 2026-08-11 to cut rather than chase, after "the camera
+        // cannot cope with direction changes", and that lesson still holds. A
+        // blend between two FIXED, known-good framings cannot drift or end up
+        // facing the wrong way the way the old SmoothDamp chase could - it can
+        // only travel between two shots that were already correct.
+        var brain = camGo.AddComponent<CinemachineBrain>();
+        brain.DefaultBlend = new CinemachineBlendDefinition(
+            CinemachineBlendDefinition.Styles.EaseInOut, 0.35f);
+
+        CinemachineCamera MakeVcam(string name, float fov)
+        {
+            var go = new GameObject(name);
+            var vc = go.AddComponent<CinemachineCamera>();
+            vc.Lens.FieldOfView = fov;
+            vc.Priority.Value = 0;
+            return vc;
+        }
+        // Each shot gets its own vcam. Positions are written by the
+        // CutCameraX methods at the moment of the cut, exactly as they were
+        // written onto the real camera before - the maths is unchanged, only
+        // what it is applied to.
+        var vcamDefault = MakeVcam("VCam Default", 60f);
+        vcamDefault.transform.SetPositionAndRotation(camGo.transform.position, camGo.transform.rotation);
+        vcamDefault.Priority.Value = 10;                 // the resting shot
+        var vcamKick = MakeVcam("VCam Kick", 60f);
+        var vcamKickOut = MakeVcam("VCam KickOut", 60f);
+        var vcamCloseup = MakeVcam("VCam Closeup", 50f); // tighter lens on contests
+
         var lightGo = new GameObject("Directional Light");
         var light = lightGo.AddComponent<Light>();
         light.type = LightType.Directional;
@@ -267,6 +308,10 @@ public static class MainBuildScript
         contest.rooClearer = rooClearerGo.transform;
         contest.crocClearer = crocClearerGo.transform;
         contest.ball = ball.transform;
+        contest.vcamDefault = vcamDefault;
+        contest.vcamKick = vcamKick;
+        contest.vcamKickOut = vcamKickOut;
+        contest.vcamCloseup = vcamCloseup;
 
         var bridgeGo = new GameObject("TouchBridge");
         bridgeGo.AddComponent<Day1TouchBridge>();

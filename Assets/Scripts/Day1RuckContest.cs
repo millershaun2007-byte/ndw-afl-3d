@@ -1,4 +1,5 @@
 using UnityEngine;
+using Unity.Cinemachine;
 
 namespace AFL.Day1
 {
@@ -60,6 +61,32 @@ namespace AFL.Day1
         // and side-on only for the kick's flight, then cut back once the
         // mark resolves.
         Camera _mainCam;
+
+        // 2026-08-28, Shaun: "lets do it with cinemashine." One vcam per shot
+        // type; the CinemachineBrain on the Main Camera blends between them.
+        // Every CutCameraX below keeps its ORIGINAL framing maths untouched
+        // and simply writes it onto the relevant vcam instead of onto the
+        // camera itself, then raises that vcam's priority.
+        //
+        // Null-safe throughout: if these are unassigned (an older scene, or a
+        // build where the brain failed to attach) every cut falls back to the
+        // direct transform write it used before, so the camera degrades to the
+        // previous behaviour rather than freezing on one shot.
+        public CinemachineCamera vcamDefault;
+        public CinemachineCamera vcamKick;
+        public CinemachineCamera vcamKickOut;
+        public CinemachineCamera vcamCloseup;
+
+        bool UsingCinemachine => vcamDefault && vcamKick && vcamKickOut && vcamCloseup;
+
+        void ActivateVcam(CinemachineCamera live)
+        {
+            if (!UsingCinemachine) return;
+            vcamDefault.Priority.Value = ReferenceEquals(vcamDefault, live) ? 20 : 0;
+            vcamKick.Priority.Value = ReferenceEquals(vcamKick, live) ? 20 : 0;
+            vcamKickOut.Priority.Value = ReferenceEquals(vcamKickOut, live) ? 20 : 0;
+            vcamCloseup.Priority.Value = ReferenceEquals(vcamCloseup, live) ? 20 : 0;
+        }
         Coroutine _defenderRunToZ;
         Vector3 _camDefaultPos;
         Quaternion _camDefaultRot;
@@ -226,8 +253,11 @@ namespace AFL.Day1
             _mainCam = Camera.main;
             if (_mainCam)
             {
-                _camDefaultPos = _mainCam.transform.position;
-                _camDefaultRot = _mainCam.transform.rotation;
+                // With a brain attached the camera transform is brain-driven,
+                // so the resting shot is defined by vcamDefault, not by
+                // whatever the camera happens to read on the first frame.
+                _camDefaultPos = vcamDefault ? vcamDefault.transform.position : _mainCam.transform.position;
+                _camDefaultRot = vcamDefault ? vcamDefault.transform.rotation : _mainCam.transform.rotation;
             }
             _quarterTimeRemaining = quarterDuration;
             BeginThrow();
@@ -258,8 +288,12 @@ namespace AFL.Day1
             // mid-hold).
             if (_mainCam)
             {
-                _mainCam.transform.position = _camDefaultPos;
-                _mainCam.transform.rotation = _camDefaultRot;
+                if (UsingCinemachine) ActivateVcam(vcamDefault);
+                else
+                {
+                    _mainCam.transform.position = _camDefaultPos;
+                    _mainCam.transform.rotation = _camDefaultRot;
+                }
             }
             // Push the rucks out to their run-up marks. Done here rather
             // than in the scene so their resting/contest position stays the
@@ -1529,6 +1563,13 @@ namespace AFL.Day1
             // (goalZ) so both the ball's landing and the posts are framed
             // together, not just one or the other.
             float pivotZ = contestZ ?? (zDir * (goalZ - 5f));
+            if (UsingCinemachine)
+            {
+                vcamKick.transform.position = new Vector3(kickCamSide, kickCamHeight, pivotZ);
+                vcamKick.transform.LookAt(new Vector3(0, 3f, pivotZ));
+                ActivateVcam(vcamKick);
+                return;
+            }
             _mainCam.transform.position = new Vector3(kickCamSide, kickCamHeight, pivotZ);
             // Real fix (2026-08-12, same pass as the speccy). LookAt
             // height raised from 1.5 to 3 — with the leap now reaching
@@ -1556,6 +1597,13 @@ namespace AFL.Day1
         {
             if (!_mainCam) return;
             float pivotZ = (startZ + endZ) * 0.5f;
+            if (UsingCinemachine)
+            {
+                vcamKickOut.transform.position = new Vector3(kickCamSide * 1.6f, kickCamHeight * 1.6f, pivotZ);
+                vcamKickOut.transform.LookAt(new Vector3(0, 3f, pivotZ));
+                ActivateVcam(vcamKickOut);
+                return;
+            }
             _mainCam.transform.position = new Vector3(kickCamSide * 1.6f, kickCamHeight * 1.6f, pivotZ);
             _mainCam.transform.LookAt(new Vector3(0, 3f, pivotZ));
         }
@@ -1563,6 +1611,7 @@ namespace AFL.Day1
         void CutCameraToDefault()
         {
             if (!_mainCam) return;
+            if (UsingCinemachine) { ActivateVcam(vcamDefault); return; }
             _mainCam.transform.position = _camDefaultPos;
             _mainCam.transform.rotation = _camDefaultRot;
         }
@@ -1583,6 +1632,13 @@ namespace AFL.Day1
         void CutCameraToMarkCloseup(Transform forward)
         {
             if (!_mainCam || !forward) return;
+            if (UsingCinemachine)
+            {
+                vcamCloseup.transform.position = forward.position + new Vector3(7f, 3f, 0f);
+                vcamCloseup.transform.LookAt(forward.position + Vector3.up * 1.2f);
+                ActivateVcam(vcamCloseup);
+                return;
+            }
             _mainCam.transform.position = forward.position + new Vector3(7f, 3f, 0f);
             _mainCam.transform.LookAt(forward.position + Vector3.up * 1.2f);
         }
@@ -1601,6 +1657,13 @@ namespace AFL.Day1
         void CutCameraToMarkCloseup(Transform subject, float side)
         {
             if (!_mainCam || !subject) return;
+            if (UsingCinemachine)
+            {
+                vcamCloseup.transform.position = subject.position + new Vector3(side * 7f, 3f, 0f);
+                vcamCloseup.transform.LookAt(subject.position + Vector3.up * 1.2f);
+                ActivateVcam(vcamCloseup);
+                return;
+            }
             _mainCam.transform.position = subject.position + new Vector3(side * 7f, 3f, 0f);
             _mainCam.transform.LookAt(subject.position + Vector3.up * 1.2f);
         }
