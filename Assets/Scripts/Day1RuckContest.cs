@@ -1548,7 +1548,28 @@ namespace AFL.Day1
                 // but which team that is (see its own header comment on
                 // the reverseDirection bug this replaced); no separate
                 // direction override needed or correct here.
-                yield return TapBallAway(crocsInPossession: !humanControlled, kickerOverride: defender, chainDepth: chainDepth + 1);
+                // 2026-08-28, Shaun: "also the kick out from points needs to be
+                // consistent", read alongside "ditch tackling brings to many
+                // moving parts" and "it just leads to this being like a
+                // standalone game not part of a bigger app".
+                //
+                // The inconsistency was not wording, it was structure. There
+                // are two behind paths and they ended differently:
+                //
+                //     rushed behind  -> kick-in -> a whole second contest
+                //     shot behind    -> kick-in -> centre bounce
+                //
+                // So a point sometimes bought another full passage of play and
+                // sometimes did not, with nothing on screen to say why. Both
+                // now return to the centre.
+                //
+                // This deletes the chained second contest documented in
+                // SECOND-CONTEST-BRIEF.md. That was real work and it worked -
+                // it is removed because it makes the game longer and less
+                // predictable, not because it was broken. Restoring it means
+                // putting this TapBallAway call back and giving the OTHER
+                // behind path an equivalent, not just reverting this line.
+                yield break;
                 }
                 else
                 {
@@ -1790,7 +1811,23 @@ namespace AFL.Day1
         // actual short-landing spot takes — same time-based-not-speed-based
         // convention every other RunToZ call in this file already uses
         // (e.g. shotRunInDuration), not derived from the real distance.
-        public float gatherRunDuration = 0.8f;
+        public float gatherRunDuration = 0.62f;
+
+        // 2026-08-28, Shaun: "if the ball is at ground level they need to run
+        // to the ball pick it up quck tap staright away prtty much to kick a
+        // snap needs to be direct in that contest not like the set shot."
+        //
+        // The beat was using catchPause (0.5s) twice - once before the run and
+        // again after the pickup - which is sized for CATCHING A MARK, where a
+        // held pause is the point. On a ground ball it is just dead time: 1.9s
+        // of waiting before a tap was even possible. A player who scoops a
+        // loose ball in the forward 50 gets it away immediately or gets caught.
+        //
+        // Kept as a real beat rather than zero, so it still reads as pick up
+        // THEN kick rather than the two happening at once - the pacing note
+        // ("lots of pauses and one thing at a time") still applies, this is
+        // just the right size of pause for this particular beat.
+        public float groundBallBeat = 0.16f;
 
         // 2026-08-23 — the short-kick scene KickAway branches into above
         // (isShortKick). Deliberately its own simple coroutine rather than
@@ -1844,7 +1881,7 @@ namespace AFL.Day1
             // class already found and fixed once for chained mark contests.
             CutCameraForKick(zDir, kickEnd.z);
             _message = "Loose ball!";
-            yield return new WaitForSeconds(catchPause);
+            yield return new WaitForSeconds(groundBallBeat);
             if (_roundId != roundAtStart) yield break;
 
             // Gather — forward runs onto the loose ball from wherever the
@@ -1854,7 +1891,7 @@ namespace AFL.Day1
             var gatherHand = FindDeepChild(forward, "RightHand");
             if (gatherHand) ball.position = gatherHand.position;
             _message = "Gathers it!";
-            yield return new WaitForSeconds(catchPause);
+            yield return new WaitForSeconds(groundBallBeat);
             if (_roundId != roundAtStart) yield break;
 
             // 2026-08-28, Shaun: "when the ball falls short the player can
@@ -1954,7 +1991,10 @@ namespace AFL.Day1
         // enough - the ceremony that actually made it feel like a set shot was
         // this 2.5s power bar, which the snap was still using. A snap is taken
         // under pressure, in about a second.
-        public float snapPowerRiseDuration = 0.9f;
+        // 2026-08-28, Shaun: "maybe still have the bar just less time" - the
+        // bar stays (it is the skill in the shot), it is just quicker on a
+        // snap than on a set shot's 2.5s sweep.
+        public float snapPowerRiseDuration = 0.6f;
         // 2026-08-28, Shaun: "maybe also 10 percent easier for the kid."
         // Band widened 10% about its own centre (0.735) rather than by moving
         // one edge, which would shift WHERE you have to tap as well as how
