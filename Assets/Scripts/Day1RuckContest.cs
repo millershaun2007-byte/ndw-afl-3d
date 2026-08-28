@@ -1040,6 +1040,14 @@ namespace AFL.Day1
                     // fell straight through the if/else chain and the round simply
                     // died, which is why it read as the game giving up. The contest
                     // is now binary: marked, or spoiled by the defender.
+                    // 2026-08-28: markBestErr was computed here and then never read by
+                    // anything - the mark contest ignored the player's timing entirely,
+                    // so when attacking, the defender's roll decided it alone and taps
+                    // changed nothing. A mistimed leap now loses the ball in the air to
+                    // the defender rather than doing nothing, which keeps the outcome
+                    // binary (no spill) while making the tap matter. Applies to the AI
+                    // too - its own tap is graded by the same window.
+                    if (!(markPressed && markBestErr <= markPerfectWindow)) defenderSpoiled = true;
                     bool marked = !defenderSpoiled;
                     _message = defenderSpoiled ? "Spoiled by the defender!" : "MARK!";
                     // 2026-08-21 — real bug: this called the unmirrored
