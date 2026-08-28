@@ -1220,14 +1220,15 @@ namespace AFL.Day1
                 ball.position = punchHand ? punchHand.position
                     : new Vector3(ball.position.x, groundY + peakHeight, ball.position.z);
                 Vector3 behindKickStart = ball.position;
-                Vector3 behindTarget = new Vector3(side * 1.6f, behindKickStart.y, zDir * goalZ);
+                // target the ground, not the punch height - a punched ball falls
+                Vector3 behindTarget = new Vector3(side * 1.6f, groundY, zDir * goalZ);
                 float behindEl = 0f;
-                while (behindEl < shotKickDuration)
+                while (behindEl < spoilPunchDuration)
                 {
                     if (_roundId != roundAtStart) yield break;
                     behindEl += Time.deltaTime;
-                    float f = Mathf.Clamp01(behindEl / shotKickDuration);
-                    float arc = Mathf.Sin(f * Mathf.PI) * shotKickHeight;
+                    float f = Mathf.Clamp01(behindEl / spoilPunchDuration);
+                    float arc = Mathf.Sin(f * Mathf.PI) * spoilPunchHeight;
                     ball.position = Vector3.Lerp(behindKickStart, behindTarget, f) + Vector3.up * arc;
                     yield return null;
                 }
@@ -1646,6 +1647,13 @@ namespace AFL.Day1
         public float shotSetupPause = 0.4f;
         public float shotRunInDuration = 0.9f;
         public float shotDropDuration = 0.3f;
+        // 2026-08-28: a punched ball is fast and flat and it LANDS. Borrowing
+        // the set shot's constants (3.0 height over 0.9s) gave the spoil a
+        // floaty set-shot arc, which is what made it read wrong - four commits
+        // tonight went at the punch ANIMATION when the trajectory was the
+        // problem the whole time.
+        public float spoilPunchHeight = 0.8f;     // a deflection, not a kick
+        public float spoilPunchDuration = 0.45f;  // sharp, roughly the hop
         public float shotKickHeight = 3f;
         public float shotKickDuration = 0.9f;
         // How far off-centre (world X) a mistimed kick drifts — enough to
