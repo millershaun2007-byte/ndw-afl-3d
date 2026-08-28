@@ -4,7 +4,6 @@ using UnityEditor.Animations;
 using UnityEditor.SceneManagement;
 using System.Linq;
 using AFL.Day1;
-using Unity.Cinemachine;
 
 // Day 1/2 — issue #6 and the canonical rebuild plan (issue #1 pinned
 // comment). One persistent scene, not per-day scenes — "each day adds a
@@ -23,14 +22,6 @@ public static class MainBuildScript
         PlayerSettings.productName = "Mount Duneed Footy";
         PlayerSettings.WebGL.template = "PROJECT:Day1";
         PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Disabled;
-        // 2026-08-28: adding Cinemachine took the wasm from 17.6MB to 31.4MB,
-        // a 78% bigger code download for a kid on a phone. managedStrippingLevel
-        // had never been set (ProjectSettings shows "{}"), so the build was
-        // shipping every unused type the new package dragged in. High is safe
-        // for this project specifically - nothing here resolves types by
-        // reflection or name, the one risk that stripping actually breaks.
-        PlayerSettings.SetManagedStrippingLevel(
-            UnityEditor.Build.NamedBuildTarget.WebGL, ManagedStrippingLevel.High);
 
         var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
         {
@@ -145,28 +136,6 @@ public static class MainBuildScript
         // which was already confirmed good.
         EnsureAnimatorController("Dragon", "Assets/Models/DragonRiggedAI");
         EnsureAnimatorController("Lion", "Assets/Models/LionRiggedAI");
-        // 2026-08-28, Shaun: "maybe have people with same skills as the rucks
-        // doing that job."
-        //
-        // Football-correct and free. A spoil is a tall player leaping at the
-        // ball, which is a ruck's job, so the defenders are now the ruck
-        // models - and because those are already loaded for the centre bounce,
-        // this costs ZERO extra download.
-        //
-        // This replaces Shaun's own rigged character, tried here first at his
-        // suggestion ("just use my one for now if that ok in defence") and
-        // measured rather than guessed. Two problems, both real:
-        //
-        //   SIZE  ShaunRigged.glb is 8.1MB against 2.4MB for every animal -
-        //         they are compressed copies, his is raw. WebGL.data went
-        //         31MB -> 48.7MB, a ~35% bigger download for one character.
-        //   LOOK  It renders as a grey slab at game scale. Nothing is broken -
-        //         same 1 image / 1 material / 1 mesh / 80 accessors as Dragon
-        //         and Lion - a photo-derived human simply does not stylise
-        //         next to cartoon animals at ~100px.
-        //
-        // Getting him in properly means compressing to ~2.4MB and giving it a
-        // stylised treatment, not swapping the raw model in.
         // Real fix (2026-08-12, Shaun: "the characters inserted are much
         // smaller"). Measured directly (Renderer bounds), not guessed:
         // Croc=2.098 high, Roo=2.317, Dragon=1.937 (92% of Croc), Lion=
@@ -202,9 +171,9 @@ public static class MainBuildScript
         // zone — so SpeccyLeap (Day1RuckContest.cs) has real ground to
         // cover before the leap instead of starting almost on top of it.
         var crocForwardGo = BuildStaticCharacter("CrocForward", "Assets/Models/DragonRiggedAI", new Vector3(-0.9f, 0, 5f), Quaternion.identity, dragonScale);
-        var rooDefenderGo = BuildStaticCharacter("RooDefender", "Assets/Models/RooRiggedAI", new Vector3(0.9f, 0, 10f), Quaternion.Euler(0, 180, 0), lionScale);
+        var rooDefenderGo = BuildStaticCharacter("RooDefender", "Assets/Models/LionRiggedAI", new Vector3(0.9f, 0, 10f), Quaternion.Euler(0, 180, 0), lionScale);
         var rooForwardGo = BuildStaticCharacter("RooForward", "Assets/Models/LionRiggedAI", new Vector3(0.9f, 0, -5f), Quaternion.Euler(0, 180, 0), lionScale);
-        var crocDefenderGo = BuildStaticCharacter("CrocDefender", "Assets/Models/CrocRiggedAI", new Vector3(-0.9f, 0, -10f), Quaternion.identity, dragonScale);
+        var crocDefenderGo = BuildStaticCharacter("CrocDefender", "Assets/Models/DragonRiggedAI", new Vector3(-0.9f, 0, -10f), Quaternion.identity, dragonScale);
 
         // 2026-08-19, Shaun: "add 2 more characters so it does work like
         // the centre" — the forward line had no equivalent of
@@ -271,54 +240,8 @@ public static class MainBuildScript
         // pullback tried right after this (both ends + forward/defender
         // visible) looked fine in a static render but was wrong in
         // actual play. Back to the position confirmed good before that.
-        // 2026-08-28, Shaun: "camer probaly needs to be zoomed in even more to
-        // the game". Pulled in from -9.5 to -7.4 and lowered slightly, so the
-        // centre bounce fills more of the frame.
-        camGo.transform.position = new Vector3(0, 3.4f, -9.6f);   // 2026-08-28: back out, close framing exposed overlaps
-        // 2026-08-28: aim raised 1.2 -> 1.7. The ruck throw-up now peaks at
-        // 3.5 rather than 3.1 (a real leap needs a real ball height, see
-        // Day1RuckContest's RuckLeapScale), and at the old aim the ball
-        // climbed up behind the on-screen message banner at the top of the
-        // frame - the one moment the whole tap contest is judged on.
-        camGo.transform.LookAt(new Vector3(0, 1.7f, 0));
-
-        // 2026-08-28, Shaun: "lets do it with cinemashine." A CinemachineBrain
-        // takes over the Main Camera transform, so every shot becomes a
-        // virtual camera the brain BLENDS between rather than a hard transform
-        // write. The blend is short (0.35s) on purpose: this game's camera was
-        // rewritten on 2026-08-11 to cut rather than chase, after "the camera
-        // cannot cope with direction changes", and that lesson still holds. A
-        // blend between two FIXED, known-good framings cannot drift or end up
-        // facing the wrong way the way the old SmoothDamp chase could - it can
-        // only travel between two shots that were already correct.
-        var brain = camGo.AddComponent<CinemachineBrain>();
-        brain.DefaultBlend = new CinemachineBlendDefinition(
-            CinemachineBlendDefinition.Styles.EaseInOut, 0.35f);
-
-        CinemachineCamera MakeVcam(string name, float fov)
-        {
-            var go = new GameObject(name);
-            var vc = go.AddComponent<CinemachineCamera>();
-            vc.Lens.FieldOfView = fov;
-            vc.Priority.Value = 0;
-            return vc;
-        }
-        // Each shot gets its own vcam. Positions are written by the
-        // CutCameraX methods at the moment of the cut, exactly as they were
-        // written onto the real camera before - the maths is unchanged, only
-        // what it is applied to.
-        var vcamDefault = MakeVcam("VCam Default", 60f);
-        vcamDefault.transform.SetPositionAndRotation(camGo.transform.position, camGo.transform.rotation);
-        vcamDefault.Priority.Value = 10;                 // the resting shot
-        var vcamKick = MakeVcam("VCam Kick", 60f);
-        var vcamKickOut = MakeVcam("VCam KickOut", 60f);
-        var vcamCloseup = MakeVcam("VCam Closeup", 38f); // tighter lens on contests
-        // Behind the goals, looking back up the ground - the one angle that
-        // reads instantly as football. Positioned from goalZ rather than a
-        // guessed number so it stays behind the posts if the ground is ever
-        // resized. Both ends get one; which is live depends on zDir.
-        var vcamGoalPos = MakeVcam("VCam BehindGoalsPos", 45f);
-        var vcamGoalNeg = MakeVcam("VCam BehindGoalsNeg", 45f);
+        camGo.transform.position = new Vector3(0, 3.4f, -9.5f);
+        camGo.transform.LookAt(new Vector3(0, 1.2f, 0));
 
         var lightGo = new GameObject("Directional Light");
         var light = lightGo.AddComponent<Light>();
@@ -339,12 +262,6 @@ public static class MainBuildScript
         contest.rooClearer = rooClearerGo.transform;
         contest.crocClearer = crocClearerGo.transform;
         contest.ball = ball.transform;
-        contest.vcamDefault = vcamDefault;
-        contest.vcamKick = vcamKick;
-        contest.vcamKickOut = vcamKickOut;
-        contest.vcamCloseup = vcamCloseup;
-        contest.vcamGoalPos = vcamGoalPos;
-        contest.vcamGoalNeg = vcamGoalNeg;
 
         var bridgeGo = new GameObject("TouchBridge");
         bridgeGo.AddComponent<Day1TouchBridge>();
