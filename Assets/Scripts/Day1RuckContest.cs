@@ -766,19 +766,7 @@ namespace AFL.Day1
         // spoiled-clearance treatment, but if THAT needs to chain again
         // (a spoil on it, or an out-of-range mark), it stops there and
         // resets instead of working further up the ground.
-        // 2026-08-28, Shaun: "there was a version that worket the whole time with
-        // the rushed points kick out from defence and both team able to kick the
-        // ball all the way up ground in full game style".
-        //
-        // That version is this one with the chain UNCAPPED. It was 3, and was
-        // cut to 1 on 21 Aug by 25c5992, whose own removed comment said the
-        // chain "work the ball the FULL length of the ground" - which is
-        // exactly the thing he is asking for back.
-        //
-        // Taking 1c3dba9 wholesale would have restored the full chain but lost
-        // the scoreboard and quarters, which landed two hours later (440cc32,
-        // c6a2537). This keeps both.
-        public int maxChainDepth = 3;
+        public int maxChainDepth = 1;
 
         // Drop the ball to the foot, brief beat, then kick it away in an
         // arc continuing the same direction as the run. Now interleaved
