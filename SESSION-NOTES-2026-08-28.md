@@ -74,6 +74,61 @@ predates today by weeks; pulling the camera in only exposed it.
 local=31071849 live=31071812 and refused to report success. Verify per file,
 never by folder size.
 
+
+## The bug that cost the whole afternoon — read this one
+
+**Symptom:** the tap button does nothing. The beats keep running on bot rolls,
+so the game plays kick-outs at you and ignores every input. Looks like "the
+wrong build" or "the game is broken".
+
+**Cause:** `managedStrippingLevel: WebGL: 3` in `ProjectSettings.asset`.
+
+Set by `780bafb` (the Cinemachine install) to claw back the 13.7MB the package
+added to the wasm. It did that — and High IL2CPP stripping also deletes managed
+methods with no STATIC caller. All input here goes through the WebGL template's
+`SendMessage('TouchBridge', 'TapPressed', '')`, which resolves by name at
+runtime, so `TapPressed`, `SetMoveHeld` and `MarkPressed` look unreferenced.
+There is no `link.xml` in `Assets/` protecting them.
+
+**Why it survived two reverts:** both restored only `Assets/`.
+`ProjectSettings/` was never touched, so every build made after 10:20 shipped
+with input stripped — including builds offered as "the known working version".
+It also persists on its own: `PlayerSettings.SetManagedStrippingLevel` writes
+into `ProjectSettings.asset` permanently, so deleting the build-script line does
+not undo it.
+
+**Check, before blaming the game code:**
+
+    grep -A1 managedStrippingLevel ProjectSettings/ProjectSettings.asset
+    # must be `{}`, not `WebGL: 3`
+
+    diff <(git show 89fdb33:ProjectSettings/ProjectSettings.asset) \
+         ProjectSettings/ProjectSettings.asset
+
+And verify the methods survived the build:
+
+    strings -a Build/WebGL/Build/WebGL.data | grep -c TapPressed   # must be > 0
+
+**If Cinemachine is ever reinstalled**, the size problem comes back. Add a
+`link.xml` preserving the `SendMessage` targets BEFORE raising the stripping
+level, or leave stripping at default and accept the wasm size.
+
+## Two search mistakes worth not repeating
+
+**Revert the right directory.** `git checkout <sha> -- Assets/` does not restore
+project settings, packages, or the scene's build config. A "full revert" of this
+project is `Assets/` AND `ProjectSettings/` AND `Packages/`.
+
+**The bucket holds every build back to 17 Aug.** Object versioning is on for
+`gs://ndw-game-builds`. Listing them takes one command, and the timestamps are
+UTC — 19 Aug Melbourne starts at 18 Aug 14:00Z, so filtering on the UTC date
+silently hides most of a day:
+
+    gsutil ls -la gs://ndw-game-builds/afl3d/Build/WebGL.data
+
+Identify a build by grepping its `.data` for on-screen strings ("Q1", "CATS",
+"Rushed behind", "Plays on"), not by reasoning from commit messages.
+
 ## Process note from Shaun
 
 > "i think the longer we are in sessions the less reliable you become could be
