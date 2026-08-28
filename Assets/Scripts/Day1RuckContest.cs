@@ -1075,7 +1075,12 @@ namespace AFL.Day1
                     // avoid.
                     if (marked) CutCameraToMarkCloseup(forward, Mathf.Sign(forward.position.x == 0f ? 1f : forward.position.x));
                     _markHoldSucceeded = marked;
-                    _markHoldReleased = true;
+                    // 2026-08-28: on the spoil path the forward must stay up until the
+                    // punch connects. Releasing here meant the forward was already
+                    // descending before the defender left the ground at all - two
+                    // consecutive jumps, never a contest. Every spoil branch below
+                    // releases it; both hold loops also escape on a round change.
+                    if (!defenderSpoiled) _markHoldReleased = true;
                 }
                 yield return null;
             }
@@ -1213,12 +1218,17 @@ namespace AFL.Day1
                 // ball simple". Punched through at the top of the leap - the ball
                 // stays at contest height rather than dropping to ground first, so
                 // the defender meets it in the air instead of leaping at nothing.
+                // The hand reaches the ball, rather than the ball jumping to the
+                // hand: the defender is placed under the ball first so the leap
+                // genuinely arrives at it, and the ball is left where it is.
+                defender.position = new Vector3(ball.position.x, defender.position.y,
+                    ball.position.z - zDir * 0.35f);
+                defender.rotation = Quaternion.Euler(0f, zDir > 0f ? 0f : 180f, 0f);
                 SpoilPunch(defender);
                 yield return new WaitForSeconds(hopDuration * 0.45f);
                 if (_roundId != roundAtStart) yield break;
-                var punchHand = FindDeepChild(defender, "RightHand");
-                ball.position = punchHand ? punchHand.position
-                    : new Vector3(ball.position.x, groundY + peakHeight, ball.position.z);
+                // Contest resolved at the peak - only now does the forward come down.
+                _markHoldReleased = true;
                 Vector3 behindKickStart = ball.position;
                 // target the ground, not the punch height - a punched ball falls
                 Vector3 behindTarget = new Vector3(side * 1.6f, groundY, zDir * goalZ);
@@ -1387,6 +1397,9 @@ namespace AFL.Day1
                     // a mid-ground loose ball, same treatment as an
                     // uncontested drop below (no goal-line/behind
                     // mechanic — that only makes sense right at a goal).
+                    // Mid-ground spoil: no punch beat here, so release the forward
+                    // immediately - otherwise it hangs at peak for the rest of the round.
+                    _markHoldReleased = true;
                     _message = "Spoiled — cleared away!";
                     // 2026-08-21, Shaun: "the ball going in the air until
                     // ground level like the kickout just pause then bring
