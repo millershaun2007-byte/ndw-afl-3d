@@ -1719,7 +1719,14 @@ namespace AFL.Day1
             // without a tap is a real, deliberate miss (max power,
             // way off), not a stall.
             _message = humanControlled ? "Tap when it turns GREEN!" : "Lining up the kick...";
-            _shotBarVisible = humanControlled;
+            // 2026-08-28, Shaun: "the ai just isnt doing the same camera pause
+            // set ups and working the ball up the ground like the human". The
+            // bar was drawn for the human only, so the AI's shot had nothing on
+            // screen for the same 1-2 seconds of run-up and read as instant and
+            // unstaged next to the player's. Shown for both now - for the AI it
+            // is a spectator readout of the kick it is lining up, which is the
+            // same beat the player gets.
+            _shotBarVisible = true;
             _shotBarValue = 0f;
             bool tapped = false;
             float tapValue = 0f;
