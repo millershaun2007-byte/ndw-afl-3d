@@ -448,11 +448,21 @@ namespace AFL.Day1
                 if (roll < centreBurstChance)
                 {
                     yield return BurstBounceSnap(rover, runDir, crocsInPossession);
+                    // 2026-08-28, Shaun: "of target and the players just stand still".
+                    // These two scenes returned straight out of TapBallAway, skipping
+                    // the _sequenceComplete assignment at the end of it - and Update()
+                    // only starts the next centre bounce once that is set. So after a
+                    // snap the match simply stopped, forever. Both paths now end the
+                    // sequence the same way the normal one does.
+                    _resolvedAt = Time.time;
+                    _sequenceComplete = true;
                     yield break;
                 }
                 if (roll < centreBurstChance + handballChance)
                 {
                     yield return HandballAndRun(rover, runDir, crocsInPossession);
+                    _resolvedAt = Time.time;
+                    _sequenceComplete = true;
                     yield break;
                 }
             }
