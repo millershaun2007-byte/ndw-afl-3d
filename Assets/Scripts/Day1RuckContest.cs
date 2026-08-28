@@ -1963,6 +1963,12 @@ namespace AFL.Day1
                 yield return null;
             }
             ball.position = to;
+            // The kick-in put the ball kickOutDistance up the ground. Move the kicker TO
+            // it - otherwise TapBallAway lerps the ball back to his hand on the goal
+            // square and the kick-in is undone. The rushed-behind kick-out already does
+            // exactly this (defender.position = kickOutTarget); this path was the odd one
+            // out, and that asymmetry is the whole bug.
+            defender.position = new Vector3(defender.position.x, defender.position.y, to.z);
             yield return new WaitForSeconds(shotResultHold * 0.5f);
         }
 
