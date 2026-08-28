@@ -130,7 +130,24 @@ Two things it recorded that are worth keeping:
   `CinemachineStoryboard.cs:204` fails with three CS0619s inside the package's
   own source. Every 3.x release advertises 2022.3 as its minimum, which is
   misleading.
-- **It costs 13.7MB unstripped, 207KB stripped.**
+- **It costs 13.7MB unstripped, 207KB stripped** — but read the next paragraph
+  before quoting that number, because it is easy to misapply and I misapplied
+  it myself.
+
+**Correction (28 Aug, from the Mac side, and it is right).** That 31.4MB was
+measured at `780bafb`, when the scene held **5 live Cinemachine references**.
+The current tree has **0** — the `Assets/` reverts took every vcam out — so the
+assembly is unreferenced and the linker drops it even at default stripping.
+The package as it sits on `main` is inert, and nothing is currently shipping
+13.7MB to anyone. The live wasm being 17,636,174 bytes does not prove the point
+either way, because that build was made with High stripping still set.
+
+I claimed in `b5fb39a` that rebuilding with `a52a29c` alone would ship ~31MB.
+That was not established — it assumed a figure measured with the package in use
+still applied once it was unused. Dropping the package is still the right move,
+because it makes `Packages/` byte-identical to the last known-good build
+instead of a configuration that has never been built and played. But the reason
+is tidiness and reproducibility, not a size emergency.
 
 And one thing it recorded that is **wrong**, and caused today's outage:
 
