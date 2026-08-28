@@ -625,6 +625,16 @@ namespace AFL.Day1
             // function's own header comment on the reverseDirection bug
             // this replaced).
             float runDir = crocsInPossession ? 1f : -1f;
+            // 2026-08-28, Shaun: "the ai cant work the ball up the ground just copy
+            // what the humas do with the camer". Checked properly this time: there
+            // were NO camera cuts anywhere in this passage, for either side. It only
+            // looked staged for the player because the default camera sits at one
+            // end facing one way, so their run is framed and the AI's runs away from
+            // it, off toward the far end. The run now gets the same traverse shot
+            // the kick-out uses - pivoted on the midpoint of this specific run and
+            // pulled back so the whole thing fits - derived from runDir, so each
+            // side is framed going its own way.
+            CutCameraForKickOut(rover.position.z, rover.position.z + runDir * runDistance);
             yield return RunStraight(rover, runDir);
             // 2026-08-21 — real bug, found by computing the actual
             // numbers rather than guessing again: every chain hop
