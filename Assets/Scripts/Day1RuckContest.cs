@@ -69,8 +69,12 @@ namespace AFL.Day1
         // screen might need to zoom in slightly." Deliberately ONE modest step
         // (about 20% closer), not the four increasingly-close jumps tried this
         // morning that ended at "its now a bit to close".
-        public float kickCamSide = 13f;
-        public float kickCamHeight = 6.5f;
+        // 2026-08-28, Shaun: "MAYBE THE PLAYERS COULD BE ZOOMED IN ON SLIGHTLY
+        // MORE THEY LOOK SMALL". Deliberately one small step (~12%), not a
+        // jump - this has overshot in both directions before ("a bit to
+        // close", then "zoom out slightly").
+        public float kickCamSide = 11.4f;
+        public float kickCamHeight = 5.8f;
         // Real fix (2026-08-12, Shaun: "maybe pause them in mid air when
         // they have taken the mark" / "just brief pause"). Held once the
         // mark-jump's rise reaches its peak, only when it's a genuine
@@ -128,6 +132,14 @@ namespace AFL.Day1
         float _t;
         bool _humanPressed;
         float _bestHumanErr;
+        // 2026-08-28 ruck power bar (Shaun: "YOU TAP A CERTAIN AMOUNT OF TIMES
+        // TO WIN RUCK"). Replaces the single timed press.
+        public float ruckTapGain = 0.10f;
+        public float ruckDecayPerSec = 0.06f;
+        float _ruckPower;
+        float _botRuckTarget;
+        int _lastTapSerial;
+        bool _ruckBarVisible;
         float _targetT;
         float _botPressT;
         float _hopFireAt;
@@ -242,6 +254,15 @@ namespace AFL.Day1
             _t = 0f;
             _humanPressed = false;
             _bestHumanErr = float.MaxValue;
+            _ruckPower = 0f;
+            _lastTapSerial = Day1Input.TapSerial;
+            // 2026-08-28, Shaun: "just played 54 to 6 our way maybe to onesided".
+            // A mash filled the bar to full green on every single bounce, so the
+            // human won every centre clearance. The bot's effort now spans a
+            // range a lazy mash cannot clear, while a hard, sustained one still
+            // can - green still always wins, the bar is just harder to get green.
+            _botRuckTarget = Random.Range(0.60f, 0.95f);
+            _ruckBarVisible = true;
             _ballFrozen = false;
             _hopFired = false;
             _resolved = false;
@@ -408,27 +429,26 @@ namespace AFL.Day1
             // one. Now every tap is compared against the target instant
             // and only the closest one so far is kept — mashing helps
             // instead of hurting, matching how a kid actually plays.
-            if (Day1Input.TapDown)
+            // 2026-08-28, Shaun: "THE TAPS NEED TO BE TIMED AND PURCHASE
+            // LIKE YOU TAP A CERTAIN AMOUNT OF TIMES TO WIN RUCK".
+            //
+            // This also removes a real bug introduced earlier the same session:
+            // the old code set _humanPressed = true and THEN asked
+            // if (!_humanPressed) before recording the tap's error, so the error
+            // was never recorded, stayed at float.MaxValue, and the winner test
+            // (humanErr <= botErr) was false every round. The human could not
+            // win the ruck at all, in any game.
+            //
+            // Power now accumulates per distinct tap and bleeds away between
+            // them, so the bar has to be actively driven past the bot's effort
+            // before the ball comes down.
+            if (Day1Input.TapSerial != _lastTapSerial)
             {
+                _lastTapSerial = Day1Input.TapSerial;
                 _humanPressed = true;
-                float err = Mathf.Abs(_t - _targetT);
-                // 2026-08-28, Shaun: "5 minutes into the second quater i was
-                // up 51 to 8 probaly a bit easy" - roughly ten scoring shots to
-                // one, in a game of 3-minute quarters.
-                //
-                // This line was the cause, and it was not an AI problem. It
-                // kept the BEST of however many taps the human made, while the
-                // bot commits to exactly one. Mashing therefore won nearly
-                // every ruck, which handed over possession nearly every time,
-                // and the scoreline followed from that alone.
-                //
-                // Now the FIRST tap is the one that counts, so both sides
-                // commit once and the contest is symmetric. Deliberately fixed
-                // on the HUMAN side rather than by making the bot sharper -
-                // making the bot better would not have removed the mashing
-                // advantage, it would just have raised the bar for it.
-                if (!_humanPressed) _bestHumanErr = err;
+                _ruckPower = Mathf.Clamp01(_ruckPower + ruckTapGain);
             }
+            _ruckPower = Mathf.Max(0f, _ruckPower - ruckDecayPerSec * Time.deltaTime);
 
             // Always resolve at the deadline, using whichever tap was best
             // — no more resolving on the first post-peak press, since that
@@ -467,9 +487,11 @@ namespace AFL.Day1
         void ResolveAndContest()
         {
             float ideal = throwDuration * 0.5f;
-            float humanErr = _humanPressed ? _bestHumanErr : 999f;
-            float botErr = Mathf.Abs(_botPressT - ideal);
-            bool crocWins = _humanPressed && humanErr <= botErr;
+            // Won on the bar, not on a timing comparison. Green on the
+            // traffic light means _ruckPower is already past the bot's target,
+            // so a bar driven into green wins the ruck - by construction.
+            bool crocWins = _humanPressed && _ruckPower >= _botRuckTarget;
+            _ruckBarVisible = false;
 
             _message = _humanPressed
                 ? (crocWins ? "Crocs win the tap!" : "Roos win the tap!")
@@ -603,6 +625,16 @@ namespace AFL.Day1
             // function's own header comment on the reverseDirection bug
             // this replaced).
             float runDir = crocsInPossession ? 1f : -1f;
+            // 2026-08-28, Shaun: "the ai cant work the ball up the ground just copy
+            // what the humas do with the camer". Checked properly this time: there
+            // were NO camera cuts anywhere in this passage, for either side. It only
+            // looked staged for the player because the default camera sits at one
+            // end facing one way, so their run is framed and the AI's runs away from
+            // it, off toward the far end. The run now gets the same traverse shot
+            // the kick-out uses - pivoted on the midpoint of this specific run and
+            // pulled back so the whole thing fits - derived from runDir, so each
+            // side is framed going its own way.
+            CutCameraToDefaultFacing(runDir);
             yield return RunStraight(rover, runDir);
             // 2026-08-21 — real bug, found by computing the actual
             // numbers rather than guessing again: every chain hop
@@ -799,6 +831,9 @@ namespace AFL.Day1
         // know the timing, the defender is guessing), the spoil is the
         // occasional exception, not a coin flip. Both tunable in one
         // place if the balance needs adjusting after playtesting.
+        // More taps than this during one flight reads as flailing, not a
+        // timed leap, and the spoil fails.
+        public int maxSpoilTaps = 3;
         public float defenderSpoilWindow = 0.20f;
         public float defenderSpoilJitter = 0.55f;
         // 2026-08-21, Shaun: "after some spoils another character gets
@@ -875,6 +910,9 @@ namespace AFL.Day1
             bool markResolved = false;
             bool defenderSpoiled = false;
             bool defendPressed = false;
+            int spoilTaps = 0;
+            int spoilLastSerial = Day1Input.TapSerial;
+            float spoilBestErr = 999f;
             // Real fix (2026-08-12, Shaun: "the kick is now way of the
             // forward and defender for the mark scene"). Not a physics
             // change — the wide kick-cut camera just made a mismatch
@@ -984,7 +1022,19 @@ namespace AFL.Day1
                 // in this branch (the AI-mark check above doesn't read
                 // it), so this is a genuine human spoil attempt, not a
                 // second thing fighting over the same tap.
-                if (!humanControlled && Day1Input.TapDown) defendPressed = true;
+                // 2026-08-28, Shaun: "AND EVERY TIME THEY KICK FORWARD I SPOIL".
+                // This used to be ANY tap at ANY point in the flight, with no
+                // timing test at all - and since the ruck now needs mashing, a
+                // tap was always in flight, so every AI kick forward was spoiled.
+                // A spoil is now one committed, timed leap: the closest tap has
+                // to land near the ball's arrival, and flailing at it fails.
+                if (!humanControlled && Day1Input.TapSerial != spoilLastSerial)
+                {
+                    spoilLastSerial = Day1Input.TapSerial;
+                    spoilTaps++;
+                    defendPressed = true;
+                    spoilBestErr = Mathf.Min(spoilBestErr, Mathf.Abs(el - markTargetT));
+                }
 
                 if (!markResolved && el >= markDeadline)
                 {
@@ -998,9 +1048,22 @@ namespace AFL.Day1
                     // as marking); AI defends via the randomized roll.
                     defenderSpoiled = !isSpeccy && (humanControlled
                         ? Mathf.Abs(defenderSpoilT - markTargetT) <= defenderSpoilWindow
-                        : defendPressed);
-                    bool marked = markPressed && !defenderSpoiled;
-                    _message = marked ? "MARK!" : (defenderSpoiled ? "Spoiled by the defender!" : "Spilled!");
+                        : (spoilTaps > 0 && spoilTaps <= maxSpoilTaps && spoilBestErr <= defenderSpoilWindow));
+                    // 2026-08-28, Shaun: "ITS UP TO THE SPILLED BIT ONLY ... DELETE
+                    // THE SPILL SECTION". A spill had no outcome branch at all - it
+                    // fell straight through the if/else chain and the round simply
+                    // died, which is why it read as the game giving up. The contest
+                    // is now binary: marked, or spoiled by the defender.
+                    // 2026-08-28: markBestErr was computed here and then never read by
+                    // anything - the mark contest ignored the player's timing entirely,
+                    // so when attacking, the defender's roll decided it alone and taps
+                    // changed nothing. A mistimed leap now loses the ball in the air to
+                    // the defender rather than doing nothing, which keeps the outcome
+                    // binary (no spill) while making the tap matter. Applies to the AI
+                    // too - its own tap is graded by the same window.
+                    if (!(markPressed && markBestErr <= markPerfectWindow)) defenderSpoiled = true;
+                    bool marked = !defenderSpoiled;
+                    _message = defenderSpoiled ? "Spoiled by the defender!" : "MARK!";
                     // 2026-08-21 — real bug: this called the unmirrored
                     // CutCameraToMarkCloseup(forward) (fixed +7 X
                     // offset). Rarely showed at the centre bounce since
@@ -1030,7 +1093,8 @@ namespace AFL.Day1
             // the shot off mid-way — same class of bug as the earlier
             // ball-position race, just at the sequencing level instead
             // of the position-writing level.
-            bool markedResult = markPressed && markResolved && !defenderSpoiled;
+            // No spill outcome any more - see the message line above.
+            bool markedResult = !defenderSpoiled;
             yield return MarkCatchRoutine(forward, markedResult);
             if (markedResult)
             {
@@ -1119,7 +1183,11 @@ namespace AFL.Day1
                 // sequence, so it visibly hovered near/above the post the
                 // entire time. Reset to ground level here, once, before
                 // either kick arc starts.
-                ball.position = new Vector3(ball.position.x, groundY, ball.position.z);
+                // 2026-08-28, Shaun: "DOES IT AFTER THE BALL ON GROUND NEEDS TO BE
+                // AT PEAK OF JUMP". This dropped the ball to ground BEFORE the
+                // punch, so the ball visibly fell and was then leapt at nothing.
+                // It now stays at contest height and is met at the top of the
+                // leap - the hand snap below sets its real position either way.
                 // 2026-08-21 — real fix, found by tracing coordinates
                 // rather than guessing at symptoms again (see
                 // KICKOUT-BRIEF.md). Ball and kicker must end up on the
@@ -1132,6 +1200,25 @@ namespace AFL.Day1
                 // issue. Captured once here, before the slide, while
                 // defender.position.x still holds the spawn value.
                 float side = Mathf.Sign(defender.position.x == 0f ? 1f : defender.position.x);
+                // 2026-08-28, Shaun: "ALSO THE RUSHED BEHIND IS THE BALL FLYING NOT
+                // SOMEONE PUNCHING THE BALL" - and previously "cannot tell its
+                // actually been spoiled". The ball simply flew through on its own
+                // with no defender action at all, so a rushed behind was
+                // indistinguishable from a stray ball. The defender now leaps and
+                // sweeps a hand through it (the same Hop routine the ruck uses,
+                // built for exactly this - "need them showing it clearly being
+                // tapped"), and the flight starts from the punching hand rather
+                // than from wherever the ball happened to be sitting.
+                // 2026-08-28, Shaun: "just do it as a jump in the air punching the
+                // ball simple". Punched through at the top of the leap - the ball
+                // stays at contest height rather than dropping to ground first, so
+                // the defender meets it in the air instead of leaping at nothing.
+                SpoilPunch(defender);
+                yield return new WaitForSeconds(hopDuration * 0.45f);
+                if (_roundId != roundAtStart) yield break;
+                var punchHand = FindDeepChild(defender, "RightHand");
+                ball.position = punchHand ? punchHand.position
+                    : new Vector3(ball.position.x, groundY + peakHeight, ball.position.z);
                 Vector3 behindKickStart = ball.position;
                 Vector3 behindTarget = new Vector3(side * 1.6f, behindKickStart.y, zDir * goalZ);
                 float behindEl = 0f;
@@ -1284,7 +1371,14 @@ namespace AFL.Day1
                 // but which team that is (see its own header comment on
                 // the reverseDirection bug this replaced); no separate
                 // direction override needed or correct here.
-                yield return TapBallAway(crocsInPossession: !humanControlled, kickerOverride: defender, chainDepth: chainDepth + 1);
+                // 2026-08-28, Shaun: "ITS INCONSISTENT WITH THE AI KICK OUT THATS
+                // ALL" / "BUT MOSTLY THEY KICK IT OUT". There are two kick-out
+                // paths - this one after a rushed behind, and KickInAfterBehind
+                // after a missed shot. The chained TapBallAway was removed from
+                // that one earlier today (it flung the ball off to a rover and
+                // read as random) but was left here, so the same event ended two
+                // different ways depending on which path ran. Both now end at the
+                // kick-out and the round resets.
                 }
                 else
                 {
@@ -1443,6 +1537,21 @@ namespace AFL.Day1
             if (!_mainCam) return;
             _mainCam.transform.position = _camDefaultPos;
             _mainCam.transform.rotation = _camDefaultRot;
+        }
+
+        // 2026-08-28, Shaun: "you have overcompensated with the camera i reckon
+        // just do same thing you do for humans just opposite end of ground your
+        // trying to wing it instead of following instructions". Correct - the
+        // previous attempt invented a bespoke traverse shot for the run instead
+        // of doing what was actually asked. This is literally the human's own
+        // default camera, mirrored to the far end and turned around, so the AI
+        // gets the identical framing going the other way.
+        void CutCameraToDefaultFacing(float zDir)
+        {
+            if (!_mainCam) return;
+            if (zDir >= 0f) { CutCameraToDefault(); return; }
+            _mainCam.transform.position = new Vector3(_camDefaultPos.x, _camDefaultPos.y, -_camDefaultPos.z);
+            _mainCam.transform.rotation = _camDefaultRot * Quaternion.Euler(0f, 180f, 0f);
         }
 
         // Real fix (2026-08-12, Shaun: "really being able to see the
@@ -1639,7 +1748,14 @@ namespace AFL.Day1
             // without a tap is a real, deliberate miss (max power,
             // way off), not a stall.
             _message = humanControlled ? "Tap when it turns GREEN!" : "Lining up the kick...";
-            _shotBarVisible = humanControlled;
+            // 2026-08-28, Shaun: "the ai just isnt doing the same camera pause
+            // set ups and working the ball up the ground like the human". The
+            // bar was drawn for the human only, so the AI's shot had nothing on
+            // screen for the same 1-2 seconds of run-up and read as instant and
+            // unstaged next to the player's. Shown for both now - for the AI it
+            // is a spectator readout of the kick it is lining up, which is the
+            // same beat the player gets.
+            _shotBarVisible = true;
             _shotBarValue = 0f;
             bool tapped = false;
             float tapValue = 0f;
@@ -1737,14 +1853,13 @@ namespace AFL.Day1
             if (!isGoal)
             {
                 yield return KickInAfterBehind(zDir, humanControlled);
-                // Same continuation the rushed behind gets, so the two
-                // paths now match by BOTH playing on rather than both
-                // restarting. chainDepth: 1 means maxChainDepth (1) stops
-                // this at its own contest — one more passage, then the
-                // round ends honestly, no open-ended chaining.
-                if (_roundId != roundAtStart) yield break;
-                Transform kicker2 = humanControlled ? rooDefender : crocDefender;
-                yield return TapBallAway(crocsInPossession: !humanControlled, kickerOverride: kicker2, chainDepth: 1);
+                // 2026-08-28, Shaun: "when the kick out happens the player just
+                // randomly kicks it back in completly differnt to initial game".
+                // Correct - the kick-in body is unchanged from the original, but
+                // a chained TapBallAway was added here today that flung the ball
+                // off to a rover afterwards. The original had no such step: the
+                // fullback kicks in down the middle and the round resets. That
+                // second flight was the invented part, so it is gone.
             }
         }
 
@@ -2151,6 +2266,54 @@ namespace AFL.Day1
         // visible jump attempt (0.5x height, 60° arms — about a third of
         // the winner's height) that's unambiguous either way: clearly a
         // genuine try, clearly not as high as the winner's.
+        // 2026-08-28, Shaun: "the punch looks ridiculous its like a uperthrow",
+        // then "just do it as a jump in the air punching the ball simple".
+        //
+        // The first attempt reused HopRoutine, which is the RUCK leap: both arms
+        // sweeping UP through 155 degrees to tap a ball from underneath. Correct
+        // for a ruck, and exactly why a spoil looked like an uppercut. A spoil is
+        // one arm coming DOWN across the ball at the top of the jump, so it gets
+        // its own motion rather than a borrowed one.
+        void SpoilPunch(Transform t)
+        {
+            if (t) StartCoroutine(SpoilPunchRoutine(t));
+        }
+
+        System.Collections.IEnumerator SpoilPunchRoutine(Transform t)
+        {
+            Vector3 start = t.localPosition;
+            var leftArm = FindDeepChild(t, "LeftArm");
+            var rightArm = FindDeepChild(t, "RightArm");
+            Quaternion leftStart = leftArm ? leftArm.localRotation : Quaternion.identity;
+            Quaternion rightStart = rightArm ? rightArm.localRotation : Quaternion.identity;
+            // Same reason as HopRoutine: Mecanim would overwrite these bone
+            // rotations in its own update pass if left running.
+            var animator = t.GetComponentInChildren<Animator>();
+            if (animator) animator.enabled = false;
+
+            float dur = hopDuration;
+            float el = 0f;
+            while (el < dur)
+            {
+                el += Time.deltaTime;
+                float f = el / dur;
+                float wave = Mathf.Sin(f * Mathf.PI);          // jump: 0 -> 1 -> 0
+                t.localPosition = start + Vector3.up * wave * 1.4f;
+                // Punching arm starts high and swings down through the ball,
+                // finishing its travel just past the top of the jump so contact
+                // reads as the hand driving the ball away, not scooping it up.
+                float armF = Mathf.Clamp01(f / 0.7f);
+                float ang = Mathf.Lerp(150f, 10f, armF);
+                if (rightArm) rightArm.localRotation = rightStart * Quaternion.Euler(0, 0, -ang);
+                if (leftArm) leftArm.localRotation = leftStart * Quaternion.Euler(0, 0, wave * 35f);
+                yield return null;
+            }
+            t.localPosition = start;
+            if (leftArm) leftArm.localRotation = leftStart;
+            if (rightArm) rightArm.localRotation = rightStart;
+            if (animator) animator.enabled = true;
+        }
+
         System.Collections.IEnumerator HopRoutine(Transform t, bool reachesBall)
         {
             Vector3 start = t.localPosition;
@@ -2441,6 +2604,33 @@ namespace AFL.Day1
 
                 GUI.color = Color.white;
             }
+
+            // Ruck traffic light (Shaun, 2026-08-28: "or even a traffic light
+            // system" / "traffic lights and bars have worked well in this app
+            // before"). Red = behind the bot, amber = closing, green = winning
+            // the ruck right now. The white line is the bot's effort, so the
+            // bar is a live, honest readout of whether taps are registering.
+            if (_ruckBarVisible)
+            {
+                int rW = Mathf.RoundToInt(Screen.width * 0.6f);
+                int rH = Mathf.RoundToInt(Screen.height * 0.055f);
+                int rX = (Screen.width - rW) / 2;
+                int rY = Mathf.RoundToInt(Screen.height * 0.72f);
+
+                GUI.color = new Color(0f, 0f, 0f, 0.55f);
+                GUI.DrawTexture(new Rect(rX - 6, rY - 6, rW + 12, rH + 12), Texture2D.whiteTexture);
+                GUI.color = new Color(0.14f, 0.14f, 0.18f, 0.92f);
+                GUI.DrawTexture(new Rect(rX, rY, rW, rH), Texture2D.whiteTexture);
+
+                float ratio = _botRuckTarget > 0f ? _ruckPower / _botRuckTarget : 0f;
+                GUI.color = ratio >= 1f    ? new Color(0.25f, 0.85f, 0.30f, 0.95f)
+                          : ratio >= 0.60f ? new Color(0.95f, 0.75f, 0.15f, 0.95f)
+                                           : new Color(0.85f, 0.25f, 0.25f, 0.95f);
+                GUI.DrawTexture(new Rect(rX, rY, rW * Mathf.Clamp01(_ruckPower), rH), Texture2D.whiteTexture);
+
+                GUI.color = Color.white;
+                GUI.DrawTexture(new Rect(rX + rW * Mathf.Clamp01(_botRuckTarget) - 2, rY - 8, 4, rH + 16), Texture2D.whiteTexture);
+            }
         }
     }
 
@@ -2449,18 +2639,62 @@ namespace AFL.Day1
     public static class Day1Input
     {
         public static bool TouchTapDown;
+
+        // 2026-08-28, Shaun: "ITS COMPLETLY AUTOMATED DOES NOT MATTER IF I TAP",
+        // then "I STRUGGLED TO GET THE BALL THEN WAS VERY HARD" - the same
+        // symptom seen twice: taps that silently do nothing.
+        //
+        // TouchTapDown is set by SendMessage from the template's JavaScript,
+        // which lands at an ARBITRARY point in the frame, but it was cleared
+        // unconditionally in LateUpdate. A tap arriving after the game had
+        // already read input that frame was wiped before anything could see
+        // it. Roughly half of them vanished, so the ruck felt unwinnable and
+        // the game looked like it was playing itself.
+        //
+        // Now the tap survives until something actually CONSUMES it, with a
+        // short expiry so a stale tap cannot win a later contest.
+        static int _tapFrame = -999;
+        public static int TapSerial;
+    public static void RegisterTap() { TouchTapDown = true; _tapFrame = Time.frameCount; TapSerial++; }
+
+        // CORRECTION, same session: the first attempt made TapDown CONSUME the
+        // tap. That was worse, because Update() evaluates TapDown every single
+        // frame for the ruck contest - so Update ate every tap before the mark,
+        // shot and spoil coroutines could ever see one. No marks, therefore no
+        // shots, no points and no kick-ins. Shaun: "CANT GET THE BALL AT ALL IN
+        // THAT ONE NO KICK OUTS."
+        //
+        // TapDown is a PEEK again. The original race is fixed differently: the
+        // tap is cleared only once it is at least a frame old, so one arriving
+        // late in a frame still survives to be read on the next one, and cannot
+        // linger long enough to win a later contest.
+        public static bool TapAlive => TouchTapDown && (Time.frameCount - _tapFrame) <= 2;
+        internal static void ExpireStaleTap()
+        {
+            if (TouchTapDown && Time.frameCount - _tapFrame >= 1) TouchTapDown = false;
+        }
         // 2026-08-19, Shaun: relying on "remember to press spacebar, not
         // click" was fragile for real testing — a direct mouse/touch
         // click on the canvas is the natural interaction and should just
         // work, not only the external app-bridge (TapPressed) or the
         // spacebar fallback.
-        public static bool TapDown => Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0) || TouchTapDown;
+        public static bool TapDown => Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0) || TapAlive;
         internal static void ClearOneShot() { TouchTapDown = false; }
     }
 
     public class Day1TouchBridge : MonoBehaviour
     {
-        void LateUpdate() { Day1Input.ClearOneShot(); }
-        public void TapPressed(string _) { Day1Input.TouchTapDown = true; }
+        // Clears only a tap that is already at least one frame old, so a tap
+        // arriving late in a frame survives to the next one instead of being
+        // wiped unread - which is the original bug - while still not carrying
+        // over into a later contest.
+        // Keyboard/mouse has to bump the same serial the on-screen button does,
+    // or the ruck bar cannot be driven on desktop at all.
+    void Update()
+    {
+        if (Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0)) Day1Input.RegisterTap();
+    }
+    void LateUpdate() { Day1Input.ExpireStaleTap(); }
+        public void TapPressed(string _) { Day1Input.RegisterTap(); }
     }
 }

@@ -187,8 +187,8 @@ public static class MainBuildScript
         // how rover stands behind the ruck rather than on top of it. Scale
         // untuned (1f) — Dragon/Lion both needed real measured correction
         // after first render, expect the same here once tested live.
-        EnsureAnimatorController("Mia", "Assets/Models/MiaRiggedAI");
-        var rooClearerGo = BuildStaticCharacter("RooClearer", "Assets/Models/MiaRiggedAI", new Vector3(0.9f, 0, 13f), Quaternion.Euler(0, 180, 0), miaScale);
+        EnsureAnimatorController("Emu", "Assets/Models/EmuRiggedAI");
+        var rooClearerGo = BuildStaticCharacter("RooClearer", "Assets/Models/EmuRiggedAI", new Vector3(0.9f, 0, 13f), Quaternion.Euler(0, 180, 0), miaScale);
         // 2026-08-19, Shaun: "if the other summer looks better its a white
         // tiny ghost in this game... noticed this in the safari game but
         // couldn't be bothered saying anything" — a real, pre-existing
@@ -240,7 +240,7 @@ public static class MainBuildScript
         // pullback tried right after this (both ends + forward/defender
         // visible) looked fine in a static render but was wrong in
         // actual play. Back to the position confirmed good before that.
-        camGo.transform.position = new Vector3(0, 3.3f, -8.6f);   // 2026-08-28: one modest step closer
+        camGo.transform.position = new Vector3(0, 3.0f, -7.6f);   // 2026-08-28: one modest step closer
         camGo.transform.LookAt(new Vector3(0, 1.2f, 0));
 
         var lightGo = new GameObject("Directional Light");
