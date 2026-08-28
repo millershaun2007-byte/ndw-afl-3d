@@ -44,6 +44,11 @@ namespace AFL.Day1
         // forward/defender characters (see MainBuildScript's setup for
         // why: "add 2 more characters so it does work like the centre").
         public Transform rooClearer;
+        // 2026-08-28, Shaun: "need correct amount of players even if you add more
+        // would make sense to add 2 more". Dedicated runners, one per side, so
+        // the handball goes to a real spare rather than borrowing the clearer.
+        public Transform crocRunner;
+        public Transform rooRunner;
         public Transform crocClearer;
         public Transform ball;
 
@@ -1823,7 +1828,8 @@ namespace AFL.Day1
 
         System.Collections.IEnumerator HandballAndRun(Transform rover, float zDir, bool humanControlled)
         {
-            Transform runner = zDir > 0f ? crocClearer : rooClearer;
+            Transform runner = zDir > 0f ? crocRunner : rooRunner;
+            if (!runner) runner = zDir > 0f ? crocClearer : rooClearer;   // pre-runner scenes
             if (!rover || !runner || !ball) yield break;
             int roundAtStart = _roundId;
 
@@ -1847,11 +1853,14 @@ namespace AFL.Day1
                 yield return null;
             }
 
+            // 2026-08-28, Shaun: "thats more of a long shopt" - two legs left him
+            // kicking from well out. A third carries him into range.
             _message = "Runs it into the forward line!";
-            yield return RunStraight(runner, zDir);
-            if (_roundId != roundAtStart) yield break;
-            yield return RunStraight(runner, zDir);
-            if (_roundId != roundAtStart) yield break;
+            for (int leg = 0; leg < 3; leg++)
+            {
+                yield return RunStraight(runner, zDir);
+                if (_roundId != roundAtStart) yield break;
+            }
             yield return PlayOnSnap(runner, zDir, humanControlled);
         }
 

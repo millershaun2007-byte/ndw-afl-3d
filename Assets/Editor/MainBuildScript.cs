@@ -199,6 +199,15 @@ public static class MainBuildScript
         // correction needed since Croc is the reference height itself.
         var crocClearerGo = BuildStaticCharacter("CrocClearer", "Assets/Models/CrocRiggedAI", new Vector3(-0.9f, 0, -13f), Quaternion.identity);
 
+        // 2026-08-28, Shaun: "need correct amount of players even if you add more
+        // would make sense to add 2 more". One extra runner per side, so the
+        // handball out of the centre goes to a real spare instead of borrowing
+        // the clearer out of the back line. Both reuse models already in the
+        // build (Dragon for the Crocs, Lion for the Roos), so this costs
+        // essentially nothing in download size.
+        var crocRunnerGo = BuildStaticCharacter("CrocRunner", "Assets/Models/DragonRiggedAI", new Vector3(-2.6f, 0, -6f), Quaternion.identity);
+        var rooRunnerGo = BuildStaticCharacter("RooRunner", "Assets/Models/LionRiggedAI", new Vector3(2.6f, 0, 6f), Quaternion.Euler(0, 180, 0));
+
         // Goal posts (2026-08-12, Shaun: "chuck up those... goal posts").
         // Visual only — no collision, no scoring trigger, that's still
         // genuinely day 5's work (the actual shot-at-goal mechanic). But a
@@ -261,6 +270,8 @@ public static class MainBuildScript
         contest.crocDefender = crocDefenderGo.transform;
         contest.rooClearer = rooClearerGo.transform;
         contest.crocClearer = crocClearerGo.transform;
+        contest.crocRunner = crocRunnerGo.transform;
+        contest.rooRunner = rooRunnerGo.transform;
         contest.ball = ball.transform;
 
         var bridgeGo = new GameObject("TouchBridge");
