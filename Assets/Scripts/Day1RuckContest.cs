@@ -1182,6 +1182,20 @@ namespace AFL.Day1
                 // issue. Captured once here, before the slide, while
                 // defender.position.x still holds the spawn value.
                 float side = Mathf.Sign(defender.position.x == 0f ? 1f : defender.position.x);
+                // 2026-08-28, Shaun: "ALSO THE RUSHED BEHIND IS THE BALL FLYING NOT
+                // SOMEONE PUNCHING THE BALL" - and previously "cannot tell its
+                // actually been spoiled". The ball simply flew through on its own
+                // with no defender action at all, so a rushed behind was
+                // indistinguishable from a stray ball. The defender now leaps and
+                // sweeps a hand through it (the same Hop routine the ruck uses,
+                // built for exactly this - "need them showing it clearly being
+                // tapped"), and the flight starts from the punching hand rather
+                // than from wherever the ball happened to be sitting.
+                Hop(defender, true);
+                yield return new WaitForSeconds(hopDuration * 0.5f);
+                if (_roundId != roundAtStart) yield break;
+                var spoilHand = FindDeepChild(defender, "RightHand");
+                if (spoilHand) ball.position = spoilHand.position;
                 Vector3 behindKickStart = ball.position;
                 Vector3 behindTarget = new Vector3(side * 1.6f, behindKickStart.y, zDir * goalZ);
                 float behindEl = 0f;
@@ -1334,7 +1348,14 @@ namespace AFL.Day1
                 // but which team that is (see its own header comment on
                 // the reverseDirection bug this replaced); no separate
                 // direction override needed or correct here.
-                yield return TapBallAway(crocsInPossession: !humanControlled, kickerOverride: defender, chainDepth: chainDepth + 1);
+                // 2026-08-28, Shaun: "ITS INCONSISTENT WITH THE AI KICK OUT THATS
+                // ALL" / "BUT MOSTLY THEY KICK IT OUT". There are two kick-out
+                // paths - this one after a rushed behind, and KickInAfterBehind
+                // after a missed shot. The chained TapBallAway was removed from
+                // that one earlier today (it flung the ball off to a rover and
+                // read as random) but was left here, so the same event ended two
+                // different ways depending on which path ran. Both now end at the
+                // kick-out and the round resets.
                 }
                 else
                 {
