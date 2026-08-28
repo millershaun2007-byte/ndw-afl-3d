@@ -187,8 +187,8 @@ public static class MainBuildScript
         // how rover stands behind the ruck rather than on top of it. Scale
         // untuned (1f) — Dragon/Lion both needed real measured correction
         // after first render, expect the same here once tested live.
-        EnsureAnimatorController("Shaun", "Assets/Models/ShaunSlimAI");
-        var rooClearerGo = BuildStaticCharacter("RooClearer", "Assets/Models/ShaunSlimAI", new Vector3(0.9f, 0, 13f), Quaternion.Euler(0, 180, 0), miaScale);
+        EnsureAnimatorController("Emu", "Assets/Models/EmuRiggedAI");
+        var rooClearerGo = BuildStaticCharacter("RooClearer", "Assets/Models/EmuRiggedAI", new Vector3(0.9f, 0, 13f), Quaternion.Euler(0, 180, 0), miaScale);
         // 2026-08-19, Shaun: "if the other summer looks better its a white
         // tiny ghost in this game... noticed this in the safari game but
         // couldn't be bothered saying anything" — a real, pre-existing
