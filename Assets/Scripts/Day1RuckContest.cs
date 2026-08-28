@@ -172,6 +172,7 @@ namespace AFL.Day1
             _resolved = false;
             _sequenceComplete = false;
             _steerOffsetX = 0f;
+            _runCaught = false;
             foreach (var mover in _movers)
             {
                 var (pos, rot) = _moverStarts[mover];
@@ -467,6 +468,7 @@ namespace AFL.Day1
                 if (roll < centreBurstChance)
                 {
                     yield return BurstBounceSnap(rover, runDir, crocsInPossession);
+                    if (_runCaught) _message = "Caught holding the ball — turnover!";
                     // 2026-08-28, Shaun: "of target and the players just stand still".
                     // These two scenes returned straight out of TapBallAway, skipping
                     // the _sequenceComplete assignment at the end of it - and Update()
@@ -480,6 +482,7 @@ namespace AFL.Day1
                 if (roll < centreBurstChance + handballChance)
                 {
                     yield return HandballAndRun(rover, runDir, crocsInPossession);
+                    if (_runCaught) _message = "Caught holding the ball — turnover!";
                     _resolvedAt = Time.time;
                     _sequenceComplete = true;
                     yield break;
@@ -1805,6 +1808,15 @@ namespace AFL.Day1
         // angle of the shot, not so wide he ends up off the field.
         public float steerSpeed = 4.5f;
         public float steerLimit = 7f;
+        // 2026-08-28: every running section was a cutscene - RunStraight had no
+        // tap in it anywhere, so a large share of a 3-minute quarter was spent
+        // watching. Real footy makes you bounce it every 15 metres, so the run
+        // becomes a rhythm: the call comes, you tap, miss it and you are caught.
+        // Same single verb the rest of the game uses, one body, on the ground.
+        public float bounceWindow = 0.75f;
+        public float bouncePromptAt = 0.35f;
+        bool _runCaught;
+        float _bounceDip;
         // Carried across the legs of a run so steering accumulates, and reset at
         // the start of each round rather than each leg.
         float _steerOffsetX;
@@ -1931,7 +1943,7 @@ namespace AFL.Day1
             for (int leg = 0; leg < 3; leg++)
             {
                 yield return RunStraight(runner, zDir, steerable: zDir > 0f);
-                if (_roundId != roundAtStart) yield break;
+                if (_roundId != roundAtStart || _runCaught) yield break;
             }
             yield return PlayOnSnap(runner, zDir, humanControlled);
         }
@@ -1970,7 +1982,7 @@ namespace AFL.Day1
             }
 
             yield return RunStraight(rover, zDir, steerable: zDir > 0f);
-            if (_roundId != roundAtStart) yield break;
+            if (_roundId != roundAtStart || _runCaught) yield break;
             yield return PlayOnSnap(rover, zDir, humanControlled);
         }
 
@@ -2020,6 +2032,8 @@ namespace AFL.Day1
             // over 4.55 so it actually reaches and holds Walk instead of
             // brushing past the threshold for one frame.
             const float animSpeed = 5.5f;
+            bool bouncePrompted = false, bounceDone = false;
+            float promptedAt = 0f, bouncedAt = -99f;
             float el = 0f;
             while (el < runDuration)
             {
@@ -2031,6 +2045,30 @@ namespace AFL.Day1
                 // decelerate arc for the physical movement instead.
                 float smoothF = Mathf.SmoothStep(0f, 1f, f);
                 Vector3 along = Vector3.Lerp(start, end, smoothF);
+                if (steerable && !bounceDone)
+                {
+                    if (!bouncePrompted && f >= bouncePromptAt)
+                    {
+                        bouncePrompted = true;
+                        promptedAt = el;
+                        _message = "BOUNCE IT!";
+                    }
+                    if (bouncePrompted)
+                    {
+                        if (Day1Input.TapDown)
+                        {
+                            bounceDone = true;
+                            bouncedAt = el;
+                            _message = "Bounces it!";
+                        }
+                        else if (el - promptedAt > bounceWindow)
+                        {
+                            _runCaught = true;
+                            _message = "Caught holding the ball!";
+                            break;
+                        }
+                    }
+                }
                 if (steerable)
                 {
                     // Steering only moves him ACROSS the ground; the run itself
@@ -2043,6 +2081,10 @@ namespace AFL.Day1
                 }
                 along.x += _steerOffsetX;
                 t.position = along;
+                // A real bounce: the ball drops to the turf just ahead of him and
+                // comes back up, over about a third of a second.
+                _bounceDip = (bounceDone && el - bouncedAt < 0.35f)
+                    ? Mathf.Sin(Mathf.Clamp01((el - bouncedAt) / 0.35f) * Mathf.PI) : 0f;
                 if (ball)
                 {
                     // Real fix (2026-08-12, Shaun: "arms moving when it
@@ -2054,9 +2096,13 @@ namespace AFL.Day1
                     // hand individually swings a lot. Tracking one hand
                     // (tucked-under-the-arm carry, not a two-handed cradle)
                     // actually shows the motion instead of averaging it away.
-                    if (rightHand) ball.position = rightHand.position;
-                    else if (leftHand) ball.position = leftHand.position;
-                    else ball.position = t.position + Vector3.up * 1.1f;
+                    Vector3 carried = rightHand ? rightHand.position
+                        : (leftHand ? leftHand.position : t.position + Vector3.up * 1.1f);
+                    // A real bounce: down to the turf just ahead of him, and back up.
+                    if (_bounceDip > 0f)
+                        carried = new Vector3(carried.x, Mathf.Lerp(carried.y, groundY, _bounceDip),
+                            carried.z + zDir * _bounceDip * 0.7f);
+                    ball.position = carried;
                 }
                 if (animator)
                 {
@@ -2445,14 +2491,24 @@ namespace AFL.Day1
         // click on the canvas is the natural interaction and should just
         // work, not only the external app-bridge (TapPressed) or the
         // spacebar fallback.
-        public static bool TapDown => Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0) || TouchTapDown;
-        internal static void ClearOneShot() { TouchTapDown = false; }
+        // 2026-08-28: a touch tap used to be cleared unconditionally in LateUpdate,
+        // but SendMessage from the template lands at an arbitrary point in the
+        // frame - so a tap arriving after LateUpdate was wiped before any coroutine
+        // could see it. Taps are peeked now, and expire only once a frame old.
+        static int _tapFrame = -999;
+        public static void RegisterTap() { TouchTapDown = true; _tapFrame = Time.frameCount; }
+        static bool TapAlive => TouchTapDown && (Time.frameCount - _tapFrame) <= 2;
+        internal static void ExpireStaleTap()
+        {
+            if (TouchTapDown && Time.frameCount - _tapFrame >= 1) TouchTapDown = false;
+        }
+        public static bool TapDown => Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0) || TapAlive;
     }
 
     public class Day1TouchBridge : MonoBehaviour
     {
-        void LateUpdate() { Day1Input.ClearOneShot(); }
-        public void TapPressed(string _) { Day1Input.TouchTapDown = true; }
+        void LateUpdate() { Day1Input.ExpireStaleTap(); }
+        public void TapPressed(string _) { Day1Input.RegisterTap(); }
         // 2026-08-28, Shaun: "i wonder if we can make that button like unicorn
         // surf 3d and you can easily stear it to move around a bit more could
         // actually chnage the dynamics of the game". Same scheme that game uses:
