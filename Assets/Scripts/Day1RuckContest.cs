@@ -89,6 +89,33 @@ namespace AFL.Day1
         // can't collapse the hold to ~0 duration and drop straight into
         // the fall before the peak was ever visibly held.
         public float minMarkHoldDuration = 0.2f;
+        // 2026-08-28, Shaun: "ai is either way to easy to bear or impossible",
+        // and "sometimes the game does seem to go on auto pilot... ai playing
+        // not playing humans not able to do much."
+        //
+        // Both are the same defect, and it is arithmetic rather than feel. Each
+        // AI roll was an independent constant that had drifted away from the
+        // window it competes against:
+        //
+        //   marking   window 0.25  vs roll +-0.15   -> marks 100% of contests
+        //   shot      half-band 0.115 vs +-0.18     -> goals 64%
+        //   spoil     window 0.20  vs jitter +-0.55 -> spoils 36%
+        //
+        // The AI could not miss a mark. So when the Roos had it the sequence was
+        // fixed - mark, then goal - and the human watched. That is the autopilot.
+        // Meanwhile the ruck bot commits to ONE tap while a human is judged on
+        // their BEST of many, so mashing beats it nearly every time: unloseable
+        // at one beat, unwinnable at the next, nothing in between.
+        //
+        // Checked against 19 Aug (728f2be) before changing anything: the values
+        // there are identical. This was never a regression - it has always been
+        // this way, so restoring an older build could not have fixed it.
+        //
+        // Fix is the plan's own "derive, never pass": one skill value, every
+        // roll expressed as a multiple of ITS OWN window. Tuned so all three sit
+        // near the shot's 36% miss rate, which is the one beat that already
+        // feels fair.
+        public float aiSkill = 1.6f;   // roll spread = aiSkill x half-window; higher = worse AI
         public float perfectWindow = 0.5f;
         // Real human reaction time to a reactive tap, compensated for in
         // grading — see the comment on ResolveAndContest below.
@@ -243,7 +270,10 @@ namespace AFL.Day1
             // guess. Narrowing the bot's spread doesn't erase either
             // advantage but makes Roo a real, competitive opponent instead
             // of pure noise.
-            _botPressT = ideal + Random.Range(-0.15f, 0.15f);
+            // Derived, not a constant: the bot's spread scales with the same
+            // window the human is judged against.
+            float botSpread = perfectWindow * 0.5f * aiSkill;
+            _botPressT = ideal + Random.Range(-botSpread, botSpread);
             // hopFireAt: when the ball freezes at its true visual peak —
             // fixed already (2026-08-11), see git history.
             _hopFireAt = ideal;
@@ -874,7 +904,10 @@ namespace AFL.Day1
             // was attacking. Same pattern as TakeShotAtGoal's aiTapAt: a
             // real simulated attempt, not an auto-win, when it's not the
             // human's turn to act.
-            float aiMarkTapAt = humanControlled ? 0f : markTargetT + Random.Range(-0.15f, 0.15f);
+            // Was +-0.15 against a 0.25 window, which cannot miss. Now derived
+            // from markPerfectWindow, so the AI drops marks like a player does.
+            float aiMarkSpread = markPerfectWindow * 0.5f * aiSkill;
+            float aiMarkTapAt = humanControlled ? 0f : markTargetT + Random.Range(-aiMarkSpread, aiMarkSpread);
             // 2026-08-19, Shaun: "there is only one button" — with one
             // tap doing everything, there was no way to know whether this
             // beat wanted you marking or defending. No message was ever
