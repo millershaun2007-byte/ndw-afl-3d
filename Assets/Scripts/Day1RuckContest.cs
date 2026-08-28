@@ -864,7 +864,16 @@ namespace AFL.Day1
         // spoiled-clearance treatment, but if THAT needs to chain again
         // (a spoil on it, or an out-of-range mark), it stops there and
         // resets instead of working further up the ground.
-        public int maxChainDepth = 1;
+        // 2026-08-28, RAISED TO 2 AT SHAUN'S OWN REQUEST - do not revert this
+        // reading the 21 Aug note. That note is about maxChainDepth = 3, which
+        // let a round run the ground indefinitely ("all over the shop"). 2 is
+        // the shape he actually described tonight: "humans do it in 2 kicks its
+        // kick in set the other 2 contests up like the normal marking contests".
+        // It is also required by the sign fix above: with Abs() gone, a kick-in
+        // that lands short now chains forward instead of blazing at a goal 28
+        // units away, and at a cap of 1 that chain would hit the cap and the
+        // round would die one hop from goal.
+        public int maxChainDepth = 2;
 
         // Drop the ball to the foot, brief beat, then kick it away in an
         // arc continuing the same direction as the run. Now interleaved
@@ -1139,7 +1148,8 @@ namespace AFL.Day1
                 // out of sync with it (the exact trap CLAUDE.md warns
                 // about at its own top).
                 float shotRangeZ = goalZ - kickDistance;
-                if (Mathf.Abs(ball.position.z) >= shotRangeZ)
+                // 1. signed distance along the attacking direction, not distance from any goal
+                if (zDir * ball.position.z >= shotRangeZ)
                 {
                     yield return TakeShotAtGoal(forward, zDir, humanControlled);
                 }
