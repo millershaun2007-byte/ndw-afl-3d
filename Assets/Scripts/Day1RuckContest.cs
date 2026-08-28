@@ -716,6 +716,7 @@ namespace AFL.Day1
             _message = caughtByChaser
                 ? (crocsInPossession ? "Caught by the Roo!" : "Caught by the Croc!")
                 : (crocsInPossession ? "Crocs run it out!" : "Roos run it out!");
+            if (caughtByChaser) yield return TackleGrab(chaser, rover);
 
             // Real fix (2026-08-12, Shaun: "youve kind of gone a bit
             // rouge with this one" — the automatic run-to-landing-spot
@@ -1165,6 +1166,13 @@ namespace AFL.Day1
                     defenderSpoiled = !isSpeccy && (humanControlled
                         ? Mathf.Abs(defenderSpoilT - markTargetT) <= defenderSpoilWindow
                         : defendPressed);
+                    if (defenderSpoiled)
+                    {
+                        StartCoroutine(SpoilPunch(defender));
+                        // Same reasoning as the tackle's hold: let the punch
+                        // actually be seen before the outcome moves on.
+                        yield return new WaitForSeconds(contactHoldPause);
+                    }
                     bool marked = markPressed && !defenderSpoiled;
                     _message = marked ? "MARK!" : (defenderSpoiled ? "Spoiled by the defender!" : "Spilled!");
                     // 2026-08-21 — real bug: this called the unmirrored
@@ -2581,6 +2589,127 @@ namespace AFL.Day1
         // kickOutEl loop, not at the same instant).
         public float kickMotionBackswingFrac = 0.35f;
         public float kickMotionLegAngle = 65f;
+        // 2026-08-28, Shaun: "with the rushed behind the ball just flys
+        // through cannot tell its actually been spoiled", and "the chasing
+        // abilty only working sometimes".
+        //
+        // Both had the same root cause, and it is worth naming because it is a
+        // whole class of bug in this file rather than two incidents: the
+        // OUTCOME was decided in logic and narrated in text, but never
+        // animated. defenderSpoiled swapped a message. caughtByChaser swapped
+        // a message and a kick distance. Neither put anything on screen, so
+        // from the couch nothing happened - which is indistinguishable from
+        // the feature being broken. That is exactly how the chase came to be
+        // reported as "only working sometimes" when it was firing correctly.
+        //
+        // Same technique as KickMotion below: direct bone rotation with the
+        // Animator switched off for the duration, no clip needed.
+        //
+        // Deliberately ARM BONES ONLY, no position or root rotation. These
+        // characters are already being moved by RunStraight when these fire,
+        // and a motion that fought it for the transform would read worse than
+        // no motion at all - the same "two unrelated objects animating at the
+        // same time" failure the kick-out beat already had once.
+        public float spoilPunchDuration = 0.42f;
+        public float spoilPunchAngle = 170f;
+        System.Collections.IEnumerator SpoilPunch(Transform t)
+        {
+            if (!t) yield break;
+            var rightArm = FindDeepChild(t, "RightArm");
+            if (!rightArm) yield break;
+            Quaternion start = rightArm.localRotation;
+            var animator = t.GetComponentInChildren<Animator>();
+            bool wasEnabled = animator && animator.enabled;
+            if (animator) animator.enabled = false;
+
+            float el = 0f;
+            while (el < spoilPunchDuration)
+            {
+                el += Time.deltaTime;
+                float f = Mathf.Clamp01(el / spoilPunchDuration);
+                // A spoil is a strike, not a wave: punch out fast over the
+                // first third, drop back slower. Same asymmetry KickMotion
+                // uses for the boot, and for the same reason.
+                float angle = f < 0.3f
+                    ? Mathf.Lerp(0f, -spoilPunchAngle, Mathf.Sin((f / 0.3f) * Mathf.PI * 0.5f))
+                    : Mathf.Lerp(-spoilPunchAngle, 0f, (f - 0.3f) / 0.7f);
+                rightArm.localRotation = start * Quaternion.Euler(0f, 0f, angle);
+                yield return null;
+            }
+            rightArm.localRotation = start;
+            if (animator && wasEnabled) animator.enabled = true;
+        }
+
+        public float tackleDuration = 0.55f;
+
+        // 2026-08-28, Shaun: "remember lots of pauses and also one thing at
+        // atime". This is a sensory-friendly app for neurodivergent kids, so
+        // beats have to land one at a time and be given room to register -
+        // a contact that resolves and is immediately overwritten by the next
+        // message reads as noise rather than as a moment.
+        //
+        // The motions themselves are already sequential: the tackle is a
+        // blocking yield, and the spoil punch is fired alongside the
+        // defender's existing jump because a spoil IS a jump and a punch, one
+        // action rather than two. What was missing was the beat AFTER, so the
+        // camera holds on the result before play moves on.
+        public float contactHoldPause = 0.7f;
+        System.Collections.IEnumerator TackleGrab(Transform chaser, Transform carrier)
+        {
+            var cl = chaser ? FindDeepChild(chaser, "LeftArm") : null;
+            var cr = chaser ? FindDeepChild(chaser, "RightArm") : null;
+            var bl = carrier ? FindDeepChild(carrier, "LeftArm") : null;
+            var br = carrier ? FindDeepChild(carrier, "RightArm") : null;
+            if (!cl && !cr && !bl && !br) yield break;
+
+            Quaternion clS = cl ? cl.localRotation : Quaternion.identity;
+            Quaternion crS = cr ? cr.localRotation : Quaternion.identity;
+            Quaternion blS = bl ? bl.localRotation : Quaternion.identity;
+            Quaternion brS = br ? br.localRotation : Quaternion.identity;
+
+            // Cut in close on the tackle. Without this the motion plays but
+            // nobody sees it: verified in a live capture where the carrier's
+            // arms clearly flew up on "Caught by the Croc!" while the croc
+            // doing the tackling was already outside the frame. An animation
+            // the camera is not pointing at is the same as no animation, which
+            // is the very failure this whole change exists to fix.
+            if (carrier)
+            {
+                float tside = Mathf.Sign(carrier.position.x == 0f ? 1f : carrier.position.x);
+                CutCameraToMarkCloseup(carrier, tside);
+            }
+
+            var ca = chaser ? chaser.GetComponentInChildren<Animator>() : null;
+            var ba = carrier ? carrier.GetComponentInChildren<Animator>() : null;
+            bool caOn = ca && ca.enabled, baOn = ba && ba.enabled;
+            if (ca) ca.enabled = false;
+            if (ba) ba.enabled = false;
+
+            float el = 0f;
+            while (el < tackleDuration)
+            {
+                el += Time.deltaTime;
+                float f = Mathf.Clamp01(el / tackleDuration);
+                float grab = Mathf.Sin(f * Mathf.PI);          // out and back
+                // Chaser reaches with both arms; carrier's fly up as they are
+                // caught, a touch wider so the two read as cause and effect
+                // rather than as the same gesture played twice.
+                if (cl) cl.localRotation = clS * Quaternion.Euler(0f, 0f, grab * 95f);
+                if (cr) cr.localRotation = crS * Quaternion.Euler(0f, 0f, -grab * 95f);
+                if (bl) bl.localRotation = blS * Quaternion.Euler(0f, 0f, grab * 130f);
+                if (br) br.localRotation = brS * Quaternion.Euler(0f, 0f, -grab * 130f);
+                yield return null;
+            }
+            if (cl) cl.localRotation = clS;
+            if (cr) cr.localRotation = crS;
+            if (bl) bl.localRotation = blS;
+            if (br) br.localRotation = brS;
+            if (ca && caOn) ca.enabled = true;
+            if (ba && baOn) ba.enabled = true;
+            // Hold on it before the next beat starts.
+            yield return new WaitForSeconds(contactHoldPause);
+        }
+
         System.Collections.IEnumerator KickMotion(Transform t, float duration)
         {
             if (!t) yield break;
