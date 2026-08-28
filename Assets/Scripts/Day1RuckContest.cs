@@ -1895,6 +1895,20 @@ namespace AFL.Day1
             if (!isGoal)
             {
                 yield return KickInAfterBehind(zDir, humanControlled);
+                // 2026-08-28, Shaun: "humans do it in 2 kicks its kick in set the other
+                // 2 contests up like the normal marking contests". The kick-in used to
+                // dead-end here - the round simply reset - so the side that kicked in
+                // never got to work the ball up the ground at all. It chains again now.
+                //
+                // This was removed this morning ("the player just randomly kicks it back
+                // in") and it deserved to be: the kicker was left on the goal square, so
+                // the next beat dragged the ball 12 units BACK to his hand and undid the
+                // kick-in. With the kicker now moved up to the ball, and the shooting
+                // range test signed by attacking direction, the passage runs forward the
+                // way it reads. chainDepth 0 gives it the two contests described above.
+                if (_roundId != roundAtStart) yield break;
+                yield return TapBallAway(crocsInPossession: !humanControlled,
+                    kickerOverride: humanControlled ? rooDefender : crocDefender, chainDepth: 0);
                 // 2026-08-28, Shaun: "when the kick out happens the player just
                 // randomly kicks it back in completly differnt to initial game".
                 // Correct - the kick-in body is unchanged from the original, but
