@@ -1209,11 +1209,16 @@ namespace AFL.Day1
                 // built for exactly this - "need them showing it clearly being
                 // tapped"), and the flight starts from the punching hand rather
                 // than from wherever the ball happened to be sitting.
-                // 2026-08-28, Shaun: "spoil looks fucking ridiulous now". The
-                // defender leaping and swiping at the ball read badly, so the
-                // punch is removed and the ball simply drops and is kicked
-                // through, as it was before. Everything else from today stays.
-                ball.position = new Vector3(ball.position.x, groundY, ball.position.z);
+                // 2026-08-28, Shaun: "just do it as a jump in the air punching the
+                // ball simple". Punched through at the top of the leap - the ball
+                // stays at contest height rather than dropping to ground first, so
+                // the defender meets it in the air instead of leaping at nothing.
+                SpoilPunch(defender);
+                yield return new WaitForSeconds(hopDuration * 0.45f);
+                if (_roundId != roundAtStart) yield break;
+                var punchHand = FindDeepChild(defender, "RightHand");
+                ball.position = punchHand ? punchHand.position
+                    : new Vector3(ball.position.x, groundY + peakHeight, ball.position.z);
                 Vector3 behindKickStart = ball.position;
                 Vector3 behindTarget = new Vector3(side * 1.6f, behindKickStart.y, zDir * goalZ);
                 float behindEl = 0f;
@@ -2246,6 +2251,54 @@ namespace AFL.Day1
         // visible jump attempt (0.5x height, 60° arms — about a third of
         // the winner's height) that's unambiguous either way: clearly a
         // genuine try, clearly not as high as the winner's.
+        // 2026-08-28, Shaun: "the punch looks ridiculous its like a uperthrow",
+        // then "just do it as a jump in the air punching the ball simple".
+        //
+        // The first attempt reused HopRoutine, which is the RUCK leap: both arms
+        // sweeping UP through 155 degrees to tap a ball from underneath. Correct
+        // for a ruck, and exactly why a spoil looked like an uppercut. A spoil is
+        // one arm coming DOWN across the ball at the top of the jump, so it gets
+        // its own motion rather than a borrowed one.
+        void SpoilPunch(Transform t)
+        {
+            if (t) StartCoroutine(SpoilPunchRoutine(t));
+        }
+
+        System.Collections.IEnumerator SpoilPunchRoutine(Transform t)
+        {
+            Vector3 start = t.localPosition;
+            var leftArm = FindDeepChild(t, "LeftArm");
+            var rightArm = FindDeepChild(t, "RightArm");
+            Quaternion leftStart = leftArm ? leftArm.localRotation : Quaternion.identity;
+            Quaternion rightStart = rightArm ? rightArm.localRotation : Quaternion.identity;
+            // Same reason as HopRoutine: Mecanim would overwrite these bone
+            // rotations in its own update pass if left running.
+            var animator = t.GetComponentInChildren<Animator>();
+            if (animator) animator.enabled = false;
+
+            float dur = hopDuration;
+            float el = 0f;
+            while (el < dur)
+            {
+                el += Time.deltaTime;
+                float f = el / dur;
+                float wave = Mathf.Sin(f * Mathf.PI);          // jump: 0 -> 1 -> 0
+                t.localPosition = start + Vector3.up * wave * 1.4f;
+                // Punching arm starts high and swings down through the ball,
+                // finishing its travel just past the top of the jump so contact
+                // reads as the hand driving the ball away, not scooping it up.
+                float armF = Mathf.Clamp01(f / 0.7f);
+                float ang = Mathf.Lerp(150f, 10f, armF);
+                if (rightArm) rightArm.localRotation = rightStart * Quaternion.Euler(0, 0, -ang);
+                if (leftArm) leftArm.localRotation = leftStart * Quaternion.Euler(0, 0, wave * 35f);
+                yield return null;
+            }
+            t.localPosition = start;
+            if (leftArm) leftArm.localRotation = leftStart;
+            if (rightArm) rightArm.localRotation = rightStart;
+            if (animator) animator.enabled = true;
+        }
+
         System.Collections.IEnumerator HopRoutine(Transform t, bool reachesBall)
         {
             Vector3 start = t.localPosition;
