@@ -1866,7 +1866,34 @@ namespace AFL.Day1
         // the ball to whoever is carrying it. Handballing forward to the clearer
         // (spawned deep, at z = +-13) moves the ball AWAY from the middle instead
         // of dragging it back there.
+        // 2026-08-28, Shaun: "now we need the rovers to be able to chase out of
+        // the middle". The opposition rover pursues the carrier rather than
+        // standing at the bounce watching him go - he trails behind and slightly
+        // to the side, so the break out of the centre reads as escaping someone.
+        // Deliberately no tackle: this is pursuit, which Shaun asked for
+        // explicitly ("have the rover chase with no tackle").
+        public float chaseTrail = 2.2f;
+        public float chaseSpeed = 5.2f;
         public float handballChance = 0.35f;
+
+        System.Collections.IEnumerator ChaseCarrier(Transform chaser, Transform carrier, float zDir)
+        {
+            if (!chaser || !carrier) yield break;
+            int roundAtStart = _roundId;
+            var animator = chaser.GetComponentInChildren<Animator>();
+            while (_roundId == roundAtStart)
+            {
+                Vector3 target = new Vector3(
+                    carrier.position.x + (zDir > 0f ? 0.9f : -0.9f),
+                    chaser.position.y,
+                    carrier.position.z - zDir * chaseTrail);
+                chaser.position = Vector3.MoveTowards(chaser.position, target, chaseSpeed * Time.deltaTime);
+                chaser.rotation = Quaternion.Euler(0f, zDir > 0f ? 0f : 180f, 0f);
+                if (animator) animator.SetFloat("Speed", 5.5f);
+                yield return null;
+            }
+            if (animator) animator.SetFloat("Speed", 0f);
+        }
         public float handballDuration = 0.4f;
 
         System.Collections.IEnumerator HandballAndRun(Transform rover, float zDir, bool humanControlled)
@@ -1881,6 +1908,7 @@ namespace AFL.Day1
             runner.rotation = Quaternion.Euler(0f, zDir > 0f ? 0f : 180f, 0f);
 
             CutCameraToDefault();
+            StartCoroutine(ChaseCarrier(zDir > 0f ? rooRover : crocRover, rover, zDir));
             _message = "Handballs to a runner!";
             var fromHand = FindDeepChild(rover, "RightHand");
             var toHand = FindDeepChild(runner, "LeftHand");
@@ -1918,6 +1946,7 @@ namespace AFL.Day1
             // framing, so without this they inherit that pivot and the run plays
             // out off-frame - the same drift the chain hops were fixed for.
             CutCameraToDefault();
+            StartCoroutine(ChaseCarrier(zDir > 0f ? rooRover : crocRover, rover, zDir));
             _message = "Breaks out of the centre!";
             yield return RunStraight(rover, zDir, steerable: zDir > 0f);
             if (_roundId != roundAtStart) yield break;
