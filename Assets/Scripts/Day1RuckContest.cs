@@ -885,7 +885,7 @@ namespace AFL.Day1
         // rejected sub-100ms analytic-physics system — just relocated to
         // the kick's flight. "Dont worry about the defender yet" — this
         // grades the forward's own timing only, no opponent comparison.
-        System.Collections.IEnumerator KickAway(Transform t, float zDir, Transform forward, Transform defender, bool isSpeccy, bool humanControlled, int chainDepth = 0)
+        System.Collections.IEnumerator KickAway(Transform t, float zDir, Transform forward, Transform defender, bool isSpeccy, bool humanControlled, int chainDepth = 0, float distanceOverride = 0f)
         {
             if (!t || !ball) yield break;
             int roundAtStart = _roundId;
@@ -919,7 +919,8 @@ namespace AFL.Day1
             // halved) can independently push the ball's landing spot
             // outside the field on a deep chain hop, one level below
             // where the TapBallAway-level clamps already catch it.
-            float kickEndZ = Mathf.Clamp(kickStart.z + zDir * kickDistance, -(goalZ - 2f), goalZ - 2f);
+            float kickDist = distanceOverride > 0f ? distanceOverride : kickDistance;
+            float kickEndZ = Mathf.Clamp(kickStart.z + zDir * kickDist, -(goalZ - 2f), goalZ - 2f);
             Vector3 kickEnd = new Vector3(kickStart.x, kickStart.y, kickEndZ);
             float peakT = kickDuration * 0.5f;
             float markTargetT = peakT + markReactionCompensation;
@@ -1895,6 +1896,29 @@ namespace AFL.Day1
             if (!isGoal)
             {
                 yield return KickInAfterBehind(zDir, humanControlled);
+                // 2026-08-28, Shaun: "humans do it in 2 kicks its kick in set the other
+                // 2 contests up like the normal marking contests". The kick-in used to
+                // dead-end here - the round simply reset - so the side that kicked in
+                // never got to work the ball up the ground at all. It chains again now.
+                //
+                // This was removed this morning ("the player just randomly kicks it back
+                // in") and it deserved to be: the kicker was left on the goal square, so
+                // the next beat dragged the ball 12 units BACK to his hand and undid the
+                // kick-in. With the kicker now moved up to the ball, and the shooting
+                // range test signed by attacking direction, the passage runs forward the
+                // way it reads. chainDepth 0 gives it the two contests described above.
+                if (_roundId != roundAtStart) yield break;
+                // The kicking side now attacks the OTHER end, and KickAway both flies
+                // the kick-in and stages the marking contest where it lands. Landing at
+                // zDir*8 is in their own defensive half, so it is out of shooting range
+                // and the passage chains forward: contest, kick into the forward line,
+                // second contest, shot. That is the sequence Shaun described.
+                bool nowCrocs = !humanControlled;
+                Transform kickInTaker = humanControlled ? rooDefender : crocDefender;
+                yield return KickAway(kickInTaker, -zDir,
+                    nowCrocs ? crocForward : rooForward,
+                    nowCrocs ? rooDefender : crocDefender,
+                    false, nowCrocs, 0, kickOutDistance);
                 // 2026-08-28, Shaun: "when the kick out happens the player just
                 // randomly kicks it back in completly differnt to initial game".
                 // Correct - the kick-in body is unchanged from the original, but
@@ -1949,21 +1973,16 @@ namespace AFL.Day1
                 yield return null;
             }
 
+            // 2026-08-28, Shaun: "the kick out happens from full back, then
+            // there is a marking contest then another kick into the forward line
+            // then a mark and shot at goal this does not have this".
+            //
+            // The kick-in used to fly the ball itself and hand it to a rover
+            // UNCONTESTED, so the kick-in was never marked and the passage got
+            // one contest instead of two. It now stops with the ball on the
+            // boot and KickAway performs the kick, because KickAway is what
+            // stages a marking contest where the ball lands.
             _message = "Kicks in from fullback!";
-            Vector3 from = ball.position;
-            Vector3 to = new Vector3(0f, from.y, targetZ);
-            float el2 = 0f;
-            while (el2 < shotKickDuration)
-            {
-                if (_roundId != roundAtStart) yield break;
-                el2 += Time.deltaTime;
-                float f = Mathf.Clamp01(el2 / shotKickDuration);
-                float arc = Mathf.Sin(f * Mathf.PI) * shotKickHeight;
-                ball.position = Vector3.Lerp(from, to, f) + Vector3.up * arc;
-                yield return null;
-            }
-            ball.position = to;
-            yield return new WaitForSeconds(shotResultHold * 0.5f);
         }
 
         public float speccyLeapRiseDuration = 0.5f;
