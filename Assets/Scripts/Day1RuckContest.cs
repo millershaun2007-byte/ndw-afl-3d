@@ -951,6 +951,9 @@ namespace AFL.Day1
                 // rushed behind was indistinguishable from a stray ball. He is placed
                 // under it so the hand genuinely reaches it, rather than the ball being
                 // teleported into his fist.
+                // Captured BEFORE the defender is moved - the comment below is explicit
+                // that this must read his spawn x, not a value set from the ball.
+                float side = Mathf.Sign(defender.position.x == 0f ? 1f : defender.position.x);
                 defender.position = new Vector3(ball.position.x, defender.position.y,
                     ball.position.z - zDir * 0.35f);
                 defender.rotation = Quaternion.Euler(0f, zDir > 0f ? 0f : 180f, 0f);
@@ -968,7 +971,7 @@ namespace AFL.Day1
                 // attempts that each addressed a real but secondary
                 // issue. Captured once here, before the slide, while
                 // defender.position.x still holds the spawn value.
-                float side = Mathf.Sign(defender.position.x == 0f ? 1f : defender.position.x);
+                side = Mathf.Sign(defender.position.x == 0f ? 1f : defender.position.x);
                 Vector3 behindKickStart = ball.position;
                 // target the ground, not the punch height - a punched ball falls
                 Vector3 behindTarget = new Vector3(side * 1.6f, groundY, zDir * goalZ);
