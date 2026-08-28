@@ -709,6 +709,29 @@ namespace AFL.Day1
             }
             if (chaser) StartCoroutine(RunStraight(chaser, runDir, carriesBall: false));
             yield return RunStraight(rover, runDir);
+
+            // Handball off to a teammate running past, who carries it on from
+            // here. Only out of the centre (chainDepth 0) and only when the
+            // chase has not already run this player down - a player being
+            // tackled does not get a clean handball away, and letting them
+            // would quietly undo the chase that just succeeded.
+            if (chainDepth == 0 && !caughtByChaser && Random.value < handballChance)
+            {
+                Transform receiver = crocsInPossession ? crocClearer : rooClearer;
+                if (receiver)
+                {
+                    // TapBallAway has no round guard of its own, so capture one
+                    // here: this yields for most of a second and a reset in the
+                    // middle of it would otherwise carry on into a dead round.
+                    int hbRound = _roundId;
+                    yield return HandballToRunner(rover, receiver, runDir);
+                    if (_roundId != hbRound) yield break;
+                    // Everything downstream takes the carrier as an argument,
+                    // so the receiver simply becomes the player who runs in and
+                    // kicks. No other branch needs to know this happened.
+                    rover = receiver;
+                }
+            }
             // 2026-08-21 — real bug, found by computing the actual
             // numbers rather than guessing again: every chain hop
             // (kick-out's second contest, an out-of-range mark, a spoil
@@ -2719,6 +2742,87 @@ namespace AFL.Day1
         }
 
         public float tackleDuration = 0.55f;
+
+        // 2026-08-28, Shaun: "maybe also ad a scene where out of the centre the
+        // rover gives a handball to the player running past who can run in and
+        // kick a goal".
+        //
+        // A variant on the clearance rather than a replacement - it fires about
+        // half the time so the centre bounce does not always resolve the same
+        // way. Everything downstream (kick to the forward, mark contest, shot)
+        // already takes the ball carrier as an argument, so handing the ball to
+        // a different player is genuinely just a reassignment; none of it needs
+        // to know a handball happened.
+        public float handballChance = 0.45f;
+        public float handballFlightDuration = 0.4f;
+        public float handballPunchAngle = 70f;
+        public float handballPunchDuration = 0.3f;
+
+        // A handball is a fist punched under the ball - mechanically the same
+        // forearm snap as a spoil, just shorter and flatter.
+        System.Collections.IEnumerator HandballMotion(Transform t)
+        {
+            if (!t) yield break;
+            var foreArm = FindDeepChild(t, "RightForeArm");
+            if (!foreArm) yield break;
+            Quaternion start = foreArm.localRotation;
+            var animator = t.GetComponentInChildren<Animator>();
+            bool wasEnabled = animator && animator.enabled;
+            if (animator) animator.enabled = false;
+            float el = 0f;
+            while (el < handballPunchDuration)
+            {
+                el += Time.deltaTime;
+                float f = Mathf.Clamp01(el / handballPunchDuration);
+                float angle = f < 0.35f
+                    ? Mathf.Lerp(0f, -handballPunchAngle, Mathf.Sin((f / 0.35f) * Mathf.PI * 0.5f))
+                    : Mathf.Lerp(-handballPunchAngle, 0f, (f - 0.35f) / 0.65f);
+                foreArm.localRotation = start * Quaternion.Euler(0f, 0f, angle);
+                yield return null;
+            }
+            foreArm.localRotation = start;
+            if (animator && wasEnabled) animator.enabled = true;
+        }
+
+        System.Collections.IEnumerator HandballToRunner(Transform giver, Transform receiver, float runDir)
+        {
+            if (!giver || !receiver || !ball) yield break;
+            int roundAtStart = _roundId;
+
+            // Put the receiver wide and slightly behind, so they genuinely run
+            // PAST the giver rather than appearing already in front of them.
+            receiver.position = new Vector3(
+                giver.position.x + 2.4f, giver.position.y, giver.position.z - runDir * 1.6f);
+            receiver.rotation = giver.rotation;
+
+            _message = "Handballs it off!";
+            CutCameraToMarkCloseup(giver, Mathf.Sign(giver.position.x == 0f ? 1f : giver.position.x));
+            StartCoroutine(RunStraight(receiver, runDir, carriesBall: false));
+            StartCoroutine(HandballMotion(giver));
+
+            // Flat and fast. A handball is a pass, not a kick - no arc, or it
+            // reads as a little chipped kick instead.
+            var giverHand = FindDeepChild(giver, "RightHand");
+            Vector3 from = giverHand ? giverHand.position : giver.position + Vector3.up * 1.2f;
+            float el = 0f;
+            while (el < handballFlightDuration)
+            {
+                if (_roundId != roundAtStart) yield break;
+                el += Time.deltaTime;
+                float f = Mathf.Clamp01(el / handballFlightDuration);
+                var rHand = FindDeepChild(receiver, "RightHand");
+                Vector3 to = rHand ? rHand.position : receiver.position + Vector3.up * 1.2f;
+                ball.position = Vector3.Lerp(from, to, f);
+                yield return null;
+            }
+
+            _message = "Takes it on the run!";
+            // Per "lots of pauses and one thing at a time" - let the take land
+            // before the run-in starts.
+            yield return new WaitForSeconds(contactHoldPause);
+            if (_roundId != roundAtStart) yield break;
+            CutCameraToDefault();
+        }
 
         // 2026-08-28, Shaun: "remember lots of pauses and also one thing at
         // atime". This is a sensory-friendly app for neurodivergent kids, so
