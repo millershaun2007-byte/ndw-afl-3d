@@ -87,6 +87,16 @@ namespace AFL.Day1
         public float peakHeight = 2.1f;
         public float groundY = 1.0f;
         public float hopDuration = 0.45f;
+        // 2026-08-28: ONE height for any leap that contests the ball. The
+        // defender's punch had its own hardcoded 1.4f - a third copy of a
+        // number the forward derives - so he rose a quarter of a unit BELOW
+        // the forward parked at the top and they never met. Same defect shape
+        // as the rest of today: a duplicated constant that drifted.
+        public float contestLeapHeight = 1.65f;
+        // ...and ONE arm angle for that reach, for the same reason. The
+        // defender's arm used to come from an independent lerp instead of the
+        // jump, which is why he wound up and hurled rather than reaching.
+        public float contestArmAngle = 155f;
         // 2026-08-19: rise time for NormalMarkHop, the mark-specific hop
         // that holds at peak until the outcome is known rather than
         // landing on a fixed clock (see NormalMarkHop's own header for
@@ -854,7 +864,16 @@ namespace AFL.Day1
         // spoiled-clearance treatment, but if THAT needs to chain again
         // (a spoil on it, or an out-of-range mark), it stops there and
         // resets instead of working further up the ground.
-        public int maxChainDepth = 1;
+        // 2026-08-28, RAISED TO 2 AT SHAUN'S OWN REQUEST - do not revert this
+        // reading the 21 Aug note. That note is about maxChainDepth = 3, which
+        // let a round run the ground indefinitely ("all over the shop"). 2 is
+        // the shape he actually described tonight: "humans do it in 2 kicks its
+        // kick in set the other 2 contests up like the normal marking contests".
+        // It is also required by the sign fix above: with Abs() gone, a kick-in
+        // that lands short now chains forward instead of blazing at a goal 28
+        // units away, and at a cap of 1 that chain would hit the cap and the
+        // round would die one hop from goal.
+        public int maxChainDepth = 2;
 
         // Drop the ball to the foot, brief beat, then kick it away in an
         // arc continuing the same direction as the run. Now interleaved
@@ -1075,7 +1094,12 @@ namespace AFL.Day1
                     // avoid.
                     if (marked) CutCameraToMarkCloseup(forward, Mathf.Sign(forward.position.x == 0f ? 1f : forward.position.x));
                     _markHoldSucceeded = marked;
-                    _markHoldReleased = true;
+                    // 2026-08-28: on the spoil path the forward must stay up until the
+                    // punch connects. Releasing here meant the forward was already
+                    // descending before the defender left the ground at all - two
+                    // consecutive jumps, never a contest. Every spoil branch below
+                    // releases it; both hold loops also escape on a round change.
+                    if (!defenderSpoiled) _markHoldReleased = true;
                 }
                 yield return null;
             }
@@ -1124,7 +1148,8 @@ namespace AFL.Day1
                 // out of sync with it (the exact trap CLAUDE.md warns
                 // about at its own top).
                 float shotRangeZ = goalZ - kickDistance;
-                if (Mathf.Abs(ball.position.z) >= shotRangeZ)
+                // 1. signed distance along the attacking direction, not distance from any goal
+                if (zDir * ball.position.z >= shotRangeZ)
                 {
                     yield return TakeShotAtGoal(forward, zDir, humanControlled);
                 }
@@ -1213,12 +1238,18 @@ namespace AFL.Day1
                 // ball simple". Punched through at the top of the leap - the ball
                 // stays at contest height rather than dropping to ground first, so
                 // the defender meets it in the air instead of leaping at nothing.
+                // The hand reaches the ball, rather than the ball jumping to the
+                // hand: the defender is placed under the ball first so the leap
+                // genuinely arrives at it, and the ball is left where it is.
+                defender.position = new Vector3(ball.position.x, defender.position.y,
+                    ball.position.z - zDir * 0.35f);
+                defender.rotation = Quaternion.Euler(0f, zDir > 0f ? 0f : 180f, 0f);
                 SpoilPunch(defender);
-                yield return new WaitForSeconds(hopDuration * 0.45f);
+                // ball leaves at the peak of the jump, not on the way up
+                yield return new WaitForSeconds(hopDuration * 0.5f);
                 if (_roundId != roundAtStart) yield break;
-                var punchHand = FindDeepChild(defender, "RightHand");
-                ball.position = punchHand ? punchHand.position
-                    : new Vector3(ball.position.x, groundY + peakHeight, ball.position.z);
+                // Contest resolved at the peak - only now does the forward come down.
+                _markHoldReleased = true;
                 Vector3 behindKickStart = ball.position;
                 // target the ground, not the punch height - a punched ball falls
                 Vector3 behindTarget = new Vector3(side * 1.6f, groundY, zDir * goalZ);
@@ -1387,6 +1418,9 @@ namespace AFL.Day1
                     // a mid-ground loose ball, same treatment as an
                     // uncontested drop below (no goal-line/behind
                     // mechanic — that only makes sense right at a goal).
+                    // Mid-ground spoil: no punch beat here, so release the forward
+                    // immediately - otherwise it hangs at peak for the rest of the round.
+                    _markHoldReleased = true;
                     _message = "Spoiled — cleared away!";
                     // 2026-08-21, Shaun: "the ball going in the air until
                     // ground level like the kickout just pause then bring
@@ -2306,14 +2340,25 @@ namespace AFL.Day1
                 el += Time.deltaTime;
                 float f = el / dur;
                 float wave = Mathf.Sin(f * Mathf.PI);          // jump: 0 -> 1 -> 0
-                t.localPosition = start + Vector3.up * wave * 1.4f;
-                // Punching arm starts high and swings down through the ball,
-                // finishing its travel just past the top of the jump so contact
-                // reads as the hand driving the ball away, not scooping it up.
-                float armF = Mathf.Clamp01(f / 0.7f);
-                float ang = Mathf.Lerp(150f, 10f, armF);
-                if (rightArm) rightArm.localRotation = rightStart * Quaternion.Euler(0, 0, -ang);
-                if (leftArm) leftArm.localRotation = leftStart * Quaternion.Euler(0, 0, wave * 35f);
+                t.localPosition = start + Vector3.up * wave * contestLeapHeight;
+                // 2026-08-28: this was a shotput. The arm came from its own lerp
+                // starting at -150 degrees - flung back over his head before he
+                // had even left the ground - so the defender wound up and hurled
+                // while the forward reached with both arms off `wave`. Two
+                // different actions in the same airspace never read as a contest,
+                // which is why matching their heights and timings did not fix it.
+                //
+                // A spoil is a REACH that ends in a short punch. Both arms now
+                // rise and fall with the jump exactly as the forward's do, off
+                // the same wave and the same contestArmAngle; the punch is the
+                // last part of that reach, a short flick of the near arm driving
+                // through the ball just past the top.
+                // both arms reach up with the leap — same idiom as the forward's mark
+                float reach = wave * 145f;   // just under his 155: spoiling, not marking
+                // a short jab at the top, not a wind-up
+                float jab = Mathf.Sin(Mathf.Clamp01((f - 0.35f) / 0.3f) * Mathf.PI) * 30f;
+                if (rightArm) rightArm.localRotation = rightStart * Quaternion.Euler(0, 0, -(reach + jab));
+                if (leftArm)  leftArm.localRotation  = leftStart  * Quaternion.Euler(0, 0,   reach);
                 yield return null;
             }
             t.localPosition = start;
@@ -2335,11 +2380,11 @@ namespace AFL.Day1
             // the hop's own vertical scale, not the arm — bumped 1.5 to
             // 1.65 to close that ~0.13-unit gap so the hand and ball
             // actually meet instead of falling just short.
-            float heightScale = reachesBall ? 1.65f : 0.5f;
+            float heightScale = reachesBall ? contestLeapHeight : 0.5f;
             Vector3 towardCentre = reachesBall
                 ? new Vector3(-Mathf.Sign(start.x) * 0.55f, 0, 0)
                 : Vector3.zero;
-            float armAngle = reachesBall ? 155f : 60f;
+            float armAngle = reachesBall ? contestArmAngle : 60f;
 
             var leftArm = FindDeepChild(t, "LeftArm");
             var rightArm = FindDeepChild(t, "RightArm");
@@ -2466,7 +2511,7 @@ namespace AFL.Day1
             if (!t) yield break;
             int roundAtStart = _roundId;
             Vector3 start = t.localPosition;
-            const float heightScale = 1.65f;
+            float heightScale = contestLeapHeight;
             const float armAngle = 155f;
 
             var leftArm = FindDeepChild(t, "LeftArm");
