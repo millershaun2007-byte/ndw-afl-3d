@@ -69,8 +69,12 @@ namespace AFL.Day1
         // screen might need to zoom in slightly." Deliberately ONE modest step
         // (about 20% closer), not the four increasingly-close jumps tried this
         // morning that ended at "its now a bit to close".
-        public float kickCamSide = 13f;
-        public float kickCamHeight = 6.5f;
+        // 2026-08-28, Shaun: "MAYBE THE PLAYERS COULD BE ZOOMED IN ON SLIGHTLY
+        // MORE THEY LOOK SMALL". Deliberately one small step (~12%), not a
+        // jump - this has overshot in both directions before ("a bit to
+        // close", then "zoom out slightly").
+        public float kickCamSide = 11.4f;
+        public float kickCamHeight = 5.8f;
         // Real fix (2026-08-12, Shaun: "maybe pause them in mid air when
         // they have taken the mark" / "just brief pause"). Held once the
         // mark-jump's rise reaches its peak, only when it's a genuine
@@ -1169,7 +1173,11 @@ namespace AFL.Day1
                 // sequence, so it visibly hovered near/above the post the
                 // entire time. Reset to ground level here, once, before
                 // either kick arc starts.
-                ball.position = new Vector3(ball.position.x, groundY, ball.position.z);
+                // 2026-08-28, Shaun: "DOES IT AFTER THE BALL ON GROUND NEEDS TO BE
+                // AT PEAK OF JUMP". This dropped the ball to ground BEFORE the
+                // punch, so the ball visibly fell and was then leapt at nothing.
+                // It now stays at contest height and is met at the top of the
+                // leap - the hand snap below sets its real position either way.
                 // 2026-08-21 — real fix, found by tracing coordinates
                 // rather than guessing at symptoms again (see
                 // KICKOUT-BRIEF.md). Ball and kicker must end up on the
@@ -1195,7 +1203,8 @@ namespace AFL.Day1
                 yield return new WaitForSeconds(hopDuration * 0.5f);
                 if (_roundId != roundAtStart) yield break;
                 var spoilHand = FindDeepChild(defender, "RightHand");
-                if (spoilHand) ball.position = spoilHand.position;
+                ball.position = spoilHand ? spoilHand.position
+                    : new Vector3(ball.position.x, groundY + peakHeight, ball.position.z);
                 Vector3 behindKickStart = ball.position;
                 Vector3 behindTarget = new Vector3(side * 1.6f, behindKickStart.y, zDir * goalZ);
                 float behindEl = 0f;
