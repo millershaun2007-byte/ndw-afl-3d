@@ -634,7 +634,7 @@ namespace AFL.Day1
             // the kick-out uses - pivoted on the midpoint of this specific run and
             // pulled back so the whole thing fits - derived from runDir, so each
             // side is framed going its own way.
-            CutCameraForKickOut(rover.position.z, rover.position.z + runDir * runDistance);
+            CutCameraToDefaultFacing(runDir);
             yield return RunStraight(rover, runDir);
             // 2026-08-21 — real bug, found by computing the actual
             // numbers rather than guessing again: every chain hop
@@ -1537,6 +1537,21 @@ namespace AFL.Day1
             if (!_mainCam) return;
             _mainCam.transform.position = _camDefaultPos;
             _mainCam.transform.rotation = _camDefaultRot;
+        }
+
+        // 2026-08-28, Shaun: "you have overcompensated with the camera i reckon
+        // just do same thing you do for humans just opposite end of ground your
+        // trying to wing it instead of following instructions". Correct - the
+        // previous attempt invented a bespoke traverse shot for the run instead
+        // of doing what was actually asked. This is literally the human's own
+        // default camera, mirrored to the far end and turned around, so the AI
+        // gets the identical framing going the other way.
+        void CutCameraToDefaultFacing(float zDir)
+        {
+            if (!_mainCam) return;
+            if (zDir >= 0f) { CutCameraToDefault(); return; }
+            _mainCam.transform.position = new Vector3(_camDefaultPos.x, _camDefaultPos.y, -_camDefaultPos.z);
+            _mainCam.transform.rotation = _camDefaultRot * Quaternion.Euler(0f, 180f, 0f);
         }
 
         // Real fix (2026-08-12, Shaun: "really being able to see the
