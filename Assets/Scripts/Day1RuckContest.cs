@@ -1628,6 +1628,107 @@ namespace AFL.Day1
                 holdEl += Time.deltaTime;
                 yield return null;
             }
+
+            // 2026-08-28, Shaun: "after point the kick in not always
+            // working", and earlier "it goes straight back to the cntre
+            // after a behind on this one". "Not always" is the clue that
+            // identifies it: there are TWO behind paths and only one ever
+            // kicked in. A rushed behind runs a full kick-out inline (see
+            // the chainDepth==0 branch in KickAway); a behind from an
+            // actual shot at goal just held the result and fell through to
+            // BeginThrow — the centre bounce.
+            //
+            // Guarded on !isGoal rather than on a behind/off-target
+            // distinction, per his follow-up: "its inconsistent after
+            // points when there is a kick in at this stage". There are
+            // THREE shot outcomes, not two, and splitting the two misses
+            // apart is what read as the kick-in firing at random:
+            //
+            //   Behind - 1 point.  ->  kick in   ->  centre bounce
+            //   Off target!        ->  nothing   ->  centre bounce
+            //
+            // To a child those are the same event — the shot missed — so
+            // restarting them differently reads as broken. In football the
+            // ball has crossed the goal line either way, so both are a
+            // kick-in. Only an actual goal returns to the centre.
+            //
+            // Ported 2026-08-28 PM from 588d913, the settled form he
+            // actually played this morning (10:08-12:51, live), not the
+            // 3a29579 first draft. Nothing else from that session came
+            // with it — see SESSION-NOTES-2026-08-28-PM.md.
+            if (!isGoal)
+            {
+                yield return KickInAfterBehind(zDir, humanControlled);
+                // Same continuation the rushed behind gets, so the two
+                // paths now match by BOTH playing on rather than both
+                // restarting. chainDepth: 1 means maxChainDepth (1) stops
+                // this at its own contest — one more passage, then the
+                // round ends honestly, no open-ended chaining.
+                if (_roundId != roundAtStart) yield break;
+                Transform kicker2 = humanControlled ? rooDefender : crocDefender;
+                yield return TapBallAway(crocsInPossession: !humanControlled, kickerOverride: kicker2, chainDepth: 1);
+            }
+        }
+
+        // Deliberately its OWN routine rather than a shared extraction of
+        // the rushed-behind kick-out in KickAway. That block is the most
+        // heavily tuned code in this file — ball-tracked-to-boot, camera
+        // cut timed to the leg snap, and a documented defect where
+        // "kicker and ball were two unrelated objects that happened to
+        // animate at the same time". It works. Refactoring it to serve a
+        // second caller risks the beat that is already right in order to
+        // fix the one that never existed, so this reuses the same helpers
+        // (RunToZ / CutCameraForKickOut / KickMotion) without touching it.
+        System.Collections.IEnumerator KickInAfterBehind(float zDir, bool crocsInPossession)
+        {
+            // The team that was SCORED ON kicks in — same rule as the
+            // rushed-behind path's own defender pick.
+            Transform defender = crocsInPossession ? rooDefender : crocDefender;
+            if (!defender || !ball) yield break;
+            int roundAtStart = _roundId;
+
+            _message = "Kick in...";
+            Vector3 goalSquare = new Vector3(0f, defender.position.y, zDir * goalZ);
+            defender.position = goalSquare;
+            defender.rotation = Quaternion.Euler(0f, zDir > 0f ? 180f : 0f, 0f);
+
+            float targetZ = zDir * goalZ - zDir * kickOutDistance;
+            CutCameraForKickOut(zDir * goalZ, targetZ);
+
+            // Ball onto the boot and kept there through the motion, so the
+            // kick reads as caused by the player rather than the ball
+            // simply moving on its own — the exact defect the kick-out
+            // beat had.
+            var boot = FindDeepChild(defender, "RightFoot");
+            if (ball) ball.position = boot ? boot.position : defender.position + Vector3.up * 0.5f;
+            yield return new WaitForSeconds(kickOutPause * 0.5f);
+            if (_roundId != roundAtStart) yield break;
+
+            StartCoroutine(KickMotion(defender, shotKickDuration * 0.6f));
+            float settle = 0f;
+            while (settle < shotKickDuration * 0.25f)
+            {
+                if (_roundId != roundAtStart) yield break;
+                if (ball && boot) ball.position = boot.position;
+                settle += Time.deltaTime;
+                yield return null;
+            }
+
+            _message = "Kicks in from fullback!";
+            Vector3 from = ball.position;
+            Vector3 to = new Vector3(0f, from.y, targetZ);
+            float el2 = 0f;
+            while (el2 < shotKickDuration)
+            {
+                if (_roundId != roundAtStart) yield break;
+                el2 += Time.deltaTime;
+                float f = Mathf.Clamp01(el2 / shotKickDuration);
+                float arc = Mathf.Sin(f * Mathf.PI) * shotKickHeight;
+                ball.position = Vector3.Lerp(from, to, f) + Vector3.up * arc;
+                yield return null;
+            }
+            ball.position = to;
+            yield return new WaitForSeconds(shotResultHold * 0.5f);
         }
 
         public float speccyLeapRiseDuration = 0.5f;
