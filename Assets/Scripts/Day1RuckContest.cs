@@ -76,8 +76,32 @@ namespace AFL.Day1
         public CinemachineCamera vcamKick;
         public CinemachineCamera vcamKickOut;
         public CinemachineCamera vcamCloseup;
+        public CinemachineCamera vcamGoalPos;
+        public CinemachineCamera vcamGoalNeg;
 
         bool UsingCinemachine => vcamDefault && vcamKick && vcamKickOut && vcamCloseup;
+        bool HasGoalCams => vcamGoalPos && vcamGoalNeg;
+
+        // 2026-08-28, Shaun: "make the game as fun and entertaining as
+        // posibblle liek afl but exagarrated". The single most football-looking
+        // shot there is: behind the goals, watching the kick come at you
+        // through the big sticks. Used only while the ball is actually in
+        // flight at goal, so it stays an event rather than a default view.
+        public float goalCamBehind = 9f;
+        public float goalCamHeight = 3.2f;
+        void CutCameraBehindGoals(float zDir)
+        {
+            if (!UsingCinemachine || !HasGoalCams) return;
+            var vc = zDir > 0f ? vcamGoalPos : vcamGoalNeg;
+            vc.transform.position = new Vector3(0f, goalCamHeight, zDir * (goalZ + goalCamBehind));
+            vc.transform.LookAt(new Vector3(0f, 1.6f, zDir * (goalZ - 6f)));
+            vcamDefault.Priority.Value = 0;
+            vcamKick.Priority.Value = 0;
+            vcamKickOut.Priority.Value = 0;
+            vcamCloseup.Priority.Value = 0;
+            vcamGoalPos.Priority.Value = ReferenceEquals(vcamGoalPos, vc) ? 20 : 0;
+            vcamGoalNeg.Priority.Value = ReferenceEquals(vcamGoalNeg, vc) ? 20 : 0;
+        }
 
         void ActivateVcam(CinemachineCamera live)
         {
@@ -86,6 +110,11 @@ namespace AFL.Day1
             vcamKick.Priority.Value = ReferenceEquals(vcamKick, live) ? 20 : 0;
             vcamKickOut.Priority.Value = ReferenceEquals(vcamKickOut, live) ? 20 : 0;
             vcamCloseup.Priority.Value = ReferenceEquals(vcamCloseup, live) ? 20 : 0;
+            // Must clear these too - otherwise a goal cam left at 20 outranks
+            // whatever shot the next beat asks for and the camera sticks
+            // behind the posts for the rest of the game.
+            if (vcamGoalPos) vcamGoalPos.Priority.Value = 0;
+            if (vcamGoalNeg) vcamGoalNeg.Priority.Value = 0;
         }
         Coroutine _defenderRunToZ;
         Vector3 _camDefaultPos;
@@ -2022,6 +2051,7 @@ namespace AFL.Day1
             // target) is already decided before the ball leaves the
             // foot, so the arc just flies straight at it. No freeze-then-
             // tween needed here the way the mark's ball needed one.
+            CutCameraBehindGoals(zDir);
             el = 0f;
             while (el < shotKickDuration)
             {

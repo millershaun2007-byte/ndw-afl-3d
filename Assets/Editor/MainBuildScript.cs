@@ -287,7 +287,13 @@ public static class MainBuildScript
         vcamDefault.Priority.Value = 10;                 // the resting shot
         var vcamKick = MakeVcam("VCam Kick", 60f);
         var vcamKickOut = MakeVcam("VCam KickOut", 60f);
-        var vcamCloseup = MakeVcam("VCam Closeup", 50f); // tighter lens on contests
+        var vcamCloseup = MakeVcam("VCam Closeup", 38f); // tighter lens on contests
+        // Behind the goals, looking back up the ground - the one angle that
+        // reads instantly as football. Positioned from goalZ rather than a
+        // guessed number so it stays behind the posts if the ground is ever
+        // resized. Both ends get one; which is live depends on zDir.
+        var vcamGoalPos = MakeVcam("VCam BehindGoalsPos", 45f);
+        var vcamGoalNeg = MakeVcam("VCam BehindGoalsNeg", 45f);
 
         var lightGo = new GameObject("Directional Light");
         var light = lightGo.AddComponent<Light>();
@@ -312,6 +318,8 @@ public static class MainBuildScript
         contest.vcamKick = vcamKick;
         contest.vcamKickOut = vcamKickOut;
         contest.vcamCloseup = vcamCloseup;
+        contest.vcamGoalPos = vcamGoalPos;
+        contest.vcamGoalNeg = vcamGoalNeg;
 
         var bridgeGo = new GameObject("TouchBridge");
         bridgeGo.AddComponent<Day1TouchBridge>();
