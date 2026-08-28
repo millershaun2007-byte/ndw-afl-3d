@@ -1445,7 +1445,24 @@ namespace AFL.Day1
                     if (_roundId != roundAtStart) yield break;
                     yield return MarkCatchRoutine(spoilClearer, true);
                     if (_roundId != roundAtStart) yield break;
-                    yield return ContinueChainOrEnd(!humanControlled, spoilClearer, chainDepth);
+                    // 2026-08-28, Shaun: "ON THE TIMES ITS NOT A RUSHED POINT CAN
+                    // THE DEFENDER DO A QUICK KICK OUT OF DEFENCE". This used to go
+                    // through ContinueChainOrEnd, which gathers, runs, and only then
+                    // kicks. Straight to KickAway instead: the clearing defender kicks
+                    // out of defence immediately, and it still lands in a contest
+                    // because that is what KickAway stages.
+                    if (chainDepth < maxChainDepth)
+                    {
+                        bool clearCrocs = !humanControlled;
+                        yield return KickAway(spoilClearer, clearCrocs ? 1f : -1f,
+                            clearCrocs ? crocForward : rooForward,
+                            clearCrocs ? rooDefender : crocDefender,
+                            false, clearCrocs, chainDepth + 1);
+                    }
+                    else
+                    {
+                        _message = "Time's up — turnover!";
+                    }
                 }
             }
             else
@@ -1918,7 +1935,16 @@ namespace AFL.Day1
                 yield return KickAway(kickInTaker, -zDir,
                     nowCrocs ? crocForward : rooForward,
                     nowCrocs ? rooDefender : crocDefender,
-                    false, nowCrocs, 0, kickOutDistance);
+                    // chainDepth 1, NOT 0. A spoil at depth 0 is treated as a
+                    // goal-line rushed behind - but this contest happens at
+                    // zDir*8, in the defensive half, nowhere near a goal. At 0 a
+                    // spoiled kick-in scored a bogus point and kicked out again
+                    // instead of the ball going up the ground, which is why it
+                    // only worked "sometimes" (Shaun: "HOW COME THE KICK OUT ALL
+                    // THE WAY UP THE GROUND DOSNT WORK EVERYTIME"). At 1 a spoil
+                    // here is a mid-ground loose ball, and a mark still chains
+                    // forward because maxChainDepth is 2.
+                    false, nowCrocs, 1, kickOutDistance);
                 // 2026-08-28, Shaun: "when the kick out happens the player just
                 // randomly kicks it back in completly differnt to initial game".
                 // Correct - the kick-in body is unchanged from the original, but
