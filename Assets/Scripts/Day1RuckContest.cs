@@ -1022,6 +1022,7 @@ namespace AFL.Day1
                     // fell straight through the if/else chain and the round simply
                     // died, which is why it read as the game giving up. The contest
                     // is now binary: marked, or spoiled by the defender.
+                    bool marked = !defenderSpoiled;
                     _message = defenderSpoiled ? "Spoiled by the defender!" : "MARK!";
                     // 2026-08-21 — real bug: this called the unmirrored
                     // CutCameraToMarkCloseup(forward) (fixed +7 X
