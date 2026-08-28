@@ -688,25 +688,6 @@ namespace AFL.Day1
             // kick to a normal mark, same as before this feature existed.
             Transform chaser = crocsInPossession ? rooRover : crocRover;
             bool caughtByChaser = chaser && Random.value < chaseCatchChance;
-            // 2026-08-28, Shaun: "the run and tackle just needs to be a bit
-            // more natural". The chaser used to set off from wherever it was
-            // standing and run its own parallel lane, so at the moment of the
-            // catch the two were merely near each other - the arms read as a
-            // tackle but the contact never did. Start it on the carrier's own
-            // line and a couple of metres back, so it is genuinely running
-            // them down from behind and finishes on top of them.
-            //
-            // Only when the catch is actually going to happen: an uncaught
-            // chase should still look like a chase that was beaten, not like
-            // one that teleported onto the carrier and then let them go.
-            if (chaser && rover && caughtByChaser)
-            {
-                chaser.position = new Vector3(
-                    rover.position.x + 0.7f,
-                    chaser.position.y,
-                    rover.position.z - runDir * 2.4f);
-                chaser.rotation = rover.rotation;
-            }
             if (chaser) StartCoroutine(RunStraight(chaser, runDir, carriesBall: false));
             yield return RunStraight(rover, runDir);
 
@@ -758,7 +739,14 @@ namespace AFL.Day1
             _message = caughtByChaser
                 ? (crocsInPossession ? "Caught by the Roo!" : "Caught by the Croc!")
                 : (crocsInPossession ? "Crocs run it out!" : "Roos run it out!");
-            if (caughtByChaser) yield return TackleGrab(chaser, rover);
+            // 2026-08-28, Shaun: "I think we ditch tackling brings to many
+            // moving parts to the game." The tackle beat is gone: the grab
+            // motion, the closeup cut, the hold, and the chaser repositioning.
+            //
+            // The chase OUTCOME is deliberately kept - "Caught by the Croc!"
+            // still shortens the kick, which is what feeds the falls-short ->
+            // gathers -> snap passage. Removing that as well would delete a
+            // sequence that works, which is not what was asked for.
 
             // Real fix (2026-08-12, Shaun: "youve kind of gone a bit
             // rouge with this one" — the automatic run-to-landing-spot
@@ -2741,7 +2729,6 @@ namespace AFL.Day1
             foreArm.localRotation = start;
         }
 
-        public float tackleDuration = 0.55f;
 
         // 2026-08-28, Shaun: "maybe also ad a scene where out of the centre the
         // rover gives a handball to the player running past who can run in and
@@ -2845,61 +2832,6 @@ namespace AFL.Day1
         // punch. The knock itself is what makes it look struck.
         public float spoilContactBeat = 0.22f;
         public float spoilKnockDuration = 0.26f;
-        System.Collections.IEnumerator TackleGrab(Transform chaser, Transform carrier)
-        {
-            var cl = chaser ? FindDeepChild(chaser, "LeftArm") : null;
-            var cr = chaser ? FindDeepChild(chaser, "RightArm") : null;
-            var bl = carrier ? FindDeepChild(carrier, "LeftArm") : null;
-            var br = carrier ? FindDeepChild(carrier, "RightArm") : null;
-            if (!cl && !cr && !bl && !br) yield break;
-
-            Quaternion clS = cl ? cl.localRotation : Quaternion.identity;
-            Quaternion crS = cr ? cr.localRotation : Quaternion.identity;
-            Quaternion blS = bl ? bl.localRotation : Quaternion.identity;
-            Quaternion brS = br ? br.localRotation : Quaternion.identity;
-
-            // Cut in close on the tackle. Without this the motion plays but
-            // nobody sees it: verified in a live capture where the carrier's
-            // arms clearly flew up on "Caught by the Croc!" while the croc
-            // doing the tackling was already outside the frame. An animation
-            // the camera is not pointing at is the same as no animation, which
-            // is the very failure this whole change exists to fix.
-            if (carrier)
-            {
-                float tside = Mathf.Sign(carrier.position.x == 0f ? 1f : carrier.position.x);
-                CutCameraToMarkCloseup(carrier, tside);
-            }
-
-            var ca = chaser ? chaser.GetComponentInChildren<Animator>() : null;
-            var ba = carrier ? carrier.GetComponentInChildren<Animator>() : null;
-            bool caOn = ca && ca.enabled, baOn = ba && ba.enabled;
-            if (ca) ca.enabled = false;
-            if (ba) ba.enabled = false;
-
-            float el = 0f;
-            while (el < tackleDuration)
-            {
-                el += Time.deltaTime;
-                float f = Mathf.Clamp01(el / tackleDuration);
-                float grab = Mathf.Sin(f * Mathf.PI);          // out and back
-                // Chaser reaches with both arms; carrier's fly up as they are
-                // caught, a touch wider so the two read as cause and effect
-                // rather than as the same gesture played twice.
-                if (cl) cl.localRotation = clS * Quaternion.Euler(0f, 0f, grab * 95f);
-                if (cr) cr.localRotation = crS * Quaternion.Euler(0f, 0f, -grab * 95f);
-                if (bl) bl.localRotation = blS * Quaternion.Euler(0f, 0f, grab * 130f);
-                if (br) br.localRotation = brS * Quaternion.Euler(0f, 0f, -grab * 130f);
-                yield return null;
-            }
-            if (cl) cl.localRotation = clS;
-            if (cr) cr.localRotation = crS;
-            if (bl) bl.localRotation = blS;
-            if (br) br.localRotation = brS;
-            if (ca && caOn) ca.enabled = true;
-            if (ba && baOn) ba.enabled = true;
-            // Hold on it before the next beat starts.
-            yield return new WaitForSeconds(contactHoldPause);
-        }
 
         System.Collections.IEnumerator KickMotion(Transform t, float duration)
         {
