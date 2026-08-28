@@ -7,9 +7,20 @@ name: Build and deploy AFL 3D
 # build traceable to a specific commit and deploys it automatically —
 # "what's live" is never ambiguous again.
 
+# 2026-08-28: push-to-deploy TURNED OFF. Shaun: "we need to lay of the
+# deploys and psuhes a bit i think", after a day where versions appeared to
+# change on their own.
+#
+# They were not changing on their own. Every push built and deployed roughly 8
+# minutes later, so you would load the game, see one version, and a few minutes
+# later be looking at a different one having done nothing. It also overwrote
+# every byte-exact build restored by hand, and the deploy step below does not
+# add the ?v= cache-bust stamp - so browsers then cached inconsistently on top.
+# Twice today two runs overlapped and landed within seconds of each other.
+#
+# Deploying is now a deliberate act: Actions > "Build and deploy AFL 3D" > Run
+# workflow. Pushing code no longer ships it.
 on:
-  push:
-    branches: [main]
   workflow_dispatch: {}
 
 permissions:
@@ -159,4 +170,20 @@ jobs:
           # survive this pipeline's 2026-08-21 rebuild — setting it here,
           # every deploy, so it can't quietly regress again.
           gcloud storage objects update gs://ndw-game-builds/afl3d/index.html gs://ndw-game-builds/afl3d/Build/WebGL.data gs://ndw-game-builds/afl3d/Build/WebGL.wasm gs://ndw-game-builds/afl3d/Build/WebGL.loader.js gs://ndw-game-builds/afl3d/Build/WebGL.framework.js --cache-control="no-cache, max-age=0"
-          echo "Deployed commit ${{ github.sha }} to gs://ndw-game-builds/afl3d/"
+          # 2026-08-28 — stamp the build URLs. Cache-Control above is not
+          # enough: Unity caches .data/.wasm in IndexedDB keyed by URL, and
+          # those URLs are identical for every build ever made, so a returning
+          # browser replays its cached copy no matter what is in the bucket.
+          # HTTP cache headers do not reach IndexedDB. Every rebuild between
+          # 17 and 28 Aug was invisible to anyone who had played before.
+          STAMP=$(cat build/WebGL/Build/WebGL.wasm build/WebGL/Build/WebGL.data | md5sum | cut -c1-10)
+          sed -i \
+            -e "s|\"Build/WebGL\.loader\.js[^\"]*\"|\"Build/WebGL.loader.js?v=$STAMP\"|" \
+            -e "s|\"Build/WebGL\.data[^\"]*\"|\"Build/WebGL.data?v=$STAMP\"|" \
+            -e "s|\"Build/WebGL\.framework\.js[^\"]*\"|\"Build/WebGL.framework.js?v=$STAMP\"|" \
+            -e "s|\"Build/WebGL\.wasm[^\"]*\"|\"Build/WebGL.wasm?v=$STAMP\"|" \
+            build/WebGL/index.html
+          grep -q "?v=$STAMP" build/WebGL/index.html || { echo "cache-bust did not apply"; exit 1; }
+          gcloud storage cp build/WebGL/index.html gs://ndw-game-builds/afl3d/index.html \
+            --cache-control="no-cache, max-age=0"
+          echo "Deployed commit ${{ github.sha }} to gs://ndw-game-builds/afl3d/ (v=$STAMP)"
