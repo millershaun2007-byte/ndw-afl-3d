@@ -1017,8 +1017,12 @@ namespace AFL.Day1
                     defenderSpoiled = !isSpeccy && (humanControlled
                         ? Mathf.Abs(defenderSpoilT - markTargetT) <= defenderSpoilWindow
                         : defendPressed);
-                    bool marked = markPressed && !defenderSpoiled;
-                    _message = marked ? "MARK!" : (defenderSpoiled ? "Spoiled by the defender!" : "Spilled!");
+                    // 2026-08-28, Shaun: "ITS UP TO THE SPILLED BIT ONLY ... DELETE
+                    // THE SPILL SECTION". A spill had no outcome branch at all - it
+                    // fell straight through the if/else chain and the round simply
+                    // died, which is why it read as the game giving up. The contest
+                    // is now binary: marked, or spoiled by the defender.
+                    _message = defenderSpoiled ? "Spoiled by the defender!" : "MARK!";
                     // 2026-08-21 — real bug: this called the unmirrored
                     // CutCameraToMarkCloseup(forward) (fixed +7 X
                     // offset). Rarely showed at the centre bounce since
@@ -1048,7 +1052,8 @@ namespace AFL.Day1
             // the shot off mid-way — same class of bug as the earlier
             // ball-position race, just at the sequencing level instead
             // of the position-writing level.
-            bool markedResult = markPressed && markResolved && !defenderSpoiled;
+            // No spill outcome any more - see the message line above.
+            bool markedResult = !defenderSpoiled;
             yield return MarkCatchRoutine(forward, markedResult);
             if (markedResult)
             {
