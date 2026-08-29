@@ -1020,135 +1020,7 @@ namespace AFL.Day1
                 // Stop the original mark-contest run before starting a
                 // new one for the same character — see the field's own
                 // comment for the confirmed race this was causing.
-                if (_defenderRunToZ != null) StopCoroutine(_defenderRunToZ);
-                Vector3 goalSquare = new Vector3(0f, defender.position.y, zDir * goalZ);
-                yield return RunToZ(defender, goalSquare.z, 0.6f);
-                if (_roundId != roundAtStart) yield break;
-                // 2026-08-21, Shaun (live playtest): still couldn't
-                // actually see the player even after the ball-height and
-                // camera fixes above — RunToZ only ever moves Z, so the
-                // defender's X stayed wherever the mark contest left them
-                // (~±0.9, the defender-zone spawn X from MainBuildScript)
-                // — almost exactly between the two inner goal posts
-                // (±0.6). The close-up camera's fixed (7,3,0) world-space
-                // offset then looked straight through a post to reach
-                // them. Slide clear of the post cluster (posts span
-                // -1.3..1.3) before the close-up cuts in — same `side` as
-                // the ball above now, not a separately-derived sign.
-                float clearX = side * 2.6f;
-                float slideEl = 0f;
-                Vector3 slideStart = defender.position;
-                while (slideEl < 0.3f)
-                {
-                    slideEl += Time.deltaTime;
-                    defender.position = Vector3.Lerp(slideStart, new Vector3(clearX, slideStart.y, slideStart.z), Mathf.Clamp01(slideEl / 0.3f));
-                    yield return null;
-                }
-                if (_roundId != roundAtStart) yield break;
-
-                // 2026-08-19, Shaun: "pause, zoom in on the player, then
-                // they kick it clearly like they do kicking out of the
-                // centre." Reusing the same two camera beats already
-                // proven elsewhere: CutCameraToMarkCloseup for the zoom
-                // (same one a mark uses), CutCameraForKick for the wide
-                // framing during the kick itself (same one the centre's
-                // own rover kick uses) — direction is -zDir here since
-                // the fullback kicks back toward centre, not further
-                // into the attacking end.
-                _message = "Kicks out from fullback!";
-                // 2026-08-19, Shaun: "the issue is turning around and
-                // kicking the other way." Real bug — RunToZ sets facing
-                // from net movement direction, but the defender is
-                // already standing right at/near the goal square from
-                // the mark contest, so that "run" can be a near-zero
-                // distance with an arbitrary resulting facing. Setting
-                // the kick-out facing explicitly instead of trusting
-                // RunToZ's rotation for what's practically a non-move.
-                defender.rotation = Quaternion.Euler(0, zDir > 0 ? 180 : 0, 0);
-                // 2026-08-21 — mirrored variant, not the shared
-                // CutCameraToMarkCloseup(Transform) the mark beat uses
-                // (that framing is already signed off, left untouched).
-                // The original's fixed +X offset means when the subject
-                // ends up on -X (half the spawn sides), the camera sits
-                // INSIDE the post cluster's sightline — the exact
-                // occlusion the slide above exists to avoid.
-                CutCameraToMarkCloseup(defender, side);
-                yield return new WaitForSeconds(kickOutPause);
-                if (_roundId != roundAtStart) yield break;
-                // 2026-08-21, Shaun: "you need to zoom right in make sure
-                // you have the camera on the player then make sure you
-                // see them kick the ball out." Stay on the zoomed-in
-                // close-up through the WHOLE kick motion (yielded, not
-                // fired-and-forgotten) — the wide kick-arc camera only
-                // cuts in once the leg has actually snapped forward, so
-                // the kick itself is genuinely visible before the ball
-                // starts flying, not hidden behind a camera cut.
-                //
-                // 2026-08-21 — the actual defect this whole beat had:
-                // the ball was landing at behindTarget and never moving
-                // again until the kick-out arc itself, while the leg
-                // snapped at the defender's own position — a metre-plus
-                // away even on the correctly-signed side. Kicker and
-                // ball were two unrelated objects that happened to
-                // animate at the same time. Put it on the boot and keep
-                // it there through the motion, same idiom
-                // MarkCatchRoutine already uses for the hand (track the
-                // real bone, don't guess a nearby point).
-                var boot = FindDeepChild(defender, "RightFoot");
-                if (ball) ball.position = boot ? boot.position : defender.position + Vector3.up * (groundY * 0.5f);
-                yield return StartCoroutine(KickMotionWithBall(defender, boot, kickMotionDuration));
-                if (_roundId != roundAtStart) yield break;
-                // 2026-08-21, Shaun (live playtest): "camera nowhere near
-                // the person" — first attempted fix (flipping this to
-                // plain zDir) was still wrong. Real problem: this whole
-                // kick travels the full ground length (goal square to
-                // centre, ~20 units), far more than the static, non-
-                // panning CutCameraForKick was ever built to cover (see
-                // CutCameraForKickOut's own comment) — so no single sign
-                // choice on the OLD camera call would have fixed it, a
-                // dedicated wide shot was the actual fix needed.
-                // 2026-08-21, Shaun: "does not have to go all the way to
-                // the centre" — a real fullback kick-out doesn't need to
-                // reach dead centre, and a shorter traverse is also
-                // easier to frame cleanly in one static shot.
-                float kickOutTargetZ = zDir * goalZ - zDir * kickOutDistance;
-                CutCameraForKickOut(zDir * goalZ, kickOutTargetZ);
-
-                Vector3 kickOutStart = ball.position;
-                Vector3 kickOutTarget = new Vector3(0f, kickOutStart.y, kickOutTargetZ);
-                float kickOutEl = 0f;
-                while (kickOutEl < shotKickDuration)
-                {
-                    if (_roundId != roundAtStart) yield break;
-                    kickOutEl += Time.deltaTime;
-                    float f = Mathf.Clamp01(kickOutEl / shotKickDuration);
-                    float arc = Mathf.Sin(f * Mathf.PI) * shotKickHeight;
-                    ball.position = Vector3.Lerp(kickOutStart, kickOutTarget, f) + Vector3.up * arc;
-                    yield return null;
-                }
-                ball.position = kickOutTarget;
-
-                // 2026-08-21 — second contest chain (see
-                // SECOND-CONTEST-BRIEF.md, and note this whole block only
-                // runs at chainDepth==0 per the outer check above, so the
-                // chain is always allowed here — the earlier depth guard
-                // that lived on this specific call was removed, the real
-                // bound now lives in ContinueChainOrEnd/maxChainDepth for
-                // every OTHER spoil in the chain). Reposition defender
-                // (the kick-out kicker, now acting as this new contest's
-                // "rover") onto the ball's actual landing spot —
-                // TapBallAway's own peakZ and camera pivot both derive
-                // from rover.position.z, so this is what anchors the
-                // whole chained contest on where the ball really is
-                // instead of where the kicker used to stand
-                // (SECOND-CONTEST-BRIEF.md point 1).
-                defender.position = kickOutTarget;
-                // Possession flips to the team that just kicked out —
-                // TapBallAway derives their run direction from nothing
-                // but which team that is (see its own header comment on
-                // the reverseDirection bug this replaced); no separate
-                // direction override needed or correct here.
-                yield return TapBallAway(crocsInPossession: !humanControlled, kickerOverride: defender, chainDepth: chainDepth + 1);
+                yield return KickOutFullGround(defender, zDir, humanControlled, chainDepth);
                 }
                 else
                 {
@@ -1400,6 +1272,148 @@ namespace AFL.Day1
         // shot's result and the next round's centre bounce.
         public float shotStartPause = 0.5f;
 
+
+        // 2026-08-29, Shaun: "EVERY POINT CANT BE HARD CODED TO GO BACK TO CENTRE.
+        // OR SOME DO SOME DONT POINT IS ALWAYS THE KICK OUT FULL GROUND ROUTINE".
+        //
+        // This was inline in the rushed-behind branch, so only THAT kind of point
+        // got a kick-out - a missed shot scored its behind and went straight back
+        // to a centre bounce. One routine now, called by both.
+        System.Collections.IEnumerator KickOutFullGround(Transform defender, float zDir, bool humanControlled, int chainDepth)
+        {
+            if (!defender || !ball) yield break;
+            int roundAtStart = _roundId;
+            float side = Mathf.Sign(defender.position.x == 0f ? 1f : defender.position.x);
+            if (_defenderRunToZ != null) StopCoroutine(_defenderRunToZ);
+            Vector3 goalSquare = new Vector3(0f, defender.position.y, zDir * goalZ);
+            yield return RunToZ(defender, goalSquare.z, 0.6f);
+            if (_roundId != roundAtStart) yield break;
+            // 2026-08-21, Shaun (live playtest): still couldn't
+            // actually see the player even after the ball-height and
+            // camera fixes above — RunToZ only ever moves Z, so the
+            // defender's X stayed wherever the mark contest left them
+            // (~±0.9, the defender-zone spawn X from MainBuildScript)
+            // — almost exactly between the two inner goal posts
+            // (±0.6). The close-up camera's fixed (7,3,0) world-space
+            // offset then looked straight through a post to reach
+            // them. Slide clear of the post cluster (posts span
+            // -1.3..1.3) before the close-up cuts in — same `side` as
+            // the ball above now, not a separately-derived sign.
+            float clearX = side * 2.6f;
+            float slideEl = 0f;
+            Vector3 slideStart = defender.position;
+            while (slideEl < 0.3f)
+            {
+                slideEl += Time.deltaTime;
+                defender.position = Vector3.Lerp(slideStart, new Vector3(clearX, slideStart.y, slideStart.z), Mathf.Clamp01(slideEl / 0.3f));
+                yield return null;
+            }
+            if (_roundId != roundAtStart) yield break;
+
+            // 2026-08-19, Shaun: "pause, zoom in on the player, then
+            // they kick it clearly like they do kicking out of the
+            // centre." Reusing the same two camera beats already
+            // proven elsewhere: CutCameraToMarkCloseup for the zoom
+            // (same one a mark uses), CutCameraForKick for the wide
+            // framing during the kick itself (same one the centre's
+            // own rover kick uses) — direction is -zDir here since
+            // the fullback kicks back toward centre, not further
+            // into the attacking end.
+            _message = "Kicks out from fullback!";
+            // 2026-08-19, Shaun: "the issue is turning around and
+            // kicking the other way." Real bug — RunToZ sets facing
+            // from net movement direction, but the defender is
+            // already standing right at/near the goal square from
+            // the mark contest, so that "run" can be a near-zero
+            // distance with an arbitrary resulting facing. Setting
+            // the kick-out facing explicitly instead of trusting
+            // RunToZ's rotation for what's practically a non-move.
+            defender.rotation = Quaternion.Euler(0, zDir > 0 ? 180 : 0, 0);
+            // 2026-08-21 — mirrored variant, not the shared
+            // CutCameraToMarkCloseup(Transform) the mark beat uses
+            // (that framing is already signed off, left untouched).
+            // The original's fixed +X offset means when the subject
+            // ends up on -X (half the spawn sides), the camera sits
+            // INSIDE the post cluster's sightline — the exact
+            // occlusion the slide above exists to avoid.
+            CutCameraToMarkCloseup(defender, side);
+            yield return new WaitForSeconds(kickOutPause);
+            if (_roundId != roundAtStart) yield break;
+            // 2026-08-21, Shaun: "you need to zoom right in make sure
+            // you have the camera on the player then make sure you
+            // see them kick the ball out." Stay on the zoomed-in
+            // close-up through the WHOLE kick motion (yielded, not
+            // fired-and-forgotten) — the wide kick-arc camera only
+            // cuts in once the leg has actually snapped forward, so
+            // the kick itself is genuinely visible before the ball
+            // starts flying, not hidden behind a camera cut.
+            //
+            // 2026-08-21 — the actual defect this whole beat had:
+            // the ball was landing at behindTarget and never moving
+            // again until the kick-out arc itself, while the leg
+            // snapped at the defender's own position — a metre-plus
+            // away even on the correctly-signed side. Kicker and
+            // ball were two unrelated objects that happened to
+            // animate at the same time. Put it on the boot and keep
+            // it there through the motion, same idiom
+            // MarkCatchRoutine already uses for the hand (track the
+            // real bone, don't guess a nearby point).
+            var boot = FindDeepChild(defender, "RightFoot");
+            if (ball) ball.position = boot ? boot.position : defender.position + Vector3.up * (groundY * 0.5f);
+            yield return StartCoroutine(KickMotionWithBall(defender, boot, kickMotionDuration));
+            if (_roundId != roundAtStart) yield break;
+            // 2026-08-21, Shaun (live playtest): "camera nowhere near
+            // the person" — first attempted fix (flipping this to
+            // plain zDir) was still wrong. Real problem: this whole
+            // kick travels the full ground length (goal square to
+            // centre, ~20 units), far more than the static, non-
+            // panning CutCameraForKick was ever built to cover (see
+            // CutCameraForKickOut's own comment) — so no single sign
+            // choice on the OLD camera call would have fixed it, a
+            // dedicated wide shot was the actual fix needed.
+            // 2026-08-21, Shaun: "does not have to go all the way to
+            // the centre" — a real fullback kick-out doesn't need to
+            // reach dead centre, and a shorter traverse is also
+            // easier to frame cleanly in one static shot.
+            float kickOutTargetZ = zDir * goalZ - zDir * kickOutDistance;
+            CutCameraForKickOut(zDir * goalZ, kickOutTargetZ);
+
+            Vector3 kickOutStart = ball.position;
+            Vector3 kickOutTarget = new Vector3(0f, kickOutStart.y, kickOutTargetZ);
+            float kickOutEl = 0f;
+            while (kickOutEl < shotKickDuration)
+            {
+                if (_roundId != roundAtStart) yield break;
+                kickOutEl += Time.deltaTime;
+                float f = Mathf.Clamp01(kickOutEl / shotKickDuration);
+                float arc = Mathf.Sin(f * Mathf.PI) * shotKickHeight;
+                ball.position = Vector3.Lerp(kickOutStart, kickOutTarget, f) + Vector3.up * arc;
+                yield return null;
+            }
+            ball.position = kickOutTarget;
+
+            // 2026-08-21 — second contest chain (see
+            // SECOND-CONTEST-BRIEF.md, and note this whole block only
+            // runs at chainDepth==0 per the outer check above, so the
+            // chain is always allowed here — the earlier depth guard
+            // that lived on this specific call was removed, the real
+            // bound now lives in ContinueChainOrEnd/maxChainDepth for
+            // every OTHER spoil in the chain). Reposition defender
+            // (the kick-out kicker, now acting as this new contest's
+            // "rover") onto the ball's actual landing spot —
+            // TapBallAway's own peakZ and camera pivot both derive
+            // from rover.position.z, so this is what anchors the
+            // whole chained contest on where the ball really is
+            // instead of where the kicker used to stand
+            // (SECOND-CONTEST-BRIEF.md point 1).
+            defender.position = kickOutTarget;
+            // Possession flips to the team that just kicked out —
+            // TapBallAway derives their run direction from nothing
+            // but which team that is (see its own header comment on
+            // the reverseDirection bug this replaced); no separate
+            // direction override needed or correct here.
+            yield return TapBallAway(crocsInPossession: !humanControlled, kickerOverride: defender, chainDepth: chainDepth + 1);
+        }
         System.Collections.IEnumerator TakeShotAtGoal(Transform kicker, float zDir, bool humanControlled)
         {
             if (!kicker || !ball) yield break;
@@ -1514,6 +1528,15 @@ namespace AFL.Day1
                 if (_roundId != roundAtStart) yield break;
                 holdEl += Time.deltaTime;
                 yield return null;
+            }
+            // A behind is a point, and every point gets the same kick-out and full
+            // ground routine - it used to go straight back to a centre bounce, so
+            // some points had the routine and some did not.
+            if (!isGoal)
+            {
+                if (_roundId != roundAtStart) yield break;
+                yield return KickOutFullGround(humanControlled ? rooDefender : crocDefender,
+                    zDir, humanControlled, 1);
             }
         }
 
