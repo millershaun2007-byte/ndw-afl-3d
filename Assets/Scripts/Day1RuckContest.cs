@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Runtime.InteropServices;
 
 namespace AFL.Day1
 {
@@ -182,6 +183,7 @@ namespace AFL.Day1
                 _mainCam.transform.position = _camDefaultPos;
                 _mainCam.transform.rotation = _camDefaultRot;
             }
+            TapLabel("TAP");
             _message = "Centre bounce...";
             float ideal = throwDuration * 0.5f;
             // 2026-08-19, Shaun: "too easy for the crocs" — the human
@@ -213,6 +215,20 @@ namespace AFL.Day1
             // anywhere in that grace period still lands inside the
             // generous auto-win band, not just barely counted.
             _inputDeadline = ideal + perfectWindow;
+        }
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+        [DllImport("__Internal")] static extern void SetTapLabel(string s);
+#endif
+        string _tapLabel = "";
+        bool _humanAttacking = true;
+        void TapLabel(string s)
+        {
+            if (s == _tapLabel) return;
+            _tapLabel = s;
+#if UNITY_WEBGL && !UNITY_EDITOR
+            try { SetTapLabel(s); } catch { }
+#endif
         }
 
         void Update()
@@ -433,6 +449,8 @@ namespace AFL.Day1
             // or of how this particular call got here (see this
             // function's own header comment on the reverseDirection bug
             // this replaced).
+            _humanAttacking = crocsInPossession;
+            if (crocsInPossession) TapLabel("RUN");
             float runDir = crocsInPossession ? 1f : -1f;
             yield return RunStraight(rover, runDir);
             // 2026-08-21 — real bug, found by computing the actual
@@ -767,6 +785,7 @@ namespace AFL.Day1
             // genuinely a guess. Telling the player their actual role for
             // this specific round is the real fix, not a code bug in the
             // tap detection itself (checked — it's sound).
+            TapLabel(humanControlled ? "MARK" : "SPOIL");
             _message = humanControlled ? "Go up for the mark!" : "Defend! Tap to spoil!";
             el = 0f;
             while (el < kickDuration)
@@ -1239,7 +1258,7 @@ namespace AFL.Day1
             // (goalZ) so both the ball's landing and the posts are framed
             // together, not just one or the other.
             float pivotZ = contestZ ?? (zDir * (goalZ - 5f));
-            _mainCam.transform.position = new Vector3(kickCamSide, kickCamHeight, pivotZ);
+            _mainCam.transform.position = new Vector3(Mathf.Abs(kickCamSide), kickCamHeight, pivotZ);
             // Real fix (2026-08-12, same pass as the speccy). LookAt
             // height raised from 1.5 to 3 — with the leap now reaching
             // speccyLeapHeightScale (4) above standing height, framing on
@@ -1266,7 +1285,7 @@ namespace AFL.Day1
         {
             if (!_mainCam) return;
             float pivotZ = (startZ + endZ) * 0.5f;
-            _mainCam.transform.position = new Vector3(kickCamSide * 1.6f, kickCamHeight * 1.6f, pivotZ);
+            _mainCam.transform.position = new Vector3(Mathf.Abs(kickCamSide) * 1.6f, kickCamHeight * 1.6f, pivotZ);
             _mainCam.transform.LookAt(new Vector3(0, 3f, pivotZ));
         }
 
@@ -1467,6 +1486,7 @@ namespace AFL.Day1
             // player chooses. Never hangs: running all the way out
             // without a tap is a real, deliberate miss (max power,
             // way off), not a stall.
+            if (humanControlled) TapLabel("KICK");
             _message = humanControlled ? "Tap when it turns GREEN!" : "Lining up the kick...";
             _shotBarVisible = humanControlled;
             _shotBarValue = 0f;
@@ -2143,6 +2163,22 @@ namespace AFL.Day1
             // player can see it coming, not just react blind. Same "the
             // cue is visual, not a hidden number" principle as every
             // other timing mechanic in this file.
+            {
+                var teamStyle = new GUIStyle(GUI.skin.label)
+                {
+                    fontSize = Mathf.RoundToInt(Screen.height * 0.035f),
+                    fontStyle = FontStyle.Bold,
+                    alignment = TextAnchor.MiddleLeft
+                };
+                teamStyle.normal.textColor = _humanAttacking
+                    ? new Color(0.35f, 0.9f, 0.4f) : new Color(0.95f, 0.72f, 0.25f);
+                GUI.Label(new Rect(Screen.width * 0.03f, Screen.height * 0.20f,
+                                   Screen.width * 0.6f, Screen.height * 0.07f),
+                          _humanAttacking ? "CROCS ATTACK \u2192   ATTACKING"
+                                          : "CROCS ATTACK \u2192   DEFENDING",
+                          teamStyle);
+            }
+
             if (_shotBarVisible)
             {
                 int barW = Mathf.RoundToInt(Screen.width * 0.6f);
