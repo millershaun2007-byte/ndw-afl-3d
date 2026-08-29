@@ -650,7 +650,13 @@ namespace AFL.Day1
         // spoiled-clearance treatment, but if THAT needs to chain again
         // (a spoil on it, or an out-of-range mark), it stops there and
         // resets instead of working further up the ground.
-        public int maxChainDepth = 1;
+        // 2026-08-29, Shaun: "THEN AFER EVERY BEHIND THE FULL GROUND GAME PLAY
+        // IS MATCHING THE HUMAN SET UP". Back to 3, which is what 25c5992 took
+        // away on 21 Aug ("Cap chain depth to 1 - kick-out's own mark, not the
+        // full ground"). The kick-out already chains into a contest; the cap was
+        // the only thing stopping the ball being worked the length of the ground.
+        // Both sides run the same code, so the AI gets the same passage.
+        public int maxChainDepth = 3;
 
         // Drop the ball to the foot, brief beat, then kick it away in an
         // arc continuing the same direction as the run. Now interleaved
