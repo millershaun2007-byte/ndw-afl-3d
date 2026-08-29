@@ -961,7 +961,14 @@ namespace AFL.Day1
                     // AI is graded by the same window on its own tap.
                     // Marked on the bar. A miss is now a dropped mark, not the
                     // defender being credited with a spoil he did not earn.
-                    if (humanControlled && PowerEnd() < markPowerMin) defenderSpoiled = true;
+                    // 2026-08-29, Shaun: "the defender is impossible to beat if you
+                    // clear the ball out of the middle". A speccy was already exempt
+                    // from the defender's roll but NOT from this bar, so a player who
+                    // mashed the run to full and earned the leap had to immediately
+                    // fill a SECOND bar in the flight or lose the mark he had just
+                    // earned. A speccy is the reward for the clearance; it marks.
+                    float markPower = PowerEnd();
+                    if (humanControlled && !isSpeccy && markPower < markPowerMin) defenderSpoiled = true;
                     bool marked = !defenderSpoiled;
                     _message = defenderSpoiled ? "Spoiled by the defender!" : "MARK!";
                     // 2026-08-21 — real bug: this called the unmirrored
