@@ -215,6 +215,21 @@ namespace AFL.Day1
             _inputDeadline = ideal + perfectWindow;
         }
 
+        // 2026-08-29: the flight cameras were static side-on cuts aimed at a
+        // hand-computed pivotZ - "a static, non-tracking side-on shot", in the
+        // file's own words. Every one of the framing bugs (kick-out off frame,
+        // pivot 8 units short, one shot pointing at the sky) was that sum being
+        // wrong. Aiming at the ball each frame deletes the pivot, and with it the
+        // whole class of bug. Position stays fixed side-on: it is a broadcast
+        // camera, which is what footy on TV looks like.
+        bool _camTrackBall;
+
+        void LateUpdate()
+        {
+            if (_camTrackBall && _mainCam && ball)
+                _mainCam.transform.LookAt(ball.position + Vector3.up * 1.5f);
+        }
+
         void Update()
         {
             if (_resolved)
@@ -1167,6 +1182,7 @@ namespace AFL.Day1
             // together, not just one or the other.
             float pivotZ = contestZ ?? (zDir * (goalZ - 5f));
             _mainCam.transform.position = new Vector3(kickCamSide, kickCamHeight, pivotZ);
+            _camTrackBall = true;
             // Real fix (2026-08-12, same pass as the speccy). LookAt
             // height raised from 1.5 to 3 — with the leap now reaching
             // speccyLeapHeightScale (4) above standing height, framing on
@@ -1194,12 +1210,14 @@ namespace AFL.Day1
             if (!_mainCam) return;
             float pivotZ = (startZ + endZ) * 0.5f;
             _mainCam.transform.position = new Vector3(kickCamSide * 1.6f, kickCamHeight * 1.6f, pivotZ);
+            _camTrackBall = true;
             _mainCam.transform.LookAt(new Vector3(0, 3f, pivotZ));
         }
 
         void CutCameraToDefault()
         {
             if (!_mainCam) return;
+            _camTrackBall = false;
             _mainCam.transform.position = _camDefaultPos;
             _mainCam.transform.rotation = _camDefaultRot;
         }
@@ -1221,6 +1239,7 @@ namespace AFL.Day1
         {
             if (!_mainCam || !forward) return;
             _mainCam.transform.position = forward.position + new Vector3(7f, 3f, 0f);
+            _camTrackBall = false;
             _mainCam.transform.LookAt(forward.position + Vector3.up * 1.2f);
         }
 
@@ -1239,6 +1258,7 @@ namespace AFL.Day1
         {
             if (!_mainCam || !subject) return;
             _mainCam.transform.position = subject.position + new Vector3(side * 7f, 3f, 0f);
+            _camTrackBall = false;
             _mainCam.transform.LookAt(subject.position + Vector3.up * 1.2f);
         }
 
