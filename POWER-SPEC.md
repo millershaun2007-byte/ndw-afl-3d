@@ -164,6 +164,18 @@ Do NOT do these in one session. One per build, played by Shaun before the next.
 
 ## Rules while building this
 
+- **When Shaun says it looks wrong, it is wrong. Do not argue the point.**
+  He can see the screen. You cannot. His report is the only ground truth
+  available about how the game reads, and it outranks any conclusion drawn from
+  the code — including your own change that you are sure is correct.
+  Your job is to find the cause, never to dispute the observation.
+  If your reasoning says he should be happy and he is not, your reasoning is
+  wrong somewhere you have not looked yet.
+  This cost most of 28 Aug: "already done, nothing to apply" to a report of a
+  different unfixed defect; "not possible to fix" to something that was then
+  fixed; a build called broken off a file-size delta when he had just played a
+  full game on it; and "22 August is confirmed" defended repeatedly when he
+  said 19 August and was right.
 - One beat per commit, one commit per build, one build per playtest.
 - Never build on a version Shaun has not played.
 - If a beat needs a second control, the design is wrong — it is one tap.
