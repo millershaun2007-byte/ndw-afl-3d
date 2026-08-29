@@ -827,8 +827,11 @@ namespace AFL.Day1
                     defenderSpoiled = !isSpeccy && (humanControlled
                         ? Mathf.Abs(defenderSpoilT - markTargetT) <= defenderSpoilWindow
                         : defendPressed);
-                    bool marked = markPressed && !defenderSpoiled;
-                    _message = marked ? "MARK!" : (defenderSpoiled ? "Spoiled by the defender!" : "Spilled!");
+                    // 2026-08-29, Shaun: no spill outcome. The contest is marked, or
+                    // spoiled by the defender - nothing in between.
+                    if (!markPressed) defenderSpoiled = true;
+                    bool marked = !defenderSpoiled;
+                    _message = defenderSpoiled ? "Spoiled by the defender!" : "MARK!";
                     // 2026-08-21 — real bug: this called the unmirrored
                     // CutCameraToMarkCloseup(forward) (fixed +7 X
                     // offset). Rarely showed at the centre bounce since
@@ -1143,30 +1146,11 @@ namespace AFL.Day1
                     // Mid-ground spoil: no punch beat here, so release the forward
                     // immediately - otherwise it hangs at peak for the rest of the round.
                     _markHoldReleased = true;
-                    _message = "Spoiled — cleared away!";
-                    // 2026-08-21, Shaun: "the ball going in the air until
-                    // ground level like the kickout just pause then bring
-                    // it down" — same real bug as the kick-out's original
-                    // "floats near the goal post" defect: the ball is
-                    // still frozen at this contest's own peak jump height
-                    // from before the spoil, never reset to a sensible
-                    // resting height. Also reset the camera to the known-
-                    // safe default here — this branch didn't cut to
-                    // anything of its own, so it was inheriting whatever
-                    // pivot the PREVIOUS chain hop's wide kick-shot left
-                    // behind, which is exactly the kind of drift that
-                    // produced a camera pointed at the sky in testing.
+                    // Same removal as the uncontested drop below: no clearer handoff.
+                    _message = "Spoiled!";
                     ball.position = new Vector3(ball.position.x, groundY, ball.position.z);
                     CutCameraToDefault();
                     yield return new WaitForSeconds(catchPause);
-                    if (_roundId != roundAtStart) yield break;
-                    Transform spoilClearer = humanControlled ? rooClearer : crocClearer;
-                    spoilClearer.position = new Vector3(spoilClearer.position.x, spoilClearer.position.y, ball.position.z);
-                    yield return RunToZ(spoilClearer, ball.position.z, 0.4f);
-                    if (_roundId != roundAtStart) yield break;
-                    yield return MarkCatchRoutine(spoilClearer, true);
-                    if (_roundId != roundAtStart) yield break;
-                    yield return ContinueChainOrEnd(!humanControlled, spoilClearer, chainDepth);
                 }
             }
             else
@@ -1178,30 +1162,14 @@ namespace AFL.Day1
                 // time." A genuine uncontested drop (nobody tapped, not an
                 // active spoil) still gets the clearance treatment — the
                 // defending team's clearer takes it.
-                _message = "Cleared away!";
-                Transform clearer = humanControlled ? rooClearer : crocClearer;
-                yield return RunToZ(clearer, forward.position.z, 0.6f);
-                if (_roundId != roundAtStart) yield break;
-                yield return MarkCatchRoutine(clearer, true);
-                if (_roundId != roundAtStart) yield break;
-                // 2026-08-21, Shaun: "the ball going in the air until
-                // ground level like the kickout just pause then bring it
-                // down" — same class of bug as the other two chain
-                // continuations: MarkCatchRoutine leaves the ball at the
-                // clearer's hand (elevated), and nothing resets the
-                // camera before the next contest. Ground it and cut to
-                // the known-safe default before chaining on.
+                // 2026-08-29, Shaun: "STOP THE SPILLED CLEAR AWAY STUFF TAKE THAT OUT OF
+                // THE GAME" / "FROM THE BACK LINE STOP THAT STOPPED CLEARED AWAY". The
+                // clearance walked the ball back out of the back line every time nobody
+                // marked it. Gone - the ball is dead and the passage ends.
+                _message = "Ball is dead.";
                 ball.position = new Vector3(ball.position.x, groundY, ball.position.z);
                 CutCameraToDefault();
                 yield return new WaitForSeconds(catchPause);
-                if (_roundId != roundAtStart) yield break;
-                // 2026-08-21, Shaun: "after some spoils another character
-                // gets the ball goes for a run and kicks the ball into
-                // the forward line exactly the same as what would happen
-                // in the centre" — the clearer doesn't just receive it
-                // and stop, they continue the chain the same way
-                // everything else in this game does.
-                yield return ContinueChainOrEnd(!humanControlled, clearer, chainDepth);
             }
             CutCameraToDefault();
         }
