@@ -434,7 +434,11 @@ namespace AFL.Day1
             // function's own header comment on the reverseDirection bug
             // this replaced).
             float runDir = crocsInPossession ? 1f : -1f;
-            yield return RunStraight(rover, runDir);
+            // 2026-08-29, POWER-SPEC.md step 2. The run was a cutscene; it now
+            // builds the meter, and what the child builds decides the contest it
+            // is about to set up.
+            if (crocsInPossession) PowerBegin(speccyPowerMin);
+            yield return RunStraight(rover, runDir, powered: crocsInPossession);
             // 2026-08-21 — real bug, found by computing the actual
             // numbers rather than guessing again: every chain hop
             // (kick-out's second contest, an out-of-range mark, a spoil
@@ -546,7 +550,12 @@ namespace AFL.Day1
             // own "two numbers that have to agree" trap) — isSpeccy is
             // threaded into KickAway so the ball's arc always matches the
             // forward's real reach for whichever jump fires.
-            bool isSpeccy = Random.value < speccyChance;
+            // The speccy is EARNED now, not rolled. A full bar at the moment of
+            // truth launches the forward; a scrappy one sets up an ordinary
+            // contest. The AI keeps a fair random attempt of its own.
+            bool isSpeccy = crocsInPossession
+                ? PowerEnd() >= speccyPowerMin
+                : Random.value < aiSpeccyChance;
             if (isSpeccy) StartCoroutine(SpeccyLeap(forward, defender, peakZ, arriveByPeak));
             else StartCoroutine(RunToZ(forward, peakZ, arriveByPeak));
             // 2026-08-19, Shaun: "the kickout person's ability — looks
@@ -602,7 +611,10 @@ namespace AFL.Day1
         // instead of a normal timed hop — kept deliberately rare so it
         // reads as a highlight, not the everyday case.
         [Range(0f, 1f)]
-        public float speccyChance = 0.3f;
+        // How full the bar must be at the kick for the forward to go for a
+        // speccy. Its own field, not shared with any other beat.
+        public float speccyPowerMin = 0.85f;
+        public float aiSpeccyChance = 0.3f;
         // Real fix (2026-08-12, Shaun: "he runs up way to close"). The
         // forward's target (peakZ, below) is derived from this — at the
         // old value of 10 it only reached z≈12.8, barely past the centre
@@ -1803,7 +1815,7 @@ namespace AFL.Day1
         // lane so a straight run is always correct. No kick yet (that's
         // the next slice); this ends on an honest placeholder message, not
         // a stall into not-yet-built work.
-        System.Collections.IEnumerator RunStraight(Transform t, float zDir)
+        System.Collections.IEnumerator RunStraight(Transform t, float zDir, bool powered = false)
         {
             if (!t) yield break;
             var animator = t.GetComponentInChildren<Animator>();
@@ -1849,6 +1861,7 @@ namespace AFL.Day1
                 // this used to move at constant speed with an instant
                 // start/stop. SmoothStep gives a real accelerate-then-
                 // decelerate arc for the physical movement instead.
+                if (powered) PowerTick();
                 float smoothF = Mathf.SmoothStep(0f, 1f, f);
                 t.position = Vector3.Lerp(start, end, smoothF);
                 if (ball)
