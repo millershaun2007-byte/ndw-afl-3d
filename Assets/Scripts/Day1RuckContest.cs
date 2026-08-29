@@ -585,8 +585,13 @@ namespace AFL.Day1
             // The speccy is EARNED now, not rolled. A full bar at the moment of
             // truth launches the forward; a scrappy one sets up an ordinary
             // contest. The AI keeps a fair random attempt of its own.
+            // 2026-08-29, Shaun: "the small target got set with the set shot not when
+            // the rover kicked". The shot decided its own difficulty, so the clearance
+            // meant nothing once the ball had left. The rover's power is kept and it
+            // sizes the target later: a big clearance earns an easier shot.
+            _clearancePower = crocsInPossession ? PowerEnd() : Random.value;
             bool isSpeccy = crocsInPossession
-                ? PowerEnd() >= speccyPowerMin
+                ? _clearancePower >= speccyPowerMin
                 : Random.value < aiSpeccyChance;
             if (isSpeccy) StartCoroutine(SpeccyLeap(forward, defender, peakZ, arriveByPeak));
             else StartCoroutine(RunToZ(forward, peakZ, arriveByPeak));
@@ -1380,7 +1385,12 @@ namespace AFL.Day1
         // passage always completes. Set false to restore the power band.
         // How long the window stays open once the bar is full. Deliberately
         // short - Shaun: "very brief".
+        // The window at full power. Scaled by what the rover built at the
+        // clearance: a full clearance gives the whole window, a scrappy one gives
+        // a fraction of it. Set at the CLEARANCE, not at the shot.
         public float shotGoalWindow = 0.35f;
+        public float shotWindowFloor = 0.35f;   // smallest share of the window a bad clearance leaves
+        float _clearancePower = 1f;
         public float shotPowerRiseDuration = 2.5f;
         // 2026-08-29, Shaun: "AND AI IS SET TO BE OF TARGET EVERY SHOT AT GOAL".
         // Its aim is the centre of the green band plus this spread. At 0.18 the
@@ -1645,13 +1655,14 @@ namespace AFL.Day1
                     if (_power >= 0.999f && windowOpenedAt < 0f) windowOpenedAt = riseEl;
                     if (windowOpenedAt >= 0f)
                     {
+                        float thisWindow = shotGoalWindow * Mathf.Lerp(shotWindowFloor, 1f, _clearancePower);
                         if (Day1Input.TapDown)
                         {
                             tapped = true;
-                            kickedInWindow = (riseEl - windowOpenedAt) <= shotGoalWindow;
+                            kickedInWindow = (riseEl - windowOpenedAt) <= thisWindow;
                             break;
                         }
-                        if (riseEl - windowOpenedAt > shotGoalWindow) { tapped = true; kickedInWindow = false; break; }
+                        if (riseEl - windowOpenedAt > thisWindow) { tapped = true; kickedInWindow = false; break; }
                     }
                 }
                 else if (riseEl >= aiTapAt)
