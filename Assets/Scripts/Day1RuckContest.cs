@@ -711,6 +711,8 @@ namespace AFL.Day1
             return _power;
         }
 
+        // How full the bar must be to take the mark. Its own field.
+        public float markPowerMin = 0.55f;
         public float markPerfectWindow = 0.25f;
         public float markReactionCompensation = 0.17f;
         // 2026-08-19, Shaun: "the defender can jump and spoil the normal
@@ -811,7 +813,15 @@ namespace AFL.Day1
             // silly". Defending was a single tap that meant 'any tap at all', which
             // is why it read as arbitrary. It is the same meter as everything else
             // now, resolved in the air while both players are up.
-            if (!humanControlled) PowerBegin(spoilPowerMin);
+            // 2026-08-29, Shaun: "the defender spoils every time... its a movie type
+            // scenario". Both sides of this contest are on the meter now, and both
+            // start it fresh - without this the attacker inherited whatever power was
+            // left over from the run. The mark was the one beat still asking for a
+            // single precise tap, in a different grammar, moments after the run had
+            // you mashing; and any miss was reported as the DEFENDER spoiling, so the
+            // player's own failure wore the opposition's name. The AI's spoil roll is
+            // only 36% on its own.
+            PowerBegin(humanControlled ? markPowerMin : spoilPowerMin);
             // Real fix (2026-08-12, Shaun: "the kick is now way of the
             // forward and defender for the mark scene"). Not a physics
             // change — the wide kick-cut camera just made a mismatch
@@ -918,11 +928,8 @@ namespace AFL.Day1
                 // in this branch (the AI-mark check above doesn't read
                 // it), so this is a genuine human spoil attempt, not a
                 // second thing fighting over the same tap.
-                if (!humanControlled)
-                {
-                    PowerTick();
-                    if (Day1Input.TapDown) defendPressed = true;
-                }
+                PowerTick();
+                if (!humanControlled && Day1Input.TapDown) defendPressed = true;
 
                 if (!markResolved && el >= markDeadline)
                 {
@@ -952,7 +959,9 @@ namespace AFL.Day1
                     // value that made the ruck unwinnable. The leap now has to land inside
                     // markPerfectWindow of the ball arriving, or the defender takes it. The
                     // AI is graded by the same window on its own tap.
-                    if (!(markPressed && markBestErr <= markPerfectWindow)) defenderSpoiled = true;
+                    // Marked on the bar. A miss is now a dropped mark, not the
+                    // defender being credited with a spoil he did not earn.
+                    if (humanControlled && PowerEnd() < markPowerMin) defenderSpoiled = true;
                     bool marked = !defenderSpoiled;
                     _message = defenderSpoiled ? "Spoiled by the defender!" : "MARK!";
                     // 2026-08-21 — real bug: this called the unmirrored
