@@ -168,7 +168,7 @@ namespace AFL.Day1
             // now: mash while the ball is in the air, past the bot's effort and the
             // tap is yours.
             PowerBegin(Random.Range(ruckPowerMin, ruckPowerMax));
-            TapLabel("JUMP");
+            TapLabel("TAP");
             _ballFrozen = false;
             _hopFired = false;
             _resolved = false;
@@ -1062,7 +1062,7 @@ namespace AFL.Day1
                 float shotRangeZ = goalZ - kickDistance;
                 if (Mathf.Abs(ball.position.z) >= shotRangeZ)
                 {
-                    yield return TakeShotAtGoal(forward, zDir, humanControlled);
+                    yield return TakeShotAtGoal(forward, zDir, humanControlled, chainDepth);
                 }
                 else
                 {
@@ -1588,7 +1588,7 @@ namespace AFL.Day1
             // direction override needed or correct here.
             yield return TapBallAway(crocsInPossession: !humanControlled, kickerOverride: defender, chainDepth: chainDepth + 1);
         }
-        System.Collections.IEnumerator TakeShotAtGoal(Transform kicker, float zDir, bool humanControlled)
+        System.Collections.IEnumerator TakeShotAtGoal(Transform kicker, float zDir, bool humanControlled, int chainDepth = 0)
         {
             if (!kicker || !ball) yield break;
             int roundAtStart = _roundId;
@@ -1640,7 +1640,7 @@ namespace AFL.Day1
             // red/green band AND the power meter - and telling the player to wait
             // for green while the logic wanted a mash to full and a tap in the
             // window. One bar, one instruction.
-            if (humanControlled) TapLabel("KICK");
+            if (humanControlled) TapLabel("GOAL");
             _message = humanControlled ? "MASH IT — then tap on FULL!" : "Lining up the kick...";
             _shotBarVisible = !humanControlled;   // the AI keeps the old band; the human uses the meter
             _shotBarValue = 0f;
@@ -1702,6 +1702,17 @@ namespace AFL.Day1
             // The human goals by kicking inside the window at full power; the AI
             // still shoots on its own band.
             if (humanControlled) PowerEnd();
+            // 2026-08-29, Shaun: "when they get a chance to goal it will goal,
+            // then if they are to late they just kick it and it leaves it up to
+            // the forward". Missing the window is not a behind - the kick simply
+            // goes long and the forward has to deal with it. One button, and each
+            // miss hands the decision on rather than ending the passage.
+            if (humanControlled && !kickedInWindow)
+            {
+                _message = "Too late — kicks it long to the forward!";
+                yield return ContinueChainOrEnd(humanControlled, kicker, chainDepth);
+                yield break;
+            }
             bool isGoal = humanControlled
                 ? kickedInWindow
                 : (tapped && tapValue >= shotPowerGreenMin && tapValue <= shotPowerGreenMax);
