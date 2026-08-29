@@ -105,6 +105,9 @@ namespace AFL.Day1
         float _bestHumanErr;
         float _targetT;
         float _botPressT;
+        // The bot's effort in the ruck, as a share of the bar. Its own fields.
+        public float ruckPowerMin = 0.60f;
+        public float ruckPowerMax = 0.95f;
         float _hopFireAt;
         float _inputDeadline;
         bool _ballFrozen;
@@ -160,6 +163,10 @@ namespace AFL.Day1
             _t = 0f;
             _humanPressed = false;
             _bestHumanErr = float.MaxValue;
+            // 2026-08-29, POWER-SPEC. The ruck is the same meter as everything else
+            // now: mash while the ball is in the air, past the bot's effort and the
+            // tap is yours.
+            PowerBegin(Random.Range(ruckPowerMin, ruckPowerMax));
             _ballFrozen = false;
             _hopFired = false;
             _resolved = false;
@@ -278,6 +285,7 @@ namespace AFL.Day1
             // instead of hurting, matching how a kid actually plays.
             if (Day1Input.TapDown)
             {
+                PowerTick();
                 _humanPressed = true;
                 float err = Mathf.Abs(_t - _targetT);
                 if (err < _bestHumanErr) _bestHumanErr = err;
@@ -320,13 +328,15 @@ namespace AFL.Day1
         void ResolveAndContest()
         {
             float ideal = throwDuration * 0.5f;
-            float humanErr = _humanPressed ? _bestHumanErr : 999f;
-            float botErr = Mathf.Abs(_botPressT - ideal);
-            bool crocWins = _humanPressed && humanErr <= botErr;
+            // Won on the bar, not on a timing comparison against the bot. Green on
+            // the traffic light means the bar is already past its effort, so a bar
+            // driven into green wins the tap by construction.
+            float ruckPower = PowerEnd();
+            bool crocWins = ruckPower >= _powerTarget;
 
-            _message = _humanPressed
-                ? (crocWins ? "Crocs win the tap!" : "Roos win the tap!")
-                : "Too slow — Roos win the tap!";
+            _message = crocWins ? "Crocs win the tap!"
+                      : ruckPower > 0f ? "Roos win the tap!"
+                                       : "Too slow — Roos win the tap!";
 
             Hop(crocVisual, crocWins);
             Hop(rooVisual, !crocWins);
