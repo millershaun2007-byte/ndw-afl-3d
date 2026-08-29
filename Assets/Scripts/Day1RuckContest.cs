@@ -824,7 +824,12 @@ namespace AFL.Day1
                     // still deny it on a normal (non-speccy) mark. Human
                     // defends with a real tap (any tap counts, same rule
                     // as marking); AI defends via the randomized roll.
-                    defenderSpoiled = !isSpeccy && (humanControlled
+                    // 2026-08-29, Shaun: "need to make onle place you can spoil is defence
+                    // and every single one goes through the points". A spoil is only on when
+                    // the contest is inside the goal area - anywhere else the defender cannot
+                    // punch it through, so the contest is simply a mark.
+                    bool inDefence = Mathf.Abs(ball.position.z) >= goalZ - kickDistance;
+                    defenderSpoiled = inDefence && !isSpeccy && (humanControlled
                         ? Mathf.Abs(defenderSpoilT - markTargetT) <= defenderSpoilWindow
                         : defendPressed);
                     // 2026-08-29, Shaun: no spill outcome. The contest is marked, or
@@ -932,7 +937,9 @@ namespace AFL.Day1
                 // same as any other loose ball — it gets the same simple
                 // clearance handoff as an uncontested drop, not another
                 // goal-line sequence.
-                if (chainDepth == 0)
+                // Every spoil goes through the points now - a spoil can only happen in
+                // defence, so there is no mid-ground case left to treat differently.
+                if (true)
                 {
                 // 2026-08-19, Shaun: "the defender spoiled the ball
                 // through the points, no second play, just a straight
