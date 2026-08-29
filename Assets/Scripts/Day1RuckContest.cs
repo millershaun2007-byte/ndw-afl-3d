@@ -620,6 +620,47 @@ namespace AFL.Day1
         // acceptance window (well above the project's own "nothing
         // tighter than 0.25s" floor) once
         // markReactionCompensation is folded in.
+        // 2026-08-29, POWER-SPEC.md step 1. ONE meter for the whole game: tap to
+        // build power, power decides the outcome, stop tapping and it drains.
+        //
+        // Deliberately wired to NO beat in this commit. The spec's step 1 is a
+        // rename with no behaviour change, but the ruck meter it describes lives
+        // on main and does not exist on this line at all - porting it here would
+        // turn the ruck from a single timed tap into a mash, which is a real
+        // gameplay change. So the meter is built and drawn, and the first beat to
+        // read it is the mark, in step 2.
+        public float powerTapGain = 0.10f;
+        public float powerDecayPerSec = 0.06f;
+        float _power;
+        float _powerTarget;
+        bool _powerBarVisible;
+        int _powerLastSerial;
+
+        void PowerBegin(float target)
+        {
+            _power = 0f;
+            _powerTarget = target;
+            _powerLastSerial = Day1Input.TapSerial;
+            _powerBarVisible = true;
+        }
+
+        // Call once per frame while a power beat is running.
+        void PowerTick()
+        {
+            if (Day1Input.TapSerial != _powerLastSerial)
+            {
+                _powerLastSerial = Day1Input.TapSerial;
+                _power = Mathf.Clamp01(_power + powerTapGain);
+            }
+            _power = Mathf.Max(0f, _power - powerDecayPerSec * Time.deltaTime);
+        }
+
+        float PowerEnd()
+        {
+            _powerBarVisible = false;
+            return _power;
+        }
+
         public float markPerfectWindow = 0.25f;
         public float markReactionCompensation = 0.17f;
         // 2026-08-19, Shaun: "the defender can jump and spoil the normal
@@ -2186,6 +2227,31 @@ namespace AFL.Day1
 
                 GUI.color = Color.white;
             }
+
+            // 2026-08-29, POWER-SPEC.md step 1. ONE bar for every beat that asks
+            // for it - red below the band, amber closing, green inside it. The
+            // white line is the target. Drawn from _power, which nothing sets yet.
+            if (_powerBarVisible)
+            {
+                int pW = Mathf.RoundToInt(Screen.width * 0.6f);
+                int pH = Mathf.RoundToInt(Screen.height * 0.055f);
+                int pX = (Screen.width - pW) / 2;
+                int pY = Mathf.RoundToInt(Screen.height * 0.72f);
+
+                GUI.color = new Color(0f, 0f, 0f, 0.55f);
+                GUI.DrawTexture(new Rect(pX - 6, pY - 6, pW + 12, pH + 12), Texture2D.whiteTexture);
+                GUI.color = new Color(0.14f, 0.14f, 0.18f, 0.92f);
+                GUI.DrawTexture(new Rect(pX, pY, pW, pH), Texture2D.whiteTexture);
+
+                float ratio = _powerTarget > 0f ? _power / _powerTarget : 0f;
+                GUI.color = ratio >= 1f    ? new Color(0.25f, 0.85f, 0.30f, 0.95f)
+                          : ratio >= 0.60f ? new Color(0.95f, 0.75f, 0.15f, 0.95f)
+                                           : new Color(0.85f, 0.25f, 0.25f, 0.95f);
+                GUI.DrawTexture(new Rect(pX, pY, pW * Mathf.Clamp01(_power), pH), Texture2D.whiteTexture);
+
+                GUI.color = Color.white;
+                GUI.DrawTexture(new Rect(pX + pW * Mathf.Clamp01(_powerTarget) - 2, pY - 8, 4, pH + 16), Texture2D.whiteTexture);
+            }
         }
     }
 
@@ -2193,19 +2259,34 @@ namespace AFL.Day1
     // six-player game's input) — one button only, per issue #6.
     public static class Day1Input
     {
+        // 2026-08-29, POWER-SPEC.md step 1. The meter counts DISTINCT taps, so a
+        // tap needs an identity, not just a flag - hence TapSerial.
+        //
+        // The flag was also cleared unconditionally in LateUpdate, but SendMessage
+        // from the template lands at an arbitrary point in the frame, so a tap
+        // arriving after LateUpdate was wiped before anything could see it. Taps
+        // are peeked now and expire only once a frame old.
         public static bool TouchTapDown;
-        // 2026-08-19, Shaun: relying on "remember to press spacebar, not
-        // click" was fragile for real testing — a direct mouse/touch
-        // click on the canvas is the natural interaction and should just
-        // work, not only the external app-bridge (TapPressed) or the
-        // spacebar fallback.
-        public static bool TapDown => Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0) || TouchTapDown;
-        internal static void ClearOneShot() { TouchTapDown = false; }
+        public static int TapSerial;
+        static int _tapFrame = -999;
+        public static void RegisterTap() { TouchTapDown = true; _tapFrame = Time.frameCount; TapSerial++; }
+        static bool TapAlive => TouchTapDown && (Time.frameCount - _tapFrame) <= 2;
+        internal static void ExpireStaleTap()
+        {
+            if (TouchTapDown && Time.frameCount - _tapFrame >= 1) TouchTapDown = false;
+        }
+        public static bool TapDown => Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0) || TapAlive;
     }
 
     public class Day1TouchBridge : MonoBehaviour
     {
-        void LateUpdate() { Day1Input.ClearOneShot(); }
-        public void TapPressed(string _) { Day1Input.TouchTapDown = true; }
+        // Keyboard and mouse bump the same serial the touch button does, or the
+        // meter cannot be driven on desktop at all.
+        void Update()
+        {
+            if (Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0)) Day1Input.RegisterTap();
+        }
+        void LateUpdate() { Day1Input.ExpireStaleTap(); }
+        public void TapPressed(string _) { Day1Input.RegisterTap(); }
     }
 }
