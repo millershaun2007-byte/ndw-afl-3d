@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Runtime.InteropServices;
 
 namespace AFL.Day1
 {
@@ -167,6 +168,7 @@ namespace AFL.Day1
             // now: mash while the ball is in the air, past the bot's effort and the
             // tap is yours.
             PowerBegin(Random.Range(ruckPowerMin, ruckPowerMax));
+            TapLabel("JUMP");
             _ballFrozen = false;
             _hopFired = false;
             _resolved = false;
@@ -242,6 +244,21 @@ namespace AFL.Day1
         {
             if (_camTrackBall && _mainCam && ball)
                 _mainCam.transform.LookAt(ball.position + Vector3.up * 1.5f);
+        }
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+        [DllImport("__Internal")] static extern void SetTapLabel(string s);
+#endif
+        string _tapLabel = "";
+        // One button, relabelled per beat - JUMP at the ruck, MARK in a contest,
+        // KICK at the shot, RUN on a run. Same control, same gesture.
+        void TapLabel(string s)
+        {
+            if (s == _tapLabel) return;
+            _tapLabel = s;
+#if UNITY_WEBGL && !UNITY_EDITOR
+            try { SetTapLabel(s); } catch { }
+#endif
         }
 
         void Update()
@@ -470,6 +487,7 @@ namespace AFL.Day1
             // builds the meter, and what the child builds decides the contest it
             // is about to set up.
             if (crocsInPossession) PowerBegin(speccyPowerMin);
+            if (crocsInPossession) TapLabel("RUN");
             yield return RunStraight(rover, runDir, powered: crocsInPossession);
             // 2026-08-21 — real bug, found by computing the actual
             // numbers rather than guessing again: every chain hop
@@ -616,6 +634,7 @@ namespace AFL.Day1
             // kick) finishes, not from the moment the ruck contest alone
             // resolved. _sequenceComplete is what actually unblocks the
             // reset (see Update) — this timestamp alone doesn't.
+            TapLabel("TAP");
             _resolvedAt = Time.time;
             _sequenceComplete = true;
         }
@@ -827,6 +846,7 @@ namespace AFL.Day1
             // player's own failure wore the opposition's name. The AI's spoil roll is
             // only 36% on its own.
             PowerBegin(humanControlled ? markPowerMin : spoilPowerMin);
+            TapLabel(humanControlled ? "MARK" : "SPOIL");
             // Real fix (2026-08-12, Shaun: "the kick is now way of the
             // forward and defender for the mark scene"). Not a physics
             // change — the wide kick-cut camera just made a mismatch
@@ -1620,6 +1640,7 @@ namespace AFL.Day1
             // red/green band AND the power meter - and telling the player to wait
             // for green while the logic wanted a mash to full and a tap in the
             // window. One bar, one instruction.
+            if (humanControlled) TapLabel("KICK");
             _message = humanControlled ? "MASH IT — then tap on FULL!" : "Lining up the kick...";
             _shotBarVisible = !humanControlled;   // the AI keeps the old band; the human uses the meter
             _shotBarValue = 0f;
