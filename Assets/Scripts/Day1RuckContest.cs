@@ -1376,6 +1376,9 @@ namespace AFL.Day1
         // range, GREEN only in the scoring window near the top, red
         // again if it runs all the way out — tap once, whenever you
         // choose, ideally while it's green.
+        // TEMPORARY, at Shaun's request 2026-08-29: every shot is a goal, so the
+        // passage always completes. Set false to restore the power band.
+        public bool alwaysGoal = true;
         public float shotPowerRiseDuration = 2.5f;
         // 2026-08-29, Shaun: "AND AI IS SET TO BE OF TARGET EVERY SHOT AT GOAL".
         // Its aim is the centre of the green band plus this spread. At 0.18 the
@@ -1633,7 +1636,11 @@ namespace AFL.Day1
             if (!tapped) tapValue = 1f;
             _shotBarVisible = false;
 
-            bool isGoal = tapped && tapValue >= shotPowerGreenMin && tapValue <= shotPowerGreenMax;
+            // 2026-08-29, Shaun: "for now 100 percent the rover kicks a goal".
+            // A deliberate temporary: every shot goes through, so the passage
+            // always completes and the flow can be judged end to end without the
+            // shot deciding anything. One field, one line to put back.
+            bool isGoal = alwaysGoal || (tapped && tapValue >= shotPowerGreenMin && tapValue <= shotPowerGreenMax);
             _message = isGoal ? "GOAL!" : "Off target!";
 
             Vector3 kickStart = ball.position;
