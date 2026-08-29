@@ -250,6 +250,11 @@ namespace AFL.Day1
         [DllImport("__Internal")] static extern void SetTapLabel(string s);
 #endif
         string _tapLabel = "";
+        // 2026-08-29, Shaun: nothing on screen said which team you are or what
+        // your job is this passage. You always play the Crocs; what changes is
+        // whether you are attacking or defending, and that was only ever hinted
+        // at by the button label.
+        bool _humanAttacking = true;
         // One button, relabelled per beat - JUMP at the ruck, MARK in a contest,
         // KICK at the shot, RUN on a run. Same control, same gesture.
         void TapLabel(string s)
@@ -482,6 +487,7 @@ namespace AFL.Day1
             // or of how this particular call got here (see this
             // function's own header comment on the reverseDirection bug
             // this replaced).
+            _humanAttacking = crocsInPossession;
             float runDir = crocsInPossession ? 1f : -1f;
             // 2026-08-29, POWER-SPEC.md step 2. The run was a cutscene; it now
             // builds the meter, and what the child builds decides the contest it
@@ -971,9 +977,10 @@ namespace AFL.Day1
                     // the contest is inside the goal area - anywhere else the defender cannot
                     // punch it through, so the contest is simply a mark.
                     bool inDefence = Mathf.Abs(ball.position.z) >= goalZ - kickDistance;
-                    defenderSpoiled = inDefence && !isSpeccy && (humanControlled
-                        ? Mathf.Abs(defenderSpoilT - markTargetT) <= defenderSpoilWindow
-                        : PowerEnd() >= spoilPowerMin);
+                    // 2026-08-29, Shaun: "the forward then competes for the mark at this
+                    // stage the spoil is being deleted again". No spoil in this contest -
+                    // the forward either marks it or it sails over his head.
+                    defenderSpoiled = false;
                     // 2026-08-29, Shaun: no spill outcome. The contest is marked, or
                     // spoiled by the defender - nothing in between.
                     // 2026-08-29, Shaun: "SOMETIMES THE PLAYERS NEED TO BE ABLE TO MARK THIS
@@ -993,9 +1000,9 @@ namespace AFL.Day1
                     // fill a SECOND bar in the flight or lose the mark he had just
                     // earned. A speccy is the reward for the clearance; it marks.
                     float markPower = PowerEnd();
-                    if (humanControlled && !isSpeccy && markPower < markPowerMin) defenderSpoiled = true;
-                    bool marked = !defenderSpoiled;
-                    _message = defenderSpoiled ? "Spoiled by the defender!" : "MARK!";
+                    bool overHisHead = humanControlled && !isSpeccy && markPower < markPowerMin;
+                    bool marked = !overHisHead;
+                    _message = overHisHead ? "Over his head!" : "MARK!";
                     // 2026-08-21 — real bug: this called the unmirrored
                     // CutCameraToMarkCloseup(forward) (fixed +7 X
                     // offset). Rarely showed at the centre bounce since
@@ -1245,7 +1252,12 @@ namespace AFL.Day1
             // (goalZ) so both the ball's landing and the posts are framed
             // together, not just one or the other.
             float pivotZ = contestZ ?? (zDir * (goalZ - 5f));
-            _mainCam.transform.position = new Vector3(kickCamSide, kickCamHeight, pivotZ);
+            // 2026-08-29, Shaun: "you need to train the cameras for this". Every
+            // shot sits on the SAME side of the ground now, so left and right mean
+            // the same thing all game and the Crocs always attack the same way on
+            // screen. Cameras that jumped sides were a large part of why it was
+            // unclear which team you were or where you were going.
+            _mainCam.transform.position = new Vector3(Mathf.Abs(kickCamSide), kickCamHeight, pivotZ);
             _camTrackBall = true;
             // Real fix (2026-08-12, same pass as the speccy). LookAt
             // height raised from 1.5 to 3 — with the leap now reaching
@@ -1273,7 +1285,7 @@ namespace AFL.Day1
         {
             if (!_mainCam) return;
             float pivotZ = (startZ + endZ) * 0.5f;
-            _mainCam.transform.position = new Vector3(kickCamSide * 1.6f, kickCamHeight * 1.6f, pivotZ);
+            _mainCam.transform.position = new Vector3(Mathf.Abs(kickCamSide) * 1.6f, kickCamHeight * 1.6f, pivotZ);
             _camTrackBall = true;
             _mainCam.transform.LookAt(new Vector3(0, 3f, pivotZ));
         }
@@ -2398,6 +2410,22 @@ namespace AFL.Day1
             // 2026-08-29, POWER-SPEC.md step 1. ONE bar for every beat that asks
             // for it - red below the band, amber closing, green inside it. The
             // white line is the target. Drawn from _power, which nothing sets yet.
+            // Always on: your team, and your job right now.
+            {
+                var teamStyle = new GUIStyle(GUI.skin.label)
+                {
+                    fontSize = Mathf.RoundToInt(Screen.height * 0.035f),
+                    fontStyle = FontStyle.Bold,
+                    alignment = TextAnchor.MiddleLeft
+                };
+                teamStyle.normal.textColor = _humanAttacking
+                    ? new Color(0.35f, 0.9f, 0.4f) : new Color(0.95f, 0.72f, 0.25f);
+                GUI.Label(new Rect(Screen.width * 0.03f, Screen.height * 0.20f,
+                                   Screen.width * 0.6f, Screen.height * 0.07f),
+                          _humanAttacking ? "YOU: CROCS  —  ATTACKING" : "YOU: CROCS  —  DEFENDING",
+                          teamStyle);
+            }
+
             if (_powerBarVisible)
             {
                 int pW = Mathf.RoundToInt(Screen.width * 0.6f);
