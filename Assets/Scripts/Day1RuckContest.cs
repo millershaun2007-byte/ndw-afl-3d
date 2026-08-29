@@ -683,6 +683,9 @@ namespace AFL.Day1
         // know the timing, the defender is guessing), the spoil is the
         // occasional exception, not a coin flip. Both tunable in one
         // place if the balance needs adjusting after playtesting.
+        // How full the bar must be to punch it clear. Its own field - not shared
+        // with the ruck, the mark or the shot.
+        public float spoilPowerMin = 0.70f;
         public float defenderSpoilWindow = 0.20f;
         public float defenderSpoilJitter = 0.55f;
         // 2026-08-21, Shaun: "after some spoils another character gets
@@ -765,6 +768,12 @@ namespace AFL.Day1
             bool markResolved = false;
             bool defenderSpoiled = false;
             bool defendPressed = false;
+            // 2026-08-29, POWER-SPEC.md step 3, Shaun: "maybe the spoiled by defender
+            // can be more like the ruck tap and in a contest so it dosnt look so
+            // silly". Defending was a single tap that meant 'any tap at all', which
+            // is why it read as arbitrary. It is the same meter as everything else
+            // now, resolved in the air while both players are up.
+            if (!humanControlled) PowerBegin(spoilPowerMin);
             // Real fix (2026-08-12, Shaun: "the kick is now way of the
             // forward and defender for the mark scene"). Not a physics
             // change — the wide kick-cut camera just made a mismatch
@@ -871,7 +880,11 @@ namespace AFL.Day1
                 // in this branch (the AI-mark check above doesn't read
                 // it), so this is a genuine human spoil attempt, not a
                 // second thing fighting over the same tap.
-                if (!humanControlled && Day1Input.TapDown) defendPressed = true;
+                if (!humanControlled)
+                {
+                    PowerTick();
+                    if (Day1Input.TapDown) defendPressed = true;
+                }
 
                 if (!markResolved && el >= markDeadline)
                 {
@@ -890,7 +903,7 @@ namespace AFL.Day1
                     bool inDefence = Mathf.Abs(ball.position.z) >= goalZ - kickDistance;
                     defenderSpoiled = inDefence && !isSpeccy && (humanControlled
                         ? Mathf.Abs(defenderSpoilT - markTargetT) <= defenderSpoilWindow
-                        : defendPressed);
+                        : PowerEnd() >= spoilPowerMin);
                     // 2026-08-29, Shaun: no spill outcome. The contest is marked, or
                     // spoiled by the defender - nothing in between.
                     // 2026-08-29, Shaun: "SOMETIMES THE PLAYERS NEED TO BE ABLE TO MARK THIS
