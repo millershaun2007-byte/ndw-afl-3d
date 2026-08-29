@@ -1606,8 +1606,12 @@ namespace AFL.Day1
             // player chooses. Never hangs: running all the way out
             // without a tap is a real, deliberate miss (max power,
             // way off), not a stall.
-            _message = humanControlled ? "Tap when it turns GREEN!" : "Lining up the kick...";
-            _shotBarVisible = humanControlled;
+            // 2026-08-29: the human's shot was drawing BOTH bars - the old
+            // red/green band AND the power meter - and telling the player to wait
+            // for green while the logic wanted a mash to full and a tap in the
+            // window. One bar, one instruction.
+            _message = humanControlled ? "MASH IT — then tap on FULL!" : "Lining up the kick...";
+            _shotBarVisible = !humanControlled;   // the AI keeps the old band; the human uses the meter
             _shotBarValue = 0f;
             bool tapped = false;
             float tapValue = 0f;
