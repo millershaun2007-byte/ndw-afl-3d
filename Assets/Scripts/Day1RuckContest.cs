@@ -673,8 +673,14 @@ namespace AFL.Day1
         // turn the ruck from a single timed tap into a mash, which is a real
         // gameplay change. So the meter is built and drawn, and the first beat to
         // read it is the mark, in step 2.
-        public float powerTapGain = 0.10f;
-        public float powerDecayPerSec = 0.06f;
+        // 2026-08-29, Shaun: "the power meter does not give the person a chance
+        // to get to full power". Correct, and it was arithmetic: at 0.10 a gain,
+        // the 1.5s run gave ~6 taps = 0.51 against a speccy threshold of 0.85,
+        // and the 1.2s mark flight gave ~0.41 against a spoil threshold of 0.70.
+        // Neither was reachable at any tapping speed. At 0.22 a sustained mash
+        // fills the bar inside the shortest beat, and stopping still drains it.
+        public float powerTapGain = 0.22f;
+        public float powerDecayPerSec = 0.10f;
         float _power;
         float _powerTarget;
         bool _powerBarVisible;
