@@ -2422,7 +2422,13 @@ namespace AFL.Day1
                     ? new Color(0.35f, 0.9f, 0.4f) : new Color(0.95f, 0.72f, 0.25f);
                 GUI.Label(new Rect(Screen.width * 0.03f, Screen.height * 0.20f,
                                    Screen.width * 0.6f, Screen.height * 0.07f),
-                          _humanAttacking ? "YOU: CROCS  —  ATTACKING" : "YOU: CROCS  —  DEFENDING",
+                          // 2026-08-29, Shaun: "but there are 2 ends of the ground".
+                          // Both ends look alike from a side-on camera, so the arrow
+                          // is what tells you which way YOUR goal is. It can only be
+                          // stated because the camera is now pinned to one side:
+                          // camera on +X looking in, so screen-right = +Z, and the
+                          // Crocs attack +Z. Crocs go RIGHT, at both ends, always.
+                          _humanAttacking ? "CROCS ATTACK \u2192   ATTACKING" : "CROCS ATTACK \u2192   DEFENDING",
                           teamStyle);
             }
 
