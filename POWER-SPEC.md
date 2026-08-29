@@ -45,7 +45,7 @@ it. One meter, one bar, one thing to learn in the first ten seconds.
 | **mark** | spilled | normal mark | **speccy** |
 | **spoil** | missed, mark stands | fist gets a piece | clean punch through |
 | **ruck** | bot wins the tap | scrappy | clean tap to your rover |
-| **run** | caught | held up | **breaks clear** |
+| **run** | caught → shank → **ground contest** | — | **breaks clear**, clean kick |
 | **shot** | dribbles short | on line | clean goal |
 
 Same bar, same gesture, five different outcomes. A child learns it once.
@@ -56,14 +56,45 @@ Shaun: *"with running and kicking they have a power as well they run a certain
 speed they get clear they dont go that speed they get caught opposite mechanism
 no tackling though."*
 
-Power = **speed**. Fill it and the runner breaks clear; let it drain and the
-chaser closes and the kick falls short. It is the same tap doing the same thing,
-just with the pressure coming from behind instead of from above.
+Power = **speed**. Fill it and the runner breaks clear and kicks cleanly. Let it
+drain and the chaser closes. Same tap, same rule, pressure from behind instead
+of from above.
 
-**No tackling.** Getting caught means the kick falls short — the
-`ShortKickLanding` outcome that already exists. Nobody gets brought down.
-Removing the tackle was a deliberate call (`159d386`, "fewer moving parts") and
-it stays removed.
+**Two outcomes only. There is no middle.** Shaun, 29 Aug: *"if they get caught
+they shank the kick and the kick goes to ground and its a ground contest no
+being held up or tackling."*
+
+| | |
+|---|---|
+| **clear** | clean kick → the normal mark contest |
+| **caught** | **shank** → ball hits the ground → **ground contest** |
+
+No tackle, no held-ball, no stoppage, nobody brought down. Getting caught costs
+you the *quality of the kick*, not possession — and what it produces is another
+contest, not a whistle. Removing the tackle was a deliberate call (`159d386`,
+"fewer moving parts") and it stays removed.
+
+### The ground contest
+
+This is the beat Shaun asked for separately — *"a section where players race for
+the ball get it and kick it"* — and it belongs here, as the failure state of a
+run. That gives it a reason to exist inside the grammar instead of being a
+bolt-on.
+
+Ball on the deck, both players converge, **same power rule decides who wins it.**
+Winner gathers and kicks; play continues.
+
+It is also the safest beat in the game to build. Everything that went wrong on
+28 Aug was two characters in midair whose animations had to agree inside a tenth
+of a second. This is two characters on the ground, running in straight lines,
+over a second or more — one body per motion, nothing to synchronise. That class
+of beat has never broken in this project.
+
+**What exists already:** the shank itself was built on 23 Aug (`9368bb2`, "as
+its own clean, self-contained beat") with `ShortKickLanding` and
+`shortKickUndershoot`, then reverted. It is a port, not new work. The ground
+contest is genuinely new — an old ground-ball *state* was removed on 19 Aug
+(`7e4cc61`) but it was never a contest.
 
 This also fixes the biggest dead patch in the game: `RunStraight` currently
 contains **zero input checks**, so every running section is a cutscene.
@@ -119,11 +150,16 @@ Do NOT do these in one session. One per build, played by Shaun before the next.
 2. **Mark.** Power decides spilled / normal / speccy. Delete `speccyChance`.
    This is the one that proves the whole idea.
 3. **Spoil.** Power decides missed / partial / clean.
-4. **Run.** Power = speed, drain = the chaser closes.
-5. **Shot.** Replace the rising band with the same meter.
-6. **Overcommit.** Add the top-end penalty across all of them at once, since it
+4. **Run.** Power = speed, drain = the chaser closes. Clear → clean kick.
+   Caught → shank. Port `ShortKickLanding` back from `9368bb2` rather than
+   rewriting it; the shank lands the ball on the deck and stops there for now.
+5. **Ground contest.** The beat the shank feeds into. Build it standing alone
+   first — two players race, power decides, winner gathers and kicks — and let
+   Shaun play it on its own before wiring it to the shank.
+6. **Shot.** Replace the rising band with the same meter.
+7. **Overcommit.** Add the top-end penalty across all of them at once, since it
    only makes sense as one rule.
-7. **Clearance carry-over** — the centre-clearance power feeding the next
+8. **Clearance carry-over** — the centre-clearance power feeding the next
    contest. Last, because it depends on 2 and 4 both being right.
 
 ## Rules while building this
