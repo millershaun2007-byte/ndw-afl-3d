@@ -11,12 +11,21 @@ then the next commit.
 
 ## Corrections to the original brief
 
+Both authors verified these independently in separate trees.
+
 | original said | actually |
 |---|---|
-| "Cinemachine 3.1.7 is already in Packages/manifest.json" | **NOT INSTALLED.** Zero lines use it because the package is absent. Install it first. `link.xml`/`[Preserve]` only matters once it is in. |
-| "ArmAngleCheck.cs already does this measurement — use it" | **Does not exist.** `CheckHandBone.cs` only logs whether a `RightHand` bone is found. The peak-frame hand-height measurement has to be written. |
-| `HopRoutine` at 1941, `SpoilPunchRoutine` at 1909 | **1974** and **1942**. The file has moved ~33 lines. |
-| three routines hand-pose | **five** `animator.enabled = false` sites: 1661, 1950, 2007, 2050, 2126 |
+| "Cinemachine 3.1.7 is already in Packages/manifest.json" | **NOT INSTALLED** — absent from `manifest.json` and `packages-lock.json`. See "Installing Cinemachine" below; it is its own commit, not a free note. |
+| "ArmAngleCheck.cs already does this measurement — use it" | **Does not exist.** The name comes from stale comments in `Day1RuckContest.cs` that cite a tool since deleted. `CheckHandBone.cs` is NOT a substitute — read it: it loads three glbs, reports whether a bone named `RightHand` exists, prints hand-like bone names if not. Zero measurement. |
+| line numbers | **Revision-specific and already stale.** Name symbols, never lines. |
+| three routines hand-pose | **five** `animator.enabled = false` sites |
+
+### Why the line numbers disagreed
+
+Committed `approved-plus-controls` is 2229 lines with `HopRoutine` at 1941. A
+working tree carrying the uncommitted mark-tiers edit is 2262 lines with it at
+1974 — a 33-line offset from one uncommitted change. Both readings were correct
+for their own tree. That is the whole argument for naming symbols.
 
 ## What is actually there
 
@@ -83,9 +92,18 @@ put hands at world y≈1.48; the ball peaks at `groundY + peakHeight = 1.0 + 2.1
 rendering and measuring, not guessing. **If the hand stops meeting the ball
 after this change, the clip is wrong, not those numbers.**
 
-## The camera
+## Installing Cinemachine — do this as its own commit, first
 
-Install Cinemachine first — it is not in this project.
+It is not in this project. Add `com.unity.cinemachine` and **pin 3.1.7**.
+
+**Do not accept 3.1.4** — it fails to compile on Unity 6:
+`CinemachineStoryboard.cs:204`, three `CS0619`s. Install, confirm a clean
+compile, and commit that alone before writing any camera code. Debugging a
+version fight and a new clip in the same commit is how a day disappears.
+
+`link.xml` / `[Preserve]` matters from that commit onward, not before.
+
+## The camera
 
 Construction, from `ndw-basketball-3d/Assets/Editor/MainBuildScript.cs:216-232`:
 
@@ -119,8 +137,16 @@ The ball sits frozen at 3.1. Print the hand bone's **world Y at the clip's peak
 frame**. If it is not ~2.95-3.0 the tap will not read, whatever a screenshot
 looks like.
 
-`ArmAngleCheck.cs` does NOT exist — this measurement has to be written. Do not
-substitute "no console errors" or "the render looks fine" for it.
+`ArmAngleCheck.cs` does NOT exist — **this measurement tool has to be written.**
+Instantiate the rig, sample the clip at its peak frame, print the hand bone's
+world Y.
+
+`CheckHandBone.cs` is the template for the instantiate-and-find-bone part ONLY.
+It is also still the right tool for the separate "verify the bone hierarchy
+before writing curves" step above — just not for this one.
+
+Do not substitute "no console errors" or "the render looks fine" for the
+measurement.
 
 ## Related
 
