@@ -840,7 +840,15 @@ namespace AFL.Day1
                         : defendPressed);
                     // 2026-08-29, Shaun: no spill outcome. The contest is marked, or
                     // spoiled by the defender - nothing in between.
-                    if (!markPressed) defenderSpoiled = true;
+                    // 2026-08-29, Shaun: "SOMETIMES THE PLAYERS NEED TO BE ABLE TO MARK THIS
+                    // GAME CURRENTLY IS VERY AUTOMATED HUMAN IS BARELY EVEN PLAYING".
+                    //
+                    // markBestErr was recorded on every tap and then never read by anything,
+                    // so ANY tap marked and the timing was irrelevant - the same discarded
+                    // value that made the ruck unwinnable. The leap now has to land inside
+                    // markPerfectWindow of the ball arriving, or the defender takes it. The
+                    // AI is graded by the same window on its own tap.
+                    if (!(markPressed && markBestErr <= markPerfectWindow)) defenderSpoiled = true;
                     bool marked = !defenderSpoiled;
                     _message = defenderSpoiled ? "Spoiled by the defender!" : "MARK!";
                     // 2026-08-21 — real bug: this called the unmirrored
