@@ -224,6 +224,13 @@ namespace AFL.Day1
         // camera, which is what footy on TV looks like.
         bool _camTrackBall;
 
+        // KNOWN, PREDICTED, NOT YET SEEN: the ball is deliberately held still at
+        // a few points - parked at the peak of a mark contest, frozen at the top
+        // of the shot arc. A camera aiming at it every frame will sit and stare
+        // through those holds in a way the fixed pivot never did. If that reads
+        // badly, the fix is easing the aim (SmoothDamp / Slerp toward the target
+        // rotation) rather than snapping to it - NOT a rethink of tracking, and
+        // not a return to computing a pivot.
         void LateUpdate()
         {
             if (_camTrackBall && _mainCam && ball)
