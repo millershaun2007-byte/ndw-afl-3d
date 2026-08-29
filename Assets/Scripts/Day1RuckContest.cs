@@ -1378,7 +1378,9 @@ namespace AFL.Day1
         // choose, ideally while it's green.
         // TEMPORARY, at Shaun's request 2026-08-29: every shot is a goal, so the
         // passage always completes. Set false to restore the power band.
-        public bool alwaysGoal = true;
+        // How long the window stays open once the bar is full. Deliberately
+        // short - Shaun: "very brief".
+        public float shotGoalWindow = 0.35f;
         public float shotPowerRiseDuration = 2.5f;
         // 2026-08-29, Shaun: "AND AI IS SET TO BE OF TARGET EVERY SHOT AT GOAL".
         // Its aim is the centre of the green band plus this spread. At 0.18 the
@@ -1609,6 +1611,9 @@ namespace AFL.Day1
             _shotBarValue = 0f;
             bool tapped = false;
             float tapValue = 0f;
+            float windowOpenedAt = -1f;
+            bool kickedInWindow = false;
+            if (humanControlled) PowerBegin(1f);
             float riseEl = 0f;
             // 2026-08-19, Shaun: "the human kicks at goal for themself and
             // ai" — when Roo (the AI's side) is the one shooting, the
@@ -1625,7 +1630,25 @@ namespace AFL.Day1
                 _shotBarValue = Mathf.Clamp01(riseEl / shotPowerRiseDuration);
                 if (humanControlled)
                 {
-                    if (Day1Input.TapDown) { tapped = true; tapValue = _shotBarValue; break; }
+                    // 2026-08-29, Shaun: "when the bar goes full they have a brief
+                    // window they have to kick the ball for a goal very brief".
+                    // Mash it to full, and full opens a short window - tap inside
+                    // that and it goes through. The shot is the same meter as
+                    // every other beat now, with the timing on the release rather
+                    // than on a rising band.
+                    PowerTick();
+                    _shotBarValue = _power;
+                    if (_power >= 0.999f && windowOpenedAt < 0f) windowOpenedAt = riseEl;
+                    if (windowOpenedAt >= 0f)
+                    {
+                        if (Day1Input.TapDown)
+                        {
+                            tapped = true;
+                            kickedInWindow = (riseEl - windowOpenedAt) <= shotGoalWindow;
+                            break;
+                        }
+                        if (riseEl - windowOpenedAt > shotGoalWindow) { tapped = true; kickedInWindow = false; break; }
+                    }
                 }
                 else if (riseEl >= aiTapAt)
                 {
@@ -1640,7 +1663,12 @@ namespace AFL.Day1
             // A deliberate temporary: every shot goes through, so the passage
             // always completes and the flow can be judged end to end without the
             // shot deciding anything. One field, one line to put back.
-            bool isGoal = alwaysGoal || (tapped && tapValue >= shotPowerGreenMin && tapValue <= shotPowerGreenMax);
+            // The human goals by kicking inside the window at full power; the AI
+            // still shoots on its own band.
+            if (humanControlled) PowerEnd();
+            bool isGoal = humanControlled
+                ? kickedInWindow
+                : (tapped && tapValue >= shotPowerGreenMin && tapValue <= shotPowerGreenMax);
             _message = isGoal ? "GOAL!" : "Off target!";
 
             Vector3 kickStart = ball.position;
