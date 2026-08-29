@@ -47,3 +47,6 @@ sysinfo.txt
 crashlytics-build.properties
 
 .DS_Store
+
+# Deploy marker for the commit gate - local state, not shared
+.claude/last-deploy
