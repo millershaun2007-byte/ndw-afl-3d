@@ -44,11 +44,6 @@ namespace AFL.Day1
         // forward/defender characters (see MainBuildScript's setup for
         // why: "add 2 more characters so it does work like the centre").
         public Transform rooClearer;
-        // 2026-08-28, Shaun: "need correct amount of players even if you add more
-        // would make sense to add 2 more". Dedicated runners, one per side, so
-        // the handball goes to a real spare rather than borrowing the clearer.
-        public Transform crocRunner;
-        public Transform rooRunner;
         public Transform crocClearer;
         public Transform ball;
 
@@ -116,8 +111,6 @@ namespace AFL.Day1
         bool _hopFired;
         bool _resolved;
         bool _sequenceComplete;
-        // How long a passage may sit without completing before it is force-restarted.
-        public float stallTimeout = 6f;
         float _resolvedAt;
         string _message = "Centre bounce...";
         GUIStyle _style;
@@ -171,8 +164,6 @@ namespace AFL.Day1
             _hopFired = false;
             _resolved = false;
             _sequenceComplete = false;
-            _steerOffsetX = 0f;
-            _runCaught = false;
             foreach (var mover in _movers)
             {
                 var (pos, rot) = _moverStarts[mover];
@@ -235,23 +226,7 @@ namespace AFL.Day1
                 // reset now waits on _sequenceComplete (set at the true end
                 // of TapBallAway) rather than a timer that predates the run
                 // existing at all.
-                if (_sequenceComplete && Time.time - _resolvedAt > 1.2f) { BeginThrow(); return; }
-                // 2026-08-28, Shaun: "after of target and it sits near the boundary
-                // line its still frozen".
-                //
-                // A passage that never sets _sequenceComplete leaves the match
-                // stopped forever, and there is no recovery from it - the player
-                // just watches everyone stand still. Every exit in TapBallAway
-                // does set it, so a survivor here means a coroutine died partway
-                // (a real exception, or a beat that returned by a route not yet
-                // found). Rather than leave the game bricked, restart the passage
-                // and say so, which also names the beat it happened in.
-                if (!_sequenceComplete && Time.time - _resolvedAt > stallTimeout)
-                {
-                    Debug.LogWarning("[stall] sequence never completed after \"" + _message
-                        + "\" - restarting the passage");
-                    _sequenceComplete = true;
-                }
+                if (_sequenceComplete && Time.time - _resolvedAt > 1.2f) BeginThrow();
                 return;
             }
 
@@ -459,36 +434,7 @@ namespace AFL.Day1
             // function's own header comment on the reverseDirection bug
             // this replaced).
             float runDir = crocsInPossession ? 1f : -1f;
-            // Centre clearance only - not a kick-out or a chain hop, which have
-            // their own shape. kickerOverride is null exactly when this came
-            // from the ruck.
-            if (chainDepth == 0 && !kickerOverride)
-            {
-                float roll = Random.value;
-                if (roll < centreBurstChance)
-                {
-                    yield return BurstBounceSnap(rover, runDir, crocsInPossession);
-                    if (_runCaught) _message = "Caught holding the ball — turnover!";
-                    // 2026-08-28, Shaun: "of target and the players just stand still".
-                    // These two scenes returned straight out of TapBallAway, skipping
-                    // the _sequenceComplete assignment at the end of it - and Update()
-                    // only starts the next centre bounce once that is set. So after a
-                    // snap the match simply stopped, forever. Both paths now end the
-                    // sequence the same way the normal one does.
-                    _resolvedAt = Time.time;
-                    _sequenceComplete = true;
-                    yield break;
-                }
-                if (roll < centreBurstChance + handballChance)
-                {
-                    yield return HandballAndRun(rover, runDir, crocsInPossession);
-                    if (_runCaught) _message = "Caught holding the ball — turnover!";
-                    _resolvedAt = Time.time;
-                    _sequenceComplete = true;
-                    yield break;
-                }
-            }
-            yield return RunStraight(rover, runDir, steerable: crocsInPossession);
+            yield return RunStraight(rover, runDir);
             // 2026-08-21 — real bug, found by computing the actual
             // numbers rather than guessing again: every chain hop
             // (kick-out's second contest, an out-of-range mark, a spoil
@@ -1255,34 +1201,7 @@ namespace AFL.Day1
                 // in the centre" — the clearer doesn't just receive it
                 // and stop, they continue the chain the same way
                 // everything else in this game does.
-                // 2026-08-28, Shaun: "easier way out of defence could be for when
-                // it says clear it away the defender runs with the ball and kicks
-                // it forwards to aoid it going back to middle". ContinueChainOrEnd
-                // hands off through TapBallAway, which brings the ball to the
-                // team's rover in the middle - the ball went backwards. The
-                // clearer now runs it out himself and kicks forward, and it lands
-                // in a contest because that is what KickAway stages.
-                if (chainDepth < maxChainDepth)
-                {
-                    bool clearCrocs = !humanControlled;
-                    float clearDir = clearCrocs ? 1f : -1f;
-                    // 2026-08-28, Shaun: "the cleared away stuff the players are facing
-                    // the wrong way they need to start running in the corect direction".
-                    // RunToZ above turned him back toward the ball, so he began the
-                    // clearance still facing his own goal. Face the way he is about to
-                    // run before he starts.
-                    clearer.rotation = Quaternion.Euler(0f, clearDir > 0f ? 0f : 180f, 0f);
-                    yield return RunStraight(clearer, clearDir);
-                    if (_roundId != roundAtStart) yield break;
-                    yield return KickAway(clearer, clearDir,
-                        clearCrocs ? crocForward : rooForward,
-                        clearCrocs ? rooDefender : crocDefender,
-                        false, clearCrocs, chainDepth + 1);
-                }
-                else
-                {
-                    _message = "Time's up — turnover!";
-                }
+                yield return ContinueChainOrEnd(!humanControlled, clearer, chainDepth);
             }
             CutCameraToDefault();
         }
@@ -1472,10 +1391,6 @@ namespace AFL.Day1
         // again if it runs all the way out — tap once, whenever you
         // choose, ideally while it's green.
         public float shotPowerRiseDuration = 2.5f;
-        // 2026-08-28, Shaun: "probaly have a really quick power button to get the
-        // snap goal". A snap is taken at pace - the bar sweeps in well under half
-        // the time a set shot gets, so it has to be hit sharply.
-        public float snapPowerRiseDuration = 1.0f;
         public float shotPowerGreenMin = 0.62f;
         public float shotPowerGreenMax = 0.85f;
         bool _shotBarVisible;
@@ -1504,22 +1419,13 @@ namespace AFL.Day1
         // shot's result and the next round's centre bounce.
         public float shotStartPause = 0.5f;
 
-        System.Collections.IEnumerator TakeShotAtGoal(Transform kicker, float zDir, bool humanControlled, bool onTheRun = false)
+        System.Collections.IEnumerator TakeShotAtGoal(Transform kicker, float zDir, bool humanControlled)
         {
             if (!kicker || !ball) yield break;
             int roundAtStart = _roundId;
-            // 2026-08-28, Shaun: "no they dont go back and have a shot after
-            // bouncing it they need to kick it on the run". onTheRun skips the
-            // whole set-shot ritual below - the walk back, the pause, the run-in
-            // - and goes straight to the kick. Everything after it (ball to the
-            // boot, the power bar, the flight, the scoring) is shared, so a snap
-            // is graded exactly like any other kick.
-            if (!onTheRun)
-            {
-                _message = "Lines up for goal...";
-                yield return new WaitForSeconds(shotStartPause);
-                if (_roundId != roundAtStart) yield break;
-            }
+            _message = "Lines up for goal...";
+            yield return new WaitForSeconds(shotStartPause);
+            if (_roundId != roundAtStart) yield break;
 
             // Real fix (2026-08-12, Shaun: "it not really evident that the
             // player is able to go back and take there kick"). This used
@@ -1532,16 +1438,13 @@ namespace AFL.Day1
             // here instead, before the step-back starts, makes the whole
             // back-then-in run visible in one continuous, stable shot.
             CutCameraForKick(zDir);
-            if (!onTheRun)
-            {
-                float markSpotZ = kicker.position.z;
-                yield return RunToZ(kicker, markSpotZ - zDir * shotStepBackDistance, shotStepBackDuration);
-                if (_roundId != roundAtStart) yield break;
-                yield return new WaitForSeconds(shotSetupPause);
-                if (_roundId != roundAtStart) yield break;
-                yield return RunToZ(kicker, markSpotZ, shotRunInDuration);
-                if (_roundId != roundAtStart) yield break;
-            }
+            float markSpotZ = kicker.position.z;
+            yield return RunToZ(kicker, markSpotZ - zDir * shotStepBackDistance, shotStepBackDuration);
+            if (_roundId != roundAtStart) yield break;
+            yield return new WaitForSeconds(shotSetupPause);
+            if (_roundId != roundAtStart) yield break;
+            yield return RunToZ(kicker, markSpotZ, shotRunInDuration);
+            if (_roundId != roundAtStart) yield break;
 
             var rightHand = FindDeepChild(kicker, "RightHand");
             var rightFoot = FindDeepChild(kicker, "RightFoot");
@@ -1578,12 +1481,11 @@ namespace AFL.Day1
             // rather than either an auto-goal or a required human tap.
             float aiTapAt = humanControlled ? 0f
                 : Mathf.Clamp01(((shotPowerGreenMin + shotPowerGreenMax) / 2f) + Random.Range(-0.18f, 0.18f)) * shotPowerRiseDuration;
-            float powerRise = onTheRun ? snapPowerRiseDuration : shotPowerRiseDuration;
-            while (riseEl < powerRise)
+            while (riseEl < shotPowerRiseDuration)
             {
                 if (_roundId != roundAtStart) { _shotBarVisible = false; yield break; }
                 riseEl += Time.deltaTime;
-                _shotBarValue = Mathf.Clamp01(riseEl / powerRise);
+                _shotBarValue = Mathf.Clamp01(riseEl / shotPowerRiseDuration);
                 if (humanControlled)
                 {
                     if (Day1Input.TapDown) { tapped = true; tapValue = _shotBarValue; break; }
@@ -1803,23 +1705,6 @@ namespace AFL.Day1
         // and Walk at half that (3.5) — this run now moves at ~4 units/sec,
         // matching Walk-ish pace rather than a full Run blend.
         public float runDistance = 6f;
-        // How fast the carrier drifts across the ground while steering, and how
-        // far from the corridor he is allowed to get. Wide enough to change the
-        // angle of the shot, not so wide he ends up off the field.
-        public float steerSpeed = 4.5f;
-        public float steerLimit = 7f;
-        // 2026-08-28: every running section was a cutscene - RunStraight had no
-        // tap in it anywhere, so a large share of a 3-minute quarter was spent
-        // watching. Real footy makes you bounce it every 15 metres, so the run
-        // becomes a rhythm: the call comes, you tap, miss it and you are caught.
-        // Same single verb the rest of the game uses, one body, on the ground.
-        public float bounceWindow = 0.75f;
-        public float bouncePromptAt = 0.35f;
-        bool _runCaught;
-        float _bounceDip;
-        // Carried across the legs of a run so steering accumulates, and reset at
-        // the start of each round rather than each leg.
-        float _steerOffsetX;
         public float runDuration = 1.5f;
 
         // Day 4, first slice (2026-08-12, Shaun: "what kind of happens
@@ -1859,143 +1744,7 @@ namespace AFL.Day1
         // lane so a straight run is always correct. No kick yet (that's
         // the next slice); this ends on an honest placeholder message, not
         // a stall into not-yet-built work.
-        // 2026-08-28, Shaun: "add a scene in the centre were the rover sprints
-        // out of the centre has a bounce and kicks a snap on the run."
-        //
-        // Reuses RunStraight for both legs rather than duplicating its animator
-        // and hand-tracking work - it already drives the Speed parameter and
-        // pins the ball to the real hand bones, and a second copy of that would
-        // drift out of sync exactly like every other duplicate in this file has.
-        public float centreBurstChance = 0.45f;
-        public float bounceDuration = 0.55f;
-
-        // 2026-08-28, Shaun: "when the palyer in the middle grabs it they handball
-        // to a player running past who keeps running and then goes in and kicks a
-        // goal".
-        //
-        // This also avoids the real pull back toward the centre: the rovers are
-        // spawned at z = +-1.8, the centre bounce itself, and TapBallAway lerps
-        // the ball to whoever is carrying it. Handballing forward to the clearer
-        // (spawned deep, at z = +-13) moves the ball AWAY from the middle instead
-        // of dragging it back there.
-        // 2026-08-28, Shaun: "now we need the rovers to be able to chase out of
-        // the middle". The opposition rover pursues the carrier rather than
-        // standing at the bounce watching him go - he trails behind and slightly
-        // to the side, so the break out of the centre reads as escaping someone.
-        // Deliberately no tackle: this is pursuit, which Shaun asked for
-        // explicitly ("have the rover chase with no tackle").
-        public float chaseTrail = 2.2f;
-        public float chaseSpeed = 5.2f;
-        public float handballChance = 0.35f;
-
-        System.Collections.IEnumerator ChaseCarrier(Transform chaser, Transform carrier, float zDir)
-        {
-            if (!chaser || !carrier) yield break;
-            int roundAtStart = _roundId;
-            var animator = chaser.GetComponentInChildren<Animator>();
-            while (_roundId == roundAtStart)
-            {
-                Vector3 target = new Vector3(
-                    carrier.position.x + (zDir > 0f ? 0.9f : -0.9f),
-                    chaser.position.y,
-                    carrier.position.z - zDir * chaseTrail);
-                chaser.position = Vector3.MoveTowards(chaser.position, target, chaseSpeed * Time.deltaTime);
-                chaser.rotation = Quaternion.Euler(0f, zDir > 0f ? 0f : 180f, 0f);
-                if (animator) animator.SetFloat("Speed", 5.5f);
-                yield return null;
-            }
-            if (animator) animator.SetFloat("Speed", 0f);
-        }
-        public float handballDuration = 0.4f;
-
-        System.Collections.IEnumerator HandballAndRun(Transform rover, float zDir, bool humanControlled)
-        {
-            Transform runner = zDir > 0f ? crocRunner : rooRunner;
-            if (!runner) runner = zDir > 0f ? crocClearer : rooClearer;   // pre-runner scenes
-            if (!rover || !runner || !ball) yield break;
-            int roundAtStart = _roundId;
-
-            // The runner comes past, ahead of the rover, going the same way.
-            runner.position = new Vector3(runner.position.x, runner.position.y, rover.position.z + zDir * 3.5f);
-            runner.rotation = Quaternion.Euler(0f, zDir > 0f ? 0f : 180f, 0f);
-
-            CutCameraToDefault();
-            StartCoroutine(ChaseCarrier(zDir > 0f ? rooRover : crocRover, rover, zDir));
-            _message = "Handballs to a runner!";
-            var fromHand = FindDeepChild(rover, "RightHand");
-            var toHand = FindDeepChild(runner, "LeftHand");
-            Vector3 from = fromHand ? fromHand.position : rover.position + Vector3.up;
-            float el = 0f;
-            while (el < handballDuration)
-            {
-                if (_roundId != roundAtStart) yield break;
-                el += Time.deltaTime;
-                float f = Mathf.Clamp01(el / handballDuration);
-                Vector3 to = toHand ? toHand.position : runner.position + Vector3.up;
-                // flat and quick, the way a handball travels
-                ball.position = Vector3.Lerp(from, to, f) + Vector3.up * Mathf.Sin(f * Mathf.PI) * 0.25f;
-                yield return null;
-            }
-
-            // 2026-08-28, Shaun: "thats more of a long shopt" - two legs left him
-            // kicking from well out. A third carries him into range.
-            _message = "Runs it into the forward line!";
-            for (int leg = 0; leg < 3; leg++)
-            {
-                yield return RunStraight(runner, zDir, steerable: zDir > 0f);
-                if (_roundId != roundAtStart || _runCaught) yield break;
-            }
-            yield return PlayOnSnap(runner, zDir, humanControlled);
-        }
-
-        System.Collections.IEnumerator BurstBounceSnap(Transform rover, float zDir, bool humanControlled)
-        {
-            if (!rover || !ball) yield break;
-            int roundAtStart = _roundId;
-
-            // 2026-08-28, Shaun: "far out now the camera problems again". These
-            // scenes are entered straight from the ruck contest's own close
-            // framing, so without this they inherit that pivot and the run plays
-            // out off-frame - the same drift the chain hops were fixed for.
-            CutCameraToDefault();
-            StartCoroutine(ChaseCarrier(zDir > 0f ? rooRover : crocRover, rover, zDir));
-            _message = "Breaks out of the centre!";
-            yield return RunStraight(rover, zDir, steerable: zDir > 0f);
-            if (_roundId != roundAtStart) yield break;
-
-            // The bounce: ball out of the hands, down to ground, back up.
-            _message = "Bounces it...";
-            var hand = FindDeepChild(rover, "RightHand");
-            Vector3 from = hand ? hand.position : rover.position + Vector3.up;
-            float el = 0f;
-            while (el < bounceDuration)
-            {
-                if (_roundId != roundAtStart) yield break;
-                el += Time.deltaTime;
-                float f = Mathf.Clamp01(el / bounceDuration);
-                Vector3 h = hand ? hand.position : rover.position + Vector3.up;
-                // down to the turf and back to the hand, travelling with the run
-                float dip = Mathf.Sin(f * Mathf.PI);
-                Vector3 at = Vector3.Lerp(from, h, f);
-                ball.position = new Vector3(at.x, Mathf.Lerp(at.y, groundY, dip), at.z + zDir * dip * 0.8f);
-                yield return null;
-            }
-
-            yield return RunStraight(rover, zDir, steerable: zDir > 0f);
-            if (_roundId != roundAtStart || _runCaught) yield break;
-            yield return PlayOnSnap(rover, zDir, humanControlled);
-        }
-
-        System.Collections.IEnumerator PlayOnSnap(Transform kicker, float zDir, bool humanControlled)
-        {
-            if (!kicker || !ball) yield break;
-            int roundAtStart = _roundId;
-            _message = "Snaps for goal on the run!";
-            CutCameraForKick(zDir, kicker.position.z);
-            yield return TakeShotAtGoal(kicker, zDir, humanControlled, onTheRun: true);
-        }
-
-        System.Collections.IEnumerator RunStraight(Transform t, float zDir, bool steerable = false)
+        System.Collections.IEnumerator RunStraight(Transform t, float zDir)
         {
             if (!t) yield break;
             var animator = t.GetComponentInChildren<Animator>();
@@ -2032,8 +1781,6 @@ namespace AFL.Day1
             // over 4.55 so it actually reaches and holds Walk instead of
             // brushing past the threshold for one frame.
             const float animSpeed = 5.5f;
-            bool bouncePrompted = false, bounceDone = false;
-            float promptedAt = 0f, bouncedAt = -99f;
             float el = 0f;
             while (el < runDuration)
             {
@@ -2044,47 +1791,7 @@ namespace AFL.Day1
                 // start/stop. SmoothStep gives a real accelerate-then-
                 // decelerate arc for the physical movement instead.
                 float smoothF = Mathf.SmoothStep(0f, 1f, f);
-                Vector3 along = Vector3.Lerp(start, end, smoothF);
-                if (steerable && !bounceDone)
-                {
-                    if (!bouncePrompted && f >= bouncePromptAt)
-                    {
-                        bouncePrompted = true;
-                        promptedAt = el;
-                        _message = "BOUNCE IT!";
-                    }
-                    if (bouncePrompted)
-                    {
-                        if (Day1Input.TapDown)
-                        {
-                            bounceDone = true;
-                            bouncedAt = el;
-                            _message = "Bounces it!";
-                        }
-                        else if (el - promptedAt > bounceWindow)
-                        {
-                            _runCaught = true;
-                            _message = "Caught holding the ball!";
-                            break;
-                        }
-                    }
-                }
-                if (steerable)
-                {
-                    // Steering only moves him ACROSS the ground; the run itself
-                    // still carries him forward on its own curve. Accumulated so
-                    // it persists into the kick, which is the point - where you
-                    // end up decides the angle you shoot from.
-                    _steerOffsetX = Mathf.Clamp(
-                        _steerOffsetX + Day1Input.SteerAxis * steerSpeed * Time.deltaTime,
-                        -steerLimit, steerLimit);
-                }
-                along.x += _steerOffsetX;
-                t.position = along;
-                // A real bounce: the ball drops to the turf just ahead of him and
-                // comes back up, over about a third of a second.
-                _bounceDip = (bounceDone && el - bouncedAt < 0.35f)
-                    ? Mathf.Sin(Mathf.Clamp01((el - bouncedAt) / 0.35f) * Mathf.PI) : 0f;
+                t.position = Vector3.Lerp(start, end, smoothF);
                 if (ball)
                 {
                     // Real fix (2026-08-12, Shaun: "arms moving when it
@@ -2096,13 +1803,9 @@ namespace AFL.Day1
                     // hand individually swings a lot. Tracking one hand
                     // (tucked-under-the-arm carry, not a two-handed cradle)
                     // actually shows the motion instead of averaging it away.
-                    Vector3 carried = rightHand ? rightHand.position
-                        : (leftHand ? leftHand.position : t.position + Vector3.up * 1.1f);
-                    // A real bounce: down to the turf just ahead of him, and back up.
-                    if (_bounceDip > 0f)
-                        carried = new Vector3(carried.x, Mathf.Lerp(carried.y, groundY, _bounceDip),
-                            carried.z + zDir * _bounceDip * 0.7f);
-                    ball.position = carried;
+                    if (rightHand) ball.position = rightHand.position;
+                    else if (leftHand) ball.position = leftHand.position;
+                    else ball.position = t.position + Vector3.up * 1.1f;
                 }
                 if (animator)
                 {
@@ -2472,51 +2175,19 @@ namespace AFL.Day1
     // six-player game's input) — one button only, per issue #6.
     public static class Day1Input
     {
-        // -1 left, +1 right, 0 straight. Set by the WebGL template while a
-        // pointer is held, and by the keyboard for desktop play.
-        public static float Steer;
-        public static float SteerAxis
-        {
-            get
-            {
-                float k = 0f;
-                if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) k -= 1f;
-                if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) k += 1f;
-                return Mathf.Clamp(k + Steer, -1f, 1f);
-            }
-        }
         public static bool TouchTapDown;
         // 2026-08-19, Shaun: relying on "remember to press spacebar, not
         // click" was fragile for real testing — a direct mouse/touch
         // click on the canvas is the natural interaction and should just
         // work, not only the external app-bridge (TapPressed) or the
         // spacebar fallback.
-        // 2026-08-28: a touch tap used to be cleared unconditionally in LateUpdate,
-        // but SendMessage from the template lands at an arbitrary point in the
-        // frame - so a tap arriving after LateUpdate was wiped before any coroutine
-        // could see it. Taps are peeked now, and expire only once a frame old.
-        static int _tapFrame = -999;
-        public static void RegisterTap() { TouchTapDown = true; _tapFrame = Time.frameCount; }
-        static bool TapAlive => TouchTapDown && (Time.frameCount - _tapFrame) <= 2;
-        internal static void ExpireStaleTap()
-        {
-            if (TouchTapDown && Time.frameCount - _tapFrame >= 1) TouchTapDown = false;
-        }
-        public static bool TapDown => Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0) || TapAlive;
+        public static bool TapDown => Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0) || TouchTapDown;
+        internal static void ClearOneShot() { TouchTapDown = false; }
     }
 
     public class Day1TouchBridge : MonoBehaviour
     {
-        void LateUpdate() { Day1Input.ExpireStaleTap(); }
-        public void TapPressed(string _) { Day1Input.RegisterTap(); }
-        // 2026-08-28, Shaun: "i wonder if we can make that button like unicorn
-        // surf 3d and you can easily stear it to move around a bit more could
-        // actually chnage the dynamics of the game". Same scheme that game uses:
-        // hold the left or right half of the screen to steer, tap to act.
-        public void SetSteer(string v)
-        {
-            float f;
-            Day1Input.Steer = float.TryParse(v, out f) ? Mathf.Clamp(f, -1f, 1f) : 0f;
-        }
+        void LateUpdate() { Day1Input.ClearOneShot(); }
+        public void TapPressed(string _) { Day1Input.TouchTapDown = true; }
     }
 }
