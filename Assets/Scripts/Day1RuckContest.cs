@@ -1252,6 +1252,12 @@ namespace AFL.Day1
         // again if it runs all the way out — tap once, whenever you
         // choose, ideally while it's green.
         public float shotPowerRiseDuration = 2.5f;
+        // 2026-08-29, Shaun: "AND AI IS SET TO BE OF TARGET EVERY SHOT AT GOAL".
+        // Its aim is the centre of the green band plus this spread. At 0.18 the
+        // roll ran 0.555-0.915 against a green band of 0.62-0.85, so about a
+        // third of its shots landed outside it. Tightened so the AI is plainly
+        // capable of goaling; raise it again if it becomes too accurate.
+        public float aiShotSpread = 0.09f;
         public float shotPowerGreenMin = 0.62f;
         public float shotPowerGreenMax = 0.85f;
         bool _shotBarVisible;
@@ -1483,7 +1489,7 @@ namespace AFL.Day1
             // green zone with real spread, a fair but beatable AI shot
             // rather than either an auto-goal or a required human tap.
             float aiTapAt = humanControlled ? 0f
-                : Mathf.Clamp01(((shotPowerGreenMin + shotPowerGreenMax) / 2f) + Random.Range(-0.18f, 0.18f)) * shotPowerRiseDuration;
+                : Mathf.Clamp01(((shotPowerGreenMin + shotPowerGreenMax) / 2f) + Random.Range(-aiShotSpread, aiShotSpread)) * shotPowerRiseDuration;
             while (riseEl < shotPowerRiseDuration)
             {
                 if (_roundId != roundAtStart) { _shotBarVisible = false; yield break; }
