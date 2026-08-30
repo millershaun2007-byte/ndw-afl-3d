@@ -228,13 +228,11 @@ public static class MainBuildScript
         // untuned (1f) — Dragon/Lion both needed real measured correction
         // after first render, expect the same here once tested live.
         EnsureAnimatorController("FootyMia", "Assets/Models/FootyMiaRiggedAI");
-        // The smaller Mia, in the goal square at the Croc end (Croc attacks
-        // +Z, so this is their full-forward's spot) — 18, two units in from
-        // the goal line. She is the handball outlet: she leads up out of there
-        // to meet it, rather than waiting deep for a 20-unit pass nobody on
-        // this ground could kick. Still doubles as the Roo clearer for a
-        // mid-ground spoil, which is only a transform reference, not a team.
-        var rooClearerGo = BuildStaticCharacter("MiaGoalSquare", "Assets/Models/FootyMiaRiggedAI", new Vector3(0f, 0, 18f), Quaternion.identity, miaRuckScale);
+        // THE MIA THE TALL MIA REPLACED IN THE RUCK. Shaun, 2026-08-31:
+        // "whoever Mia replaced in the ruck to be in the centre receiving the
+        // handball." Just outside the centre circle (radius 3) on the Croc
+        // side, so she is right there for a handball out of the middle.
+        var rooClearerGo = BuildStaticCharacter("MiaOutlet", "Assets/Models/FootyMiaRiggedAI", new Vector3(-3.4f, 0, 1.4f), Quaternion.identity, miaRuckScale);
         // 2026-08-19, Shaun: "if the other summer looks better its a white
         // tiny ghost in this game... noticed this in the safari game but
         // couldn't be bothered saying anything" — a real, pre-existing
@@ -359,11 +357,11 @@ public static class MainBuildScript
         contest.rooClearer = rooClearerGo.transform;
         contest.crocClearer = crocClearerGo.transform;
         contest.ball = ball.transform;
-        // The two who used to just stand there — now the handball outlets out
-        // of the middle (see Day1RuckContest.HandballClearance). Mia at z=+13
-        // is in Croc's attacking half, the Lion at z=-5 in Roo's.
-        contest.spareMia = rooClearerGo.transform;
-        contest.spareLion = rooForwardGo.transform;
+        // The handball outlets out of the middle (Day1RuckContest.
+        // HandballClearance): the Mia who lost the ruck spot to the taller
+        // Mia, and the Lion who used to stand at z=-5 doing nothing.
+        contest.crocOutlet = rooClearerGo.transform;
+        contest.rooOutlet = rooForwardGo.transform;
         contest.cams = cams;
 
         // THE SCOREBOARD AND THE FINALS SERIES (2026-08-31). Owns the clock

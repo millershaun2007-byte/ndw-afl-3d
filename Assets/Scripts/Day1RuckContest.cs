@@ -46,14 +46,17 @@ namespace AFL.Day1
         public Transform rooClearer;
         public Transform crocClearer;
         public Transform ball;
-        // THE TWO WHO NEVER MOVED. Shaun, 2026-08-31: "there are 2 mias on the
-        // ground and a spare lion... currently they don't move so this will
-        // involve them in the play." Both already stand in their own team's
-        // attacking half, so each is the natural target for a handball out of
-        // the middle: Mia at z=+13 is in Croc's forward half, the Lion at z=-5
-        // is in Roo's. Existing players, no new ones — FIELD-DIMENSIONS.md.
-        public Transform spareMia;
-        public Transform spareLion;
+        // THE HANDBALL OUTLETS. Shaun, 2026-08-31: "whoever Mia replaced in
+        // the ruck to be in the centre receiving the handball, and the random
+        // lion also receives the handball, so everyone is used in the game."
+        //
+        // The Croc is the one Mia took the ruck spot from — he is back, just
+        // outside the centre circle. The Lion at z=-5 was standing in Roo's
+        // attacking half doing nothing. One outlet each, and between these two
+        // and the goal-square Mia below, every player on the ground now has a
+        // job in some passage.
+        public Transform crocOutlet;
+        public Transform rooOutlet;
 
         // Real fix (2026-08-12, Shaun: "still cant see both teams goals").
         // The fixed camera sits between the two goals (z +-20) facing one
@@ -318,8 +321,8 @@ namespace AFL.Day1
             // THE RACE. One from each side — whoever was already closest, not
             // a designated clearer, and not all nine chasing (the field has to
             // stay open, per FIELD-DIMENSIONS.md).
-            Transform crocRunner = NearestTo(land, crocVisual, crocRover, crocForward, crocDefender, crocClearer);
-            Transform rooRunner = NearestTo(land, rooVisual, rooRover, rooForward, rooDefender, rooClearer);
+            Transform crocRunner = NearestTo(land, crocVisual, crocRover, crocForward, crocDefender, crocClearer, crocOutlet);
+            Transform rooRunner = NearestTo(land, rooVisual, rooRover, rooForward, rooDefender, rooClearer, rooOutlet);
             if (!crocRunner || !rooRunner) yield break;
 
             _message = "Race for it — TAP!";
@@ -702,7 +705,7 @@ namespace AFL.Day1
             // from long range, and the mia receives a handball and kicks a
             // long goal if the other team wins."
             {
-                Transform outlet = crocsInPossession ? spareMia : spareLion;
+                Transform outlet = crocsInPossession ? crocOutlet : rooOutlet;
                 if (chainDepth == 0 && outlet && Random.value < handballClearanceChance)
                 {
                     yield return HandballClearance(crocsInPossession, rover, outlet);
