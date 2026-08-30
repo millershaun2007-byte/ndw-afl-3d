@@ -639,6 +639,13 @@ namespace AFL.Day1
         // tighter than 0.25s" floor) once
         // markReactionCompensation is folded in.
         public float markPerfectWindow = 0.25f;
+        // 2026-08-29, Shaun: "3 tiers ... NO SPILLED 2 TIERS OF MARK".
+        // The tighter of the two mark windows. markBestErr is already measured
+        // against markTargetT on every tap - it was computed and thrown away
+        // (the same discarded-value bug that made the ruck unwinnable), so the
+        // grading below is what finally reads it. A speccy leap is the harder
+        // tier: it only comes off on a tap this close to the ball arriving.
+        public float speccyMarkWindow = 0.09f;
         public float markReactionCompensation = 0.17f;
         // 2026-08-19, Shaun: "the defender can jump and spoil the normal
         // mark" — a real bot contest for the non-speccy mark, same
@@ -648,6 +655,19 @@ namespace AFL.Day1
         // know the timing, the defender is guessing), the spoil is the
         // occasional exception, not a coin flip. Both tunable in one
         // place if the balance needs adjusting after playtesting.
+        //
+        // ⚠ PARKED 2026-08-29, NOT DEAD — Shaun: "THE SPOIL AT SOME STAGE IF YOU
+        // CAN FIGURE OUT HOW TO DO IT COMES BACK". Nothing reads these two right
+        // now: the mark is graded purely on the marker's own tap timing (see
+        // speccyMarkWindow and the grading at markDeadline), and the defender's
+        // randomized roll was removed rather than left fighting the tap for the
+        // same outcome. They are kept, with their tuned values, because the
+        // defender's spoil is coming back as a real contest once there is a
+        // design for it that does not just override the tap.
+        //
+        // Do NOT report these as an instance of the never-read bug family and do
+        // NOT delete them - the deleted thing was defenderSpoilT, the per-contest
+        // roll. These are the tuning for a mechanic that is on its way back in.
         public float defenderSpoilWindow = 0.20f;
         public float defenderSpoilJitter = 0.55f;
         // 2026-08-21, Shaun: "after some spoils another character gets
@@ -760,13 +780,12 @@ namespace AFL.Day1
             // already uses above — no clock to race against.
             bool jumpFired = false;
             float jumpFireAt = peakT - normalMarkHopRiseDuration;
-            // Defender's spoil attempt — Shaun: "the defender can jump and
-            // spoil the normal mark." Same randomized-reaction idiom as
-            // the initial ruck tap's _botPressT: a wide jitter relative to
-            // the spoil window keeps the attacker winning most of the
-            // time, the spoil is a real but occasional contest, not a
-            // coin flip.
-            float defenderSpoilT = markTargetT + Random.Range(-defenderSpoilJitter, defenderSpoilJitter);
+            // 2026-08-29: the defender's randomized roll (defenderSpoilT /
+            // defenderSpoilJitter / defenderSpoilWindow) is gone. The mark is now
+            // decided by the marker's own tap timing, so a separate dice roll
+            // deciding the same outcome is a second number that has to agree with
+            // the first — and it was the roll, not the tap, that made the contest
+            // feel automated. Removed rather than left assigned-and-unread.
             // 2026-08-19, Shaun: "the human kicks at goal for themself and
             // ai" applied to the mark too, once it became clear the same
             // gap explained "watched without tapping and it still played
@@ -836,18 +855,32 @@ namespace AFL.Day1
                 if (!markResolved && el >= markDeadline)
                 {
                     markResolved = true;
-                    // 2026-08-19, Shaun: a real leap for the mark should
-                    // never spill — any genuine tap during the window
-                    // secures it now, no more precision-timing drop. The
-                    // defender's own timed jump is the only thing that can
-                    // still deny it on a normal (non-speccy) mark. Human
-                    // defends with a real tap (any tap counts, same rule
-                    // as marking); AI defends via the randomized roll.
-                    defenderSpoiled = !isSpeccy && (humanControlled
-                        ? Mathf.Abs(defenderSpoilT - markTargetT) <= defenderSpoilWindow
-                        : defendPressed);
-                    bool marked = markPressed && !defenderSpoiled;
-                    _message = marked ? "MARK!" : (defenderSpoiled ? "Spoiled by the defender!" : "Spilled!");
+                    // SUPERSEDED 2026-08-29. What stood here described "any
+                    // genuine tap during the window secures it, no more
+                    // precision-timing drop" plus a randomized defender roll.
+                    // Both are gone - that rule is exactly what made markBestErr
+                    // pointless and the contest feel automated. Rewritten rather
+                    // than left in place, because a comment describing a mechanic
+                    // the code no longer has is this repo's most repeated defect.
+                    // 2026-08-29, Shaun: "NO SPILLED 2 TIERS OF MARK". Two mark
+                    // tiers graded off markBestErr, and the defender takes
+                    // anything that misses. There is no third "Spilled!"
+                    // outcome any more - the ball is marked or it is spoiled.
+                    //
+                    // The tier is chosen by which jump is ALREADY playing, not by
+                    // the tap: isSpeccy is rolled before KickAway is called (it
+                    // starts SpeccyLeap and sets the ball's arc height), so
+                    // grading a speccy onto a normal hop would put the message
+                    // and the animation out of step - this file's own
+                    // two-numbers-must-agree trap. The roll picks which leap
+                    // plays; the tap decides whether it comes off.
+                    float markWindow = isSpeccy ? speccyMarkWindow : markPerfectWindow;
+                    bool markTimed = markPressed && markBestErr <= markWindow;
+                    // When the human is defending (!humanControlled) their own tap
+                    // still spoils, exactly as before - that path is unchanged.
+                    defenderSpoiled = humanControlled ? !markTimed : (defendPressed || !markTimed);
+                    bool marked = !defenderSpoiled;
+                    _message = marked ? (isSpeccy ? "SPECCY!" : "MARK!") : "Spoiled by the defender!";
                     // 2026-08-21 — real bug: this called the unmirrored
                     // CutCameraToMarkCloseup(forward) (fixed +7 X
                     // offset). Rarely showed at the centre bounce since
