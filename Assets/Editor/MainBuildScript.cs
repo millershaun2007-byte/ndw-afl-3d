@@ -88,8 +88,17 @@ public static class MainBuildScript
         //   and should read as oriented toward their own attacking end —
         //   so they keep the Z-axis, opposite-ends facing from the oval
         //   fix, unaffected by the ruck pair's ball-facing requirement.
-        var crocGo = BuildStaticCharacter("Croc", "Assets/Models/CrocRiggedAI", new Vector3(-0.55f, 0, 0), Quaternion.Euler(0, 90, 0));
-        var rooGo = BuildStaticCharacter("Roo", "Assets/Models/RooRiggedAI", new Vector3(0.55f, 0, 0), Quaternion.Euler(0, -90, 0));
+        // THE FOOTY CHARACTERS. Shaun, 2026-08-31: "lets get the characters
+        // into the confirmed game... just run the game as is with new
+        // characters."
+        //
+        // Same cast, same positions, same passages - only the models and the
+        // animation change. Croc and Roo previously used hand-made controllers
+        // that exist only under their old names, so all five are generated now.
+        EnsureAnimatorController("FootyCroc",   "Assets/Models/FootyCrocRiggedAI");
+        EnsureAnimatorController("FootyRoo",    "Assets/Models/FootyRooRiggedAI");
+        var crocGo = BuildStaticCharacter("Croc", "Assets/Models/FootyCrocRiggedAI", new Vector3(-0.55f, 0, 0), Quaternion.Euler(0, 90, 0));
+        var rooGo = BuildStaticCharacter("Roo", "Assets/Models/FootyRooRiggedAI", new Vector3(0.55f, 0, 0), Quaternion.Euler(0, -90, 0));
 
         // Day 2 (2026-08-11, Shaun: "the next step would be the person in
         // the ruck to tap the ball to a player" / "one more player from
@@ -104,8 +113,8 @@ public static class MainBuildScript
         // "behind" their ruck teammate on that same axis (Shaun: "the
         // rovers can stand behind if they want") — behind Croc (attacking
         // +Z) is -Z; behind Roo (attacking -Z) is +Z.
-        var crocRoverGo = BuildStaticCharacter("CrocRover", "Assets/Models/CrocRiggedAI", new Vector3(-1.7f, 0, -1.8f), Quaternion.identity);
-        var rooRoverGo = BuildStaticCharacter("RooRover", "Assets/Models/RooRiggedAI", new Vector3(1.7f, 0, 1.8f), Quaternion.Euler(0, 180, 0));
+        var crocRoverGo = BuildStaticCharacter("CrocRover", "Assets/Models/FootyCrocRiggedAI", new Vector3(-1.7f, 0, -1.8f), Quaternion.identity);
+        var rooRoverGo = BuildStaticCharacter("RooRover", "Assets/Models/FootyRooRiggedAI", new Vector3(1.7f, 0, 1.8f), Quaternion.Euler(0, 180, 0));
 
         // Day 4 setup (2026-08-12, Shaun: "we will need 2 more players
         // defender and forward", confirmed "4 [total]... 2 more at each
@@ -134,8 +143,8 @@ public static class MainBuildScript
         // as disconnected even though the kick itself bridges the gap.
         // Brought in to z=10 rather than touching the run/kick pacing,
         // which was already confirmed good.
-        EnsureAnimatorController("Dragon", "Assets/Models/DragonRiggedAI");
-        EnsureAnimatorController("Lion", "Assets/Models/LionRiggedAI");
+        EnsureAnimatorController("FootyDragon", "Assets/Models/FootyDragonRiggedAI");
+        EnsureAnimatorController("FootyLion", "Assets/Models/FootyLionRiggedAI");
         // Real fix (2026-08-12, Shaun: "the characters inserted are much
         // smaller"). Measured directly (Renderer bounds), not guessed:
         // Croc=2.098 high, Roo=2.317, Dragon=1.937 (92% of Croc), Lion=
@@ -170,10 +179,10 @@ public static class MainBuildScript
         // behind the defender, who stays at 10 near the actual contest
         // zone — so SpeccyLeap (Day1RuckContest.cs) has real ground to
         // cover before the leap instead of starting almost on top of it.
-        var crocForwardGo = BuildStaticCharacter("CrocForward", "Assets/Models/DragonRiggedAI", new Vector3(-0.9f, 0, 5f), Quaternion.identity, dragonScale);
-        var rooDefenderGo = BuildStaticCharacter("RooDefender", "Assets/Models/LionRiggedAI", new Vector3(0.9f, 0, 10f), Quaternion.Euler(0, 180, 0), lionScale);
-        var rooForwardGo = BuildStaticCharacter("RooForward", "Assets/Models/LionRiggedAI", new Vector3(0.9f, 0, -5f), Quaternion.Euler(0, 180, 0), lionScale);
-        var crocDefenderGo = BuildStaticCharacter("CrocDefender", "Assets/Models/DragonRiggedAI", new Vector3(-0.9f, 0, -10f), Quaternion.identity, dragonScale);
+        var crocForwardGo = BuildStaticCharacter("CrocForward", "Assets/Models/FootyDragonRiggedAI", new Vector3(-0.9f, 0, 5f), Quaternion.identity, dragonScale);
+        var rooDefenderGo = BuildStaticCharacter("RooDefender", "Assets/Models/FootyLionRiggedAI", new Vector3(0.9f, 0, 10f), Quaternion.Euler(0, 180, 0), lionScale);
+        var rooForwardGo = BuildStaticCharacter("RooForward", "Assets/Models/FootyLionRiggedAI", new Vector3(0.9f, 0, -5f), Quaternion.Euler(0, 180, 0), lionScale);
+        var crocDefenderGo = BuildStaticCharacter("CrocDefender", "Assets/Models/FootyDragonRiggedAI", new Vector3(-0.9f, 0, -10f), Quaternion.identity, dragonScale);
 
         // 2026-08-19, Shaun: "add 2 more characters so it does work like
         // the centre" — the forward line had no equivalent of
@@ -187,8 +196,8 @@ public static class MainBuildScript
         // how rover stands behind the ruck rather than on top of it. Scale
         // untuned (1f) — Dragon/Lion both needed real measured correction
         // after first render, expect the same here once tested live.
-        EnsureAnimatorController("Mia", "Assets/Models/MiaRiggedAI");
-        var rooClearerGo = BuildStaticCharacter("RooClearer", "Assets/Models/MiaRiggedAI", new Vector3(0.9f, 0, 13f), Quaternion.Euler(0, 180, 0), miaScale);
+        EnsureAnimatorController("FootyMia", "Assets/Models/FootyMiaRiggedAI");
+        var rooClearerGo = BuildStaticCharacter("RooClearer", "Assets/Models/FootyMiaRiggedAI", new Vector3(0.9f, 0, 13f), Quaternion.Euler(0, 180, 0), miaScale);
         // 2026-08-19, Shaun: "if the other summer looks better its a white
         // tiny ghost in this game... noticed this in the safari game but
         // couldn't be bothered saying anything" — a real, pre-existing
@@ -197,7 +206,7 @@ public static class MainBuildScript
         // Swapped for Croc's own species — already proven working
         // everywhere else in this game, default scale (1f), no
         // correction needed since Croc is the reference height itself.
-        var crocClearerGo = BuildStaticCharacter("CrocClearer", "Assets/Models/CrocRiggedAI", new Vector3(-0.9f, 0, -13f), Quaternion.identity);
+        var crocClearerGo = BuildStaticCharacter("CrocClearer", "Assets/Models/FootyCrocRiggedAI", new Vector3(-0.9f, 0, -13f), Quaternion.identity);
 
         // Goal posts (2026-08-12, Shaun: "chuck up those... goal posts").
         // Visual only — no collision, no scoring trigger, that's still
@@ -285,10 +294,23 @@ public static class MainBuildScript
     // BuildStaticCharacter's controller lookup already expects, for any
     // new species that doesn't have one yet. Idempotent — skips if the
     // asset already exists, so calling it every build is cheap and safe.
+    // A CONTROLLER THAT USES THE CLIPS THAT ARE THERE.
+    //
+    // What this generated before: two states, Idle and Walk, on a Speed float -
+    // and Idle had NO MOTION AT ALL, so a stationary player stood in his raw
+    // bind pose. The Running clips already in the project were never referenced.
+    //
+    // And the game has always called SetTrigger("Kick") and SetTrigger("Jump")
+    // (AFLPlayer.cs, Day1RuckContest.cs) against a controller that declared
+    // neither parameter. Unity drops a SetTrigger for a parameter that does not
+    // exist SILENTLY, so no kick and no jump has ever animated. Declaring them
+    // here is not a gameplay change - the calls are already in the game.
     static void EnsureAnimatorController(string species, string modelFolder)
     {
         string path = $"Assets/_Generated/{species}RiggedAIAnimator.controller";
-        if (AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>(path)) return;
+        // Always regenerated. The old early-return meant an edit to this method
+        // silently did nothing on any species whose controller already existed.
+        AssetDatabase.DeleteAsset(path);
 
         System.IO.Directory.CreateDirectory("Assets/_Generated");
         var controller = UnityEditor.Animations.AnimatorController.CreateAnimatorControllerAtPath(path);
@@ -296,27 +318,63 @@ public static class MainBuildScript
         controller.AddParameter("Airborne", AnimatorControllerParameterType.Bool);
         controller.AddParameter("HasBall", AnimatorControllerParameterType.Bool);
         controller.AddParameter("KickCharge", AnimatorControllerParameterType.Float);
-        var sm = controller.layers[0].stateMachine;
-        var idle = sm.AddState("Idle");
-        sm.defaultState = idle;
 
-        var walkClip = FindClipInFolder(modelFolder, "Walking");
-        if (walkClip != null)
+        var sm = controller.layers[0].stateMachine;
+
+        // Idle gets a real clip. This is the single biggest visual change - a
+        // player standing still stops being a mannequin.
+        var idle = sm.AddState("Idle");
+        idle.motion = FindClipInFolder(modelFolder, "Idle");
+        sm.defaultState = idle;
+        if (idle.motion == null)
+            Debug.LogWarning($"EnsureAnimatorController: no Idle clip in {modelFolder} - {species} will stand in bind pose.");
+
+        // Run. The Footy set has Sprint rather than Walking; the game drives
+        // Speed to 5.5 during a run and 0 when still, so one moving state on
+        // the existing 0.3 threshold covers everything it actually asks for.
+        var runClip = FindClipInFolder(modelFolder, "Sprint") ?? FindClipInFolder(modelFolder, "Running");
+        if (runClip != null)
         {
-            var walk = sm.AddState("Walk");
-            walk.motion = walkClip;
-            var toWalk = idle.AddTransition(walk);
-            toWalk.hasExitTime = false; toWalk.duration = 0.15f;
-            toWalk.AddCondition(AnimatorConditionMode.Greater, 0.3f, "Speed");
-            var toIdle = walk.AddTransition(idle);
+            var run = sm.AddState("Run");
+            run.motion = runClip;
+            var toRun = idle.AddTransition(run);
+            toRun.hasExitTime = false; toRun.duration = 0.15f;
+            toRun.AddCondition(AnimatorConditionMode.Greater, 0.3f, "Speed");
+            var toIdle = run.AddTransition(idle);
             toIdle.hasExitTime = false; toIdle.duration = 0.15f;
             toIdle.AddCondition(AnimatorConditionMode.Less, 0.3f, "Speed");
         }
-        else
+        else Debug.LogWarning($"EnsureAnimatorController: no Sprint/Running clip in {modelFolder} for {species}.");
+
+        // One-shots. Entered from AnyState so they interrupt whatever is
+        // playing, and they run to the end of their clip and fall back to Idle.
+        //
+        // canTransitionToSelf is OFF deliberately: an AnyState transition that
+        // can re-enter its own state is how a character ends up kicking or
+        // jumping non-stop, which this project has hit before.
+        foreach (var act in new[] { "Kick", "Jump", "Mark", "Spoil", "Handball", "Turn" })
         {
-            Debug.LogWarning($"EnsureAnimatorController: no Walking clip found in {modelFolder} for {species} — Idle only.");
+            var clip = FindClipInFolder(modelFolder, act);
+            if (clip == null) continue;
+            controller.AddParameter(act, AnimatorControllerParameterType.Trigger);
+
+            var st = sm.AddState(act);
+            st.motion = clip;
+
+            var enter = sm.AddAnyStateTransition(st);
+            enter.hasExitTime = false;
+            enter.duration = 0.08f;
+            enter.canTransitionToSelf = false;
+            enter.AddCondition(AnimatorConditionMode.If, 0f, act);
+
+            var back = st.AddTransition(idle);
+            back.hasExitTime = true;      // let the clip finish
+            back.exitTime = 0.85f;
+            back.duration = 0.15f;
         }
+
         EditorUtility.SetDirty(controller);
+        AssetDatabase.SaveAssets();
     }
 
     static AnimationClip FindClipInFolder(string folder, string suffix)
