@@ -377,8 +377,18 @@ public static class MainBuildScript
         AssetDatabase.SaveAssets();
     }
 
+    // .anim first. These are ndw-footy's extracted clips - the ones from the
+    // game Shaun actually rates - and they are standalone AnimationClip assets,
+    // not sub-assets buried in a .glb. Falls back to the old glb path so any
+    // species that still only has model-embedded clips keeps working.
     static AnimationClip FindClipInFolder(string folder, string suffix)
     {
+        string animPath = System.IO.Directory.GetFiles(folder, "*" + suffix + ".anim").FirstOrDefault();
+        if (animPath != null)
+        {
+            var clip = AssetDatabase.LoadAssetAtPath<AnimationClip>(animPath.Replace('\\', '/'));
+            if (clip != null) return clip;
+        }
         string glbPath = System.IO.Directory.GetFiles(folder, "*" + suffix + ".glb").FirstOrDefault();
         if (glbPath == null) return null;
         glbPath = glbPath.Replace('\\', '/');

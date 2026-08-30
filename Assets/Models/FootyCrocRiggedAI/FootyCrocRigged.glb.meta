@@ -29,8 +29,8 @@ ScriptedImporter:
   - type: 2
     code: 20
     messages:
-    - KHR_materials_specular
+    - KHR_materials_ior
   - type: 2
     code: 20
     messages:
-    - KHR_materials_ior
+    - KHR_materials_specular
