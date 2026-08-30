@@ -97,7 +97,38 @@ public static class MainBuildScript
         // that exist only under their old names, so all five are generated now.
         EnsureAnimatorController("FootyCroc",   "Assets/Models/FootyCrocRiggedAI");
         EnsureAnimatorController("FootyRoo",    "Assets/Models/FootyRooRiggedAI");
-        var crocGo = BuildStaticCharacter("Croc", "Assets/Models/FootyCrocRiggedAI", new Vector3(-0.55f, 0, 0), Quaternion.Euler(0, 90, 0));
+        // MIA IN THE RUCK (2026-08-31, Shaun: "lets swap mia into the ruck").
+        // The human's side, so the player is the one in the middle of the
+        // contest. Same slot, same facing, same passages — only the model
+        // changes; the controller is derived from the model FOLDER (see
+        // BuildStaticCharacter's own note on why it can't come from the
+        // GameObject name), so FootyMia's has to exist before this runs.
+        //
+        // Scale is Croc's height match WITHOUT the 1.3 distance boost the
+        // forward-line copies of Mia carry: 1.284 is the measured
+        // Croc-height ratio (MeasureMiaSummer.cs), and the 1.3 on top of it
+        // exists only to compensate for standing 13 units downfield. In the
+        // centre she is right on the camera, so applying it here would make
+        // her a head taller than the ruck she is contesting.
+        // 2026-08-31, Shaun: "the ridiculously tall mia in the forward line
+        // that is just random needs to be the one in the ruck, the current
+        // ruck goes and stands in the goal square." So the two Mias swap: the
+        // tall one rucks (a tall ruck is the point of a ruck), and the smaller
+        // one goes deep forward and becomes the handball outlet.
+        //
+        // The tall scale is the forward-line one — Croc's height ratio plus
+        // the 1.3 distance compensation — which is exactly why she reads as
+        // ridiculously tall standing in the middle of the ground. Kept, on
+        // purpose: in the ruck that height is the whole idea.
+        // Both Mia scales live here now, because the ruck is built first and
+        // C# wants the const before its use. miaScale is the measured
+        // Croc-height match (MeasureMiaSummer.cs) plus the same 1.3 distance
+        // compensation Dragon and Lion carry; miaRuckScale is that ratio
+        // without it, for a character standing close to the camera.
+        const float miaScale = 1.284f * 1.3f;
+        const float miaRuckScale = 1.284f;
+        EnsureAnimatorController("FootyMia", "Assets/Models/FootyMiaRiggedAI");
+        var crocGo = BuildStaticCharacter("MiaRuck", "Assets/Models/FootyMiaRiggedAI", new Vector3(-0.55f, 0, 0), Quaternion.Euler(0, 90, 0), miaScale);
         var rooGo = BuildStaticCharacter("Roo", "Assets/Models/FootyRooRiggedAI", new Vector3(0.55f, 0, 0), Quaternion.Euler(0, -90, 0));
 
         // Day 2 (2026-08-11, Shaun: "the next step would be the person in
@@ -173,7 +204,7 @@ public static class MainBuildScript
         // further tonight; if revisited later, check scale/pose/rig
         // compatibility with this project's Generic-animation pipeline
         // before reusing.
-        const float miaScale = 1.284f * 1.3f;
+        // (miaScale/miaRuckScale are declared up with the ruck — see there.)
         // Real fix (2026-08-12, Shaun: "the speccy so the forward now
         // starts behind runs up"). Forward moved from z=10 to z=5 —
         // behind the defender, who stays at 10 near the actual contest
@@ -197,7 +228,13 @@ public static class MainBuildScript
         // untuned (1f) — Dragon/Lion both needed real measured correction
         // after first render, expect the same here once tested live.
         EnsureAnimatorController("FootyMia", "Assets/Models/FootyMiaRiggedAI");
-        var rooClearerGo = BuildStaticCharacter("RooClearer", "Assets/Models/FootyMiaRiggedAI", new Vector3(0.9f, 0, 13f), Quaternion.Euler(0, 180, 0), miaScale);
+        // The smaller Mia, in the goal square at the Croc end (Croc attacks
+        // +Z, so this is their full-forward's spot) — 18, two units in from
+        // the goal line. She is the handball outlet: she leads up out of there
+        // to meet it, rather than waiting deep for a 20-unit pass nobody on
+        // this ground could kick. Still doubles as the Roo clearer for a
+        // mid-ground spoil, which is only a transform reference, not a team.
+        var rooClearerGo = BuildStaticCharacter("MiaGoalSquare", "Assets/Models/FootyMiaRiggedAI", new Vector3(0f, 0, 18f), Quaternion.identity, miaRuckScale);
         // 2026-08-19, Shaun: "if the other summer looks better its a white
         // tiny ghost in this game... noticed this in the safari game but
         // couldn't be bothered saying anything" — a real, pre-existing
@@ -252,6 +289,57 @@ public static class MainBuildScript
         camGo.transform.position = new Vector3(0, 3.4f, -9.5f);
         camGo.transform.LookAt(new Vector3(0, 1.2f, 0));
 
+        // ── CINEMACHINE (2026-08-31) ──────────────────────────────────
+        // Main Camera now carries a Brain and nothing else writes its
+        // transform. Every shot Day1RuckContest used to snap to is a
+        // CinemachineCamera below, at the SAME framing it already had —
+        // the numbers were playtested, only the delivery changes. The
+        // Brain blends between them, which is the whole upgrade: the
+        // shot changes over 0.4s instead of between two frames.
+        var brain = camGo.AddComponent<Unity.Cinemachine.CinemachineBrain>();
+        brain.DefaultBlend = new Unity.Cinemachine.CinemachineBlendDefinition(
+            Unity.Cinemachine.CinemachineBlendDefinition.Styles.EaseInOut, 0.4f);
+
+        var camsGo = new GameObject("Cameras");
+        var cams = camsGo.AddComponent<AFL.Day1.AFLDay1Cameras>();
+
+        // The centre bounce shot: the exact position/rotation the Main
+        // Camera itself used to sit at, moved onto a vcam so it is one
+        // shot among several rather than "the default nobody can blend
+        // away from".
+        var centreGo = new GameObject("CM_Centre");
+        centreGo.transform.position = new Vector3(0, 3.4f, -9.5f);
+        centreGo.transform.LookAt(new Vector3(0, 1.2f, 0));
+        cams.centre = centreGo.AddComponent<Unity.Cinemachine.CinemachineCamera>();
+        cams.centre.Priority = AFL.Day1.AFLDay1Cameras.LivePriority;
+
+        // The kick / kick-out shot. Static by design — a kick's flight
+        // reads better against a still frame than a panning one — so it
+        // has no Follow; Day1RuckContest places it per beat, pivoted on
+        // that kick's own path.
+        var kickGo = new GameObject("CM_Kick");
+        kickGo.transform.position = new Vector3(16f, 8f, 15f);
+        kickGo.transform.LookAt(new Vector3(0, 3f, 15f));
+        cams.kick = kickGo.AddComponent<Unity.Cinemachine.CinemachineCamera>();
+        cams.kick.Priority = AFL.Day1.AFLDay1Cameras.IdlePriority;
+
+        // The mark close-up, side-on and level with the contest —
+        // Shaun's "really being able to see the person grabbing the
+        // mark". Unlike the two above this one genuinely follows, so it
+        // stays with the forward through the leap instead of framing
+        // where they stood when the beat fired. Damping is tight (a
+        // contest resolves fast) but non-zero, so it reads as a camera
+        // operator rather than a snap.
+        var closeGo = new GameObject("CM_MarkCloseup");
+        cams.closeup = closeGo.AddComponent<Unity.Cinemachine.CinemachineCamera>();
+        cams.closeup.Priority = AFL.Day1.AFLDay1Cameras.IdlePriority;
+        var closeFollow = closeGo.AddComponent<Unity.Cinemachine.CinemachineFollow>();
+        closeFollow.FollowOffset = new Vector3(7f, 3f, 0f);
+        var closeTracker = closeFollow.TrackerSettings;
+        closeTracker.PositionDamping = new Vector3(0.35f, 0.4f, 0.35f);
+        closeFollow.TrackerSettings = closeTracker;
+        closeGo.AddComponent<Unity.Cinemachine.CinemachineRotationComposer>();
+
         var lightGo = new GameObject("Directional Light");
         var light = lightGo.AddComponent<Light>();
         light.type = LightType.Directional;
@@ -271,6 +359,20 @@ public static class MainBuildScript
         contest.rooClearer = rooClearerGo.transform;
         contest.crocClearer = crocClearerGo.transform;
         contest.ball = ball.transform;
+        // The two who used to just stand there — now the handball outlets out
+        // of the middle (see Day1RuckContest.HandballClearance). Mia at z=+13
+        // is in Croc's attacking half, the Lion at z=-5 in Roo's.
+        contest.spareMia = rooClearerGo.transform;
+        contest.spareLion = rooForwardGo.transform;
+        contest.cams = cams;
+
+        // THE SCOREBOARD AND THE FINALS SERIES (2026-08-31). Owns the clock
+        // and the tally only — Day1RuckContest still runs every passage and
+        // reports what it scored.
+        var matchGo = new GameObject("Match");
+        var match = matchGo.AddComponent<AFL.Day1.AFLMatch>();
+        match.contest = contest;
+        contest.match = match;
 
         var bridgeGo = new GameObject("TouchBridge");
         bridgeGo.AddComponent<Day1TouchBridge>();
