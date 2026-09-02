@@ -998,7 +998,9 @@ namespace AFL.Day1
             float markBestErr = float.MaxValue;
             bool markResolved = false;
             bool defenderSpoiled = false;
-            bool defendPressed = false;
+            // When the human is defending: the time of their FIRST tap, or -1
+            // if they never pressed. See the note at the press site below.
+            float defendPressT = -1f;
             // Real fix (2026-08-12, Shaun: "the kick is now way of the
             // forward and defender for the mark scene"). Not a physics
             // change — the wide kick-cut camera just made a mismatch
@@ -1105,7 +1107,24 @@ namespace AFL.Day1
                 // in this branch (the AI-mark check above doesn't read
                 // it), so this is a genuine human spoil attempt, not a
                 // second thing fighting over the same tap.
-                if (!humanControlled && Day1Input.TapDown) defendPressed = true;
+                // FIRST PRESS ONLY, AND IT IS TIMED. Shaun, 2026-09-03: "every
+                // marking contest is spoiled."
+                //
+                // This used to be `if (TapDown) defendPressed = true`, and
+                // defenderSpoiled was then just `defendPressed` - ANY tap, at
+                // ANY point in the kick window, guaranteed a spoil. This same
+                // file records that children mash ("i just keep hitting tap kid
+                // would do that"), so every contest the human defended was
+                // spoiled, 100% of the time. Marking has had a timing window
+                // since 2026-08-19; defending never got one, so the two sides
+                // of the same contest were judged by different rules.
+                //
+                // Now the FIRST press is the commitment, judged against the
+                // same defenderSpoilWindow the AI defender is held to. Mashing
+                // from the start means committing far too early and missing -
+                // which is the point: the spoil is meant to be "a real but
+                // occasional contest, not a coin flip" (this file, 2026-08-19).
+                if (!humanControlled && Day1Input.TapDown && defendPressT < 0f) defendPressT = el;
 
                 if (!markResolved && el >= markDeadline)
                 {
@@ -1119,7 +1138,7 @@ namespace AFL.Day1
                     // as marking); AI defends via the randomized roll.
                     defenderSpoiled = !isSpeccy && (humanControlled
                         ? Mathf.Abs(defenderSpoilT - markTargetT) <= defenderSpoilWindow
-                        : defendPressed);
+                        : (defendPressT >= 0f && Mathf.Abs(defendPressT - markTargetT) <= defenderSpoilWindow));
                     bool marked = markPressed && !defenderSpoiled;
                     // NO MORE "SPILLED". Shaun, 2026-08-31: "we are no longer doing
             // spilled either." A contest that isn't marked and isn't spoiled
