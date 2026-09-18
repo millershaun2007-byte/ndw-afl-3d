@@ -227,7 +227,9 @@ public static class MainBuildScript
         // how rover stands behind the ruck rather than on top of it. Scale
         // untuned (1f) — Dragon/Lion both needed real measured correction
         // after first render, expect the same here once tested live.
-        EnsureAnimatorController("FootyMia", "Assets/Models/FootyMiaRiggedAI");
+        // Mia's controller is made once, above, before MiaRuck takes it. Making
+        // it again here deleted that asset from under her, so the ruck Mia
+        // shipped with no controller and stood in bind pose.
         // THE MIA THE TALL MIA REPLACED IN THE RUCK. Shaun, 2026-08-31:
         // "whoever Mia replaced in the ruck to be in the centre receiving the
         // handball." Just outside the centre circle (radius 3) on the Croc
