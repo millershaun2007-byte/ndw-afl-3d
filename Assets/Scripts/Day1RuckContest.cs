@@ -2511,12 +2511,29 @@ namespace AFL.Day1
                     normal = { textColor = Color.white }
                 };
             }
-            int panelH = Mathf.RoundToInt(Screen.height * 0.14f);
-            int y = Mathf.RoundToInt(Screen.height * 0.08f);
-            GUI.color = new Color(0f, 0f, 0f, 0.65f);
-            GUI.DrawTexture(new Rect(0, y, Screen.width, panelH), Texture2D.whiteTexture);
+            // A pill around the words, not a band across the ground. Full width
+            // and 14% tall, it masked the far end of the field and the ball
+            // could not be seen going through the posts. The words shrink to
+            // stay on one line, so a long call never spreads back across it.
+            var content = new GUIContent(_message);
+            int baseFont = Mathf.RoundToInt(Screen.height * 0.055f);
+            _style.fontSize = baseFont;
+            Vector2 size = _style.CalcSize(content);
+            float maxW = Screen.width * 0.90f;
+            if (size.x > maxW)
+            {
+                _style.fontSize = Mathf.Max(11, Mathf.RoundToInt(baseFont * maxW / size.x));
+                size = _style.CalcSize(content);
+            }
+            float u = Mathf.Max(Screen.height / 720f, 0.75f);
+            int y = Mathf.RoundToInt(Mathf.Max(Screen.height * 0.08f, 94f * u));
+            int panelW = Mathf.RoundToInt(Mathf.Min(Screen.width, size.x + Screen.width * 0.06f));
+            int panelH = Mathf.RoundToInt(size.y + Screen.height * 0.025f);
+            int x = Mathf.RoundToInt((Screen.width - panelW) * 0.5f);
+            GUI.color = new Color(0f, 0f, 0f, 0.55f);
+            GUI.DrawTexture(new Rect(x, y, panelW, panelH), Texture2D.whiteTexture);
             GUI.color = Color.white;
-            GUI.Label(new Rect(0, y, Screen.width, panelH), _message, _style);
+            GUI.Label(new Rect(x, y, panelW, panelH), content, _style);
 
             // Real fix (2026-08-12, Shaun: "no red light system and it
             // chaotic no idea when to push buttons what to do" / "even a
