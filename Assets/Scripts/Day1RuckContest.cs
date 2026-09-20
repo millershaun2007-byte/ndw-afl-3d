@@ -111,7 +111,7 @@ namespace AFL.Day1
         public float throwDuration = 2.6f;
         public float peakHeight = 2.1f;
         public float groundY = 1.0f;
-        public float hopDuration = 0.45f;
+        public float hopDuration = 0.8f;
         // 2026-08-28: ONE height and ONE arm angle for any leap that contests
         // the ball, so the forward and the defender actually meet.
         public float contestLeapHeight = 1.65f;
@@ -2314,7 +2314,9 @@ namespace AFL.Day1
             // the hop's own vertical scale, not the arm — bumped 1.5 to
             // 1.65 to close that ~0.13-unit gap so the hand and ball
             // actually meet instead of falling just short.
-            float heightScale = reachesBall ? contestLeapHeight : 0.5f;
+            // Both ruckmen jump the contest; the winner is the one who gets there,
+            // not the only one who leaves the ground.
+            float heightScale = reachesBall ? contestLeapHeight : contestLeapHeight * 0.8f;
             Vector3 towardCentre = reachesBall
                 ? new Vector3(-Mathf.Sign(start.x) * 0.55f, 0, 0)
                 : Vector3.zero;
