@@ -54,3 +54,6 @@ for f in WebGL.wasm WebGL.data WebGL.framework.js WebGL.loader.js; do
   else printf '  FAIL %-20s local=%s live=%s\n' "$f" "$want" "$got"; fail=1; fi
 done
 [ "$fail" = 0 ] && echo "synced: $DEST (v=$STAMP)" || { echo "SYNC INCOMPLETE"; exit 1; }
+
+# The repo copy Gemini reads follows the live game - only when it is the footy.
+[ "$NAME" = "afl3d" ] && "$(dirname "$0")/../../scripts/sync-afl-mirror.sh"
