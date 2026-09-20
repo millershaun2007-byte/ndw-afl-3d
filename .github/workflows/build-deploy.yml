@@ -21,7 +21,14 @@ name: Build and deploy AFL 3D
 # Deploying is now a deliberate act: Actions > "Build and deploy AFL 3D" > Run
 # workflow. Pushing code no longer ships it.
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      destination:
+        description: 'scratch (safe, afl3d-scratch) or live (replaces the game)'
+        required: true
+        default: scratch
+        type: choice
+        options: [scratch, live]
 
 permissions:
   contents: read
@@ -158,9 +165,13 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Deploy to gs://ndw-game-builds/afl3d/
+      - name: Deploy
         run: |
-          gcloud storage rsync build/WebGL gs://ndw-game-builds/afl3d/ --recursive --delete-unmatched-destination-objects
+          DEST=afl3d
+          if [ "${{ github.event.inputs.destination }}" != "live" ]; then DEST=afl3d-scratch; fi
+          # No --delete-unmatched-destination-objects: a build may add and replace
+          # its own files, never remove one it did not produce.
+          gcloud storage rsync build/WebGL gs://ndw-game-builds/$DEST/ --recursive
           # 2026-08-22 — real bug hit live: plain rsync leaves every object
           # with no Cache-Control, so GCS's default (~1hr) caching means a
           # browser that already loaded this game can silently keep serving
