@@ -110,16 +110,7 @@ public static class MainBuildScript
         // exists only to compensate for standing 13 units downfield. In the
         // centre she is right on the camera, so applying it here would make
         // her a head taller than the ruck she is contesting.
-        // 2026-08-31, Shaun: "the ridiculously tall mia in the forward line
-        // that is just random needs to be the one in the ruck, the current
-        // ruck goes and stands in the goal square." So the two Mias swap: the
-        // tall one rucks (a tall ruck is the point of a ruck), and the smaller
-        // one goes deep forward and becomes the handball outlet.
-        //
-        // The tall scale is the forward-line one — Croc's height ratio plus
-        // the 1.3 distance compensation — which is exactly why she reads as
-        // ridiculously tall standing in the middle of the ground. Kept, on
-        // purpose: in the ruck that height is the whole idea.
+        // Both Mias stand near the camera, so neither takes the downfield boost.
         // Both Mia scales live here now, because the ruck is built first and
         // C# wants the const before its use. miaScale is the measured
         // Croc-height match (MeasureMiaSummer.cs) plus the same 1.3 distance
@@ -128,7 +119,7 @@ public static class MainBuildScript
         const float miaScale = 1.284f * 1.3f;
         const float miaRuckScale = 1.284f;
         EnsureAnimatorController("FootyMia", "Assets/Models/FootyMiaRiggedAI");
-        var crocGo = BuildStaticCharacter("MiaRuck", "Assets/Models/FootyMiaRiggedAI", new Vector3(-0.55f, 0, 0), Quaternion.Euler(0, 90, 0), miaScale);
+        var crocGo = BuildStaticCharacter("MiaRuck", "Assets/Models/FootyMiaRiggedAI", new Vector3(-0.55f, 0, 0), Quaternion.Euler(0, 90, 0), miaRuckScale);
         var rooGo = BuildStaticCharacter("Roo", "Assets/Models/FootyRooRiggedAI", new Vector3(0.55f, 0, 0), Quaternion.Euler(0, -90, 0));
 
         // Day 2 (2026-08-11, Shaun: "the next step would be the person in
