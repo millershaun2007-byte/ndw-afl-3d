@@ -2334,7 +2334,12 @@ namespace AFL.Day1
             // moment they're set. Switch it off for the hop's duration,
             // back on once the pose is handed back to Idle.
             var animator = t.GetComponentInChildren<Animator>();
-            if (animator) animator.enabled = false;
+            // A rig with a real spoil clip plays it; the arm rotation below is the
+            // fallback for a rig without one.
+            bool spoilClip = animator && animator.runtimeAnimatorController
+                && System.Array.Exists(animator.parameters, pm => pm.name == "Spoil");
+            if (spoilClip) animator.SetTrigger("Spoil");
+            else if (animator) animator.enabled = false;
 
             float dur = hopDuration;
             float el = 0f;
@@ -2344,14 +2349,17 @@ namespace AFL.Day1
                 float f = el / dur;
                 float wave = Mathf.Sin(f * Mathf.PI);   // 0 -> 1 -> 0
                 t.localPosition = start + Vector3.up * wave * heightScale + towardCentre * wave;
-                if (leftArm) leftArm.localRotation = leftStart * Quaternion.Euler(0, 0, wave * armAngle);
-                if (rightArm) rightArm.localRotation = rightStart * Quaternion.Euler(0, 0, -wave * armAngle);
+                if (!spoilClip && leftArm) leftArm.localRotation = leftStart * Quaternion.Euler(0, 0, wave * armAngle);
+                if (!spoilClip && rightArm) rightArm.localRotation = rightStart * Quaternion.Euler(0, 0, -wave * armAngle);
                 yield return null;
             }
             t.localPosition = start;
-            if (leftArm) leftArm.localRotation = leftStart;
-            if (rightArm) rightArm.localRotation = rightStart;
-            if (animator) animator.enabled = true;
+            if (!spoilClip)
+            {
+                if (leftArm) leftArm.localRotation = leftStart;
+                if (rightArm) rightArm.localRotation = rightStart;
+                if (animator) animator.enabled = true;
+            }
         }
 
         // 2026-08-21, Shaun (live playtest): "the ball randomly goes to

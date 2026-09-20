@@ -97,29 +97,16 @@ public static class MainBuildScript
         // that exist only under their old names, so all five are generated now.
         EnsureAnimatorController("FootyCroc",   "Assets/Models/FootyCrocRiggedAI");
         EnsureAnimatorController("FootyRoo",    "Assets/Models/FootyRooRiggedAI");
-        // MIA IN THE RUCK (2026-08-31, Shaun: "lets swap mia into the ruck").
-        // The human's side, so the player is the one in the middle of the
-        // contest. Same slot, same facing, same passages — only the model
-        // changes; the controller is derived from the model FOLDER (see
-        // BuildStaticCharacter's own note on why it can't come from the
-        // GameObject name), so FootyMia's has to exist before this runs.
-        //
-        // Scale is Croc's height match WITHOUT the 1.3 distance boost the
-        // forward-line copies of Mia carry: 1.284 is the measured
-        // Croc-height ratio (MeasureMiaSummer.cs), and the 1.3 on top of it
-        // exists only to compensate for standing 13 units downfield. In the
-        // centre she is right on the camera, so applying it here would make
-        // her a head taller than the ruck she is contesting.
-        // Both Mias stand near the camera, so neither takes the downfield boost.
-        // Both Mia scales live here now, because the ruck is built first and
-        // C# wants the const before its use. miaScale is the measured
-        // Croc-height match (MeasureMiaSummer.cs) plus the same 1.3 distance
-        // compensation Dragon and Lion carry; miaRuckScale is that ratio
-        // without it, for a character standing close to the camera.
-        const float miaScale = 1.284f * 1.3f;
+        // The footy athlete rucks. Measured at 2.255 against Croc's 2.186 and
+        // Roo's 2.055 (MeasureFooty.cs), so he is the tallest in the centre at
+        // his own scale and takes no correction.
+        // miaRuckScale is the measured Croc-height match for Mia, who is 1.634
+        // and stands close to the camera as the outlet. Declared here because
+        // C# wants the const before its use further down.
         const float miaRuckScale = 1.284f;
+        EnsureAnimatorController("FootyCats", "Assets/Models/FootyCatsRiggedAI");
         EnsureAnimatorController("FootyMia", "Assets/Models/FootyMiaRiggedAI");
-        var crocGo = BuildStaticCharacter("MiaRuck", "Assets/Models/FootyMiaRiggedAI", new Vector3(-0.55f, 0, 0), Quaternion.Euler(0, 90, 0), miaRuckScale);
+        var crocGo = BuildStaticCharacter("Ruck", "Assets/Models/FootyCatsRiggedAI", new Vector3(-0.55f, 0, 0), Quaternion.Euler(0, 90, 0));
         var rooGo = BuildStaticCharacter("Roo", "Assets/Models/FootyRooRiggedAI", new Vector3(0.55f, 0, 0), Quaternion.Euler(0, -90, 0));
 
         // Day 2 (2026-08-11, Shaun: "the next step would be the person in
