@@ -4,12 +4,20 @@
     <meta charset="utf-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes">
-    <title>Unity Web Player | {{{ PRODUCT_NAME }}}</title>
+    <title>{{{ PRODUCT_NAME }}}</title>
     <style>
       html, body { margin: 0; padding: 0; border: 0; width: 100%; height: 100%; overflow: hidden;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
       #app { display: flex; flex-direction: column; width: 100%; height: 100%; background: #1a2f1a; }
       #canvas-wrap { flex: 1 1 auto; min-height: 0; position: relative; }
+      #load-panel { position: absolute; inset: 0; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 14px; background: #1a2f1a; color: #fff; }
+      #load-panel.done { display: none; }
+      #load-title { font-size: clamp(1rem, 4vw, 1.5rem); font-weight: 800; letter-spacing: 0.02em; }
+      #load-track { width: min(62vw, 320px); height: 12px; border-radius: 999px;
+        background: rgba(255,255,255,0.15); overflow: hidden; }
+      #load-fill { width: 0%; height: 100%; border-radius: 999px; background: #2fae4d; transition: width 0.2s ease; }
+      #load-pct { font-size: clamp(0.8rem, 3vw, 1rem); opacity: 0.85; font-variant-numeric: tabular-nums; }
       #unity-canvas { width: 100%; height: 100%; display: block; background: {{{ BACKGROUND_FILENAME ? 'url(\'Build/' + BACKGROUND_FILENAME.replace(/'/g, '%27') + '\') center / cover' : BACKGROUND_COLOR }}}; }
       /* One button only — issue #6: "One button. That is the control
          scheme for all five days. Its meaning changes per stage; the
@@ -28,6 +36,11 @@
     <div id="app">
       <div id="canvas-wrap">
         <canvas id="unity-canvas" width={{{ WIDTH }}} height={{{ HEIGHT }}} tabindex="-1"></canvas>
+        <div id="load-panel">
+          <div id="load-title">Loading the footy…</div>
+          <div id="load-track"><div id="load-fill"></div></div>
+          <div id="load-pct">0%</div>
+        </div>
       </div>
       <div id="control-bar">
         <div id="tap-btn" class="action-btn">TAP</div>
@@ -63,7 +76,12 @@
         companyName: {{{ JSON.stringify(COMPANY_NAME) }}},
         productName: {{{ JSON.stringify(PRODUCT_NAME) }}},
         productVersion: {{{ JSON.stringify(PRODUCT_VERSION) }}},
+      }, function (progress) {
+        var pct = Math.round(progress * 100);
+        document.querySelector("#load-fill").style.width = pct + "%";
+        document.querySelector("#load-pct").textContent = pct + "%";
       }).then(function (unityInstance) {
+        document.querySelector("#load-panel").classList.add("done");
         unityInstanceRef = unityInstance;
         resizeCanvasToContainer();
       }).catch(function (message) {

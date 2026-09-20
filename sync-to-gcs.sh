@@ -37,7 +37,14 @@ sed -i '' \
   -e "s|\"Build/WebGL\.framework\.js\"|\"Build/WebGL.framework.js?v=$STAMP\"|" \
   -e "s|\"Build/WebGL\.wasm\"|\"Build/WebGL.wasm?v=$STAMP\"|" \
   "$TMP/index.html"
-grep -q "?v=$STAMP" "$TMP/index.html" || { echo "cache-bust did not apply - index.html format changed"; exit 1; }
+# Some templates stamp their own build URLs at build time. Accept that, but
+# never upload an index whose build URLs carry no stamp at all - that is the
+# bug this whole script exists for.
+if ! grep -q "?v=$STAMP" "$TMP/index.html"; then
+  own=$(grep -c "WebGL\.\(data\|wasm\|loader\.js\|framework\.js\)?v=" "$TMP/index.html" || true)
+  [ "$own" -ge 4 ] || { echo "no cache-busting on the build URLs - index.html format changed"; exit 1; }
+  echo "index already stamps its own build URLs; keeping them"
+fi
 
 # cp, never rsync: -m rsync hangs indefinitely on this Mac (macOS python
 # multiprocessing fork issue), documented in CLAUDE.md.
